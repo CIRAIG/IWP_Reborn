@@ -59,6 +59,8 @@ class Parse:
         self.load_water_availability_terr_cfs()
         self.load_thermally_polluted_water_cfs()
 
+        self.apply_rules()
+
         self.master_db = self.master_db.sort_values(by=['Impact category', 'Elem flow name'])
         self.master_db = self.master_db.reset_index().drop('index', axis=1)
 
@@ -150,7 +152,7 @@ class Parse:
                     id_count += 1
                 self.master_db = pd.concat([self.master_db, df])
 
-        clean_up_dataframe(self.master_db)
+        self.master_db = clean_up_dataframe(self.master_db)
 
     def load_land_use_cfs(self):
         """
@@ -189,7 +191,7 @@ class Parse:
             id_count += 1
             self.master_db = pd.concat([self.master_db, df])
 
-        clean_up_dataframe(self.master_db)
+        self.master_db = clean_up_dataframe(self.master_db)
 
         # --------- Land transformation -----------
 
@@ -217,7 +219,7 @@ class Parse:
             id_count += 1
             self.master_db = pd.concat([self.master_db, df])
 
-        clean_up_dataframe(self.master_db)
+        self.master_db = clean_up_dataframe(self.master_db)
 
     def load_particulates_cfs(self):
         """
@@ -343,7 +345,7 @@ class Parse:
         df.loc[:, 'Elem flow name'] = [i.split(', em. av.')[0] for i in df.loc[:, 'Elem flow name']]
         self.master_db = pd.concat([self.master_db, df])
 
-        clean_up_dataframe(self.master_db)
+        self.master_db = clean_up_dataframe(self.master_db)
 
     def load_water_scarcity_cfs(self):
         """
@@ -364,7 +366,7 @@ class Parse:
             master_db.loc[id_count, 'MP or Damage'] = 'Midpoint'
             master_db.loc[id_count, 'Sub-compartment'] = '(unspecified)'
             master_db.loc[id_count, 'CF unit'] = 'm3 world-eq'
-            master_db.loc[id_count, 'CAS number'] == '007732-18-5'
+            master_db.loc[id_count, 'CAS number'] = '007732-18-5'
 
         for flow in ['UNKNOWN', 'AGRI', 'NON-AGRI']:
             data = db.loc[
@@ -388,7 +390,7 @@ class Parse:
             else:
                 self.master_db.loc[id_count, 'Elem flow name'] = 'Water, ' + flow.lower()
 
-        clean_up_dataframe(self.master_db)
+        self.master_db = clean_up_dataframe(self.master_db)
 
     def load_water_availability_eq_cfs(self):
         """
@@ -424,7 +426,7 @@ class Parse:
         self.master_db.loc[id_count, 'Compartment'] = 'Raw'
         self.master_db.loc[id_count, 'CF value'] = db.loc[:, 'CF value'].median()
 
-        clean_up_dataframe(self.master_db)
+        self.master_db = clean_up_dataframe(self.master_db)
 
     def load_water_availability_hh_cfs(self):
         """
@@ -444,24 +446,79 @@ class Parse:
             master_db.loc[id_count, 'Native geographical resolution scale'] = 'Global'
             master_db.loc[id_count, 'MP or Damage'] = 'Damage'
             master_db.loc[id_count, 'CF unit'] = 'DALY'
-            master_db.loc[id_count, 'Sub-compartment'] = '(unspecified)'
 
-        data = db.loc[[i for i in db.index if db.loc[i, 'Resolution'] in 'Global']]
-        for water_flow in data.index:
-            # Water comp
-            id_count = len(self.master_db)
-            add_generic_water_avai_hh_intel(self.master_db, id_count)
-            self.master_db.loc[id_count, 'Compartment'] = 'Water'
-            self.master_db.loc[id_count, 'Elem flow name'] = 'Water, ' + data.loc[water_flow, 'Elem flow'].lower()
-            self.master_db.loc[id_count, 'CF value'] = - data.loc[water_flow, 'Weighted Average']
-            # Raw comp
-            id_count += 1
-            add_generic_water_avai_hh_intel(self.master_db, id_count)
-            self.master_db.loc[id_count, 'Compartment'] = 'Raw'
-            self.master_db.loc[id_count, 'Elem flow name'] = 'Water, ' + data.loc[water_flow, 'Elem flow'].lower()
-            self.master_db.loc[id_count, 'CF value'] = data.loc[water_flow, 'Weighted Average']
-
-        clean_up_dataframe(self.master_db)
+        # Water comp / unspecified subcomp
+        id_count = len(self.master_db)
+        add_generic_water_avai_hh_intel(self.master_db, id_count)
+        self.master_db.loc[id_count, 'Compartment'] = 'Water'
+        self.master_db.loc[id_count, 'Sub-compartment'] = '(unspecified)'
+        self.master_db.loc[id_count, 'Elem flow name'] = 'Water'
+        self.master_db.loc[id_count, 'CF value'] = - db.loc[[i for i in db.index if (db.loc[i, 'Resolution'] in 'Global' and
+                                                                                db.loc[i, 'Elem flow'] == 'Unknown')],
+                                                       'Weighted Average'].iloc[0]
+        # Water comp / lake subcomp
+        id_count += 1
+        add_generic_water_avai_hh_intel(self.master_db, id_count)
+        self.master_db.loc[id_count, 'Compartment'] = 'Water'
+        self.master_db.loc[id_count, 'Sub-compartment'] = 'lake'
+        self.master_db.loc[id_count, 'Elem flow name'] = 'Water'
+        self.master_db.loc[id_count, 'CF value'] = - db.loc[[i for i in db.index if (db.loc[i, 'Resolution'] in 'Global' and
+                                                                                db.loc[i, 'Elem flow'] == 'Surface')],
+                                                       'Weighted Average'].iloc[0]
+        # Water comp / river subcomp
+        id_count += 1
+        add_generic_water_avai_hh_intel(self.master_db, id_count)
+        self.master_db.loc[id_count, 'Compartment'] = 'Water'
+        self.master_db.loc[id_count, 'Sub-compartment'] = 'river'
+        self.master_db.loc[id_count, 'Elem flow name'] = 'Water'
+        self.master_db.loc[id_count, 'CF value'] = - db.loc[[i for i in db.index if (db.loc[i, 'Resolution'] in 'Global' and
+                                                                                db.loc[i, 'Elem flow'] == 'Surface')],
+                                                       'Weighted Average'].iloc[0]
+        # Water comp / groundwater subcomp
+        id_count += 1
+        add_generic_water_avai_hh_intel(self.master_db, id_count)
+        self.master_db.loc[id_count, 'Compartment'] = 'Water'
+        self.master_db.loc[id_count, 'Sub-compartment'] = 'groundwater'
+        self.master_db.loc[id_count, 'Elem flow name'] = 'Water'
+        self.master_db.loc[id_count, 'CF value'] = - db.loc[[i for i in db.index if (db.loc[i, 'Resolution'] in 'Global' and
+                                                                                db.loc[i, 'Elem flow'] == 'Ground')],
+                                                       'Weighted Average'].iloc[0]
+        # Raw comp / unspecified water
+        id_count += 1
+        add_generic_water_avai_hh_intel(self.master_db, id_count)
+        self.master_db.loc[id_count, 'Compartment'] = 'Raw'
+        self.master_db.loc[id_count, 'Sub-compartment'] = '(unspecified)'
+        self.master_db.loc[id_count, 'Elem flow name'] = 'Water, unspecified natural origin'
+        self.master_db.loc[id_count, 'CF value'] = db.loc[[i for i in db.index if (db.loc[i, 'Resolution'] in 'Global' and
+                                                                              db.loc[i, 'Elem flow'] == 'Unknown')],
+                                                     'Weighted Average'].iloc[0]
+        # Raw comp / lake water
+        id_count += 1
+        add_generic_water_avai_hh_intel(self.master_db, id_count)
+        self.master_db.loc[id_count, 'Compartment'] = 'Raw'
+        self.master_db.loc[id_count, 'Sub-compartment'] = '(unspecified)'
+        self.master_db.loc[id_count, 'Elem flow name'] = 'Water, lake'
+        self.master_db.loc[id_count, 'CF value'] = db.loc[[i for i in db.index if (db.loc[i, 'Resolution'] in 'Global' and
+                                                                              db.loc[i, 'Elem flow'] == 'Surface')],
+                                                     'Weighted Average'].iloc[0]
+        # Raw comp / river water
+        id_count += 1
+        add_generic_water_avai_hh_intel(self.master_db, id_count)
+        self.master_db.loc[id_count, 'Compartment'] = 'Raw'
+        self.master_db.loc[id_count, 'Sub-compartment'] = '(unspecified)'
+        self.master_db.loc[id_count, 'Elem flow name'] = 'Water, river'
+        self.master_db.loc[id_count, 'CF value'] = db.loc[[i for i in db.index if (db.loc[i, 'Resolution'] in 'Global' and
+                                                                              db.loc[i, 'Elem flow'] == 'Surface')],
+                                                     'Weighted Average'].iloc[0]
+        # Raw comp / well water
+        id_count += 1
+        add_generic_water_avai_hh_intel(self.master_db, id_count)
+        self.master_db.loc[id_count, 'Compartment'] = 'Raw'
+        self.master_db.loc[id_count, 'Sub-compartment'] = '(unspecified)'
+        self.master_db.loc[id_count, 'Elem flow name'] = 'Water, well'
+        self.master_db.loc[id_count, 'CF value'] = db.loc[[i for i in db.index if (db.loc[i, 'Resolution'] in 'Global' and
+                                                                              db.loc[i, 'Elem flow'] == 'Ground')],
+                                                     'Weighted Average'].iloc[0]
 
     def load_water_availability_terr_cfs(self):
         """
@@ -492,7 +549,7 @@ class Parse:
             self.master_db.loc[id_count, 'Elem flow name'] = data.loc[water_flow, 'Elem flow name']
             self.master_db.loc[id_count, 'CF value'] = data.loc[water_flow, 'CF value']
 
-        clean_up_dataframe(self.master_db)
+        self.master_db = clean_up_dataframe(self.master_db)
 
     def load_thermally_polluted_water_cfs(self):
         """
@@ -523,7 +580,203 @@ class Parse:
             self.master_db.loc[id_count, 'Elem flow name'] = data.loc[water_flow, 'Elem flow name']
             self.master_db.loc[id_count, 'CF value'] = data.loc[water_flow, 'CF value']
 
-        clean_up_dataframe(self.master_db)
+        self.master_db = clean_up_dataframe(self.master_db)
+
+    def apply_rules(self):
+        """
+        Applying rules creating values for new sub compartments, for each substance.  The value is either equal to the
+        unspecified subcomp value or is fixed to zero. If a value already exists for a sub-compartment to be created,
+        this value is kept. Most of these subcomps are created to match with the subcomps used by the ecoinvent database.
+
+        Created comp/subcomps:
+            - Air/high. pop.
+            - Air/low. pop.
+            - Air/low. pop., long term
+            - Air/stratosphere + troposphere
+            - Air/indoor
+            - Water/lake
+            - Water/river
+            - Water/ocean
+            - Water/groundwater
+            - Water/groundwater, long term
+            - Soil/industrial
+            - Raw/in ground
+            - Raw/in water
+            - Raw/biotic
+
+        :return: updated master_db
+        """
+
+        # ---------------- Equal to unspecified -------------
+
+        subcomps = {'Air': ['high. pop.', 'low. pop.', 'stratosphere + troposphere', 'indoor'],
+                    'Water': ['lake', 'river'],
+                    'Soil': ['industrial'],
+                    'Raw': ['in ground', 'in water', 'biotic']}
+
+        # create a dataframe in which all new subcomps are created based on the unspecified value
+        proxy = pd.DataFrame()
+        for comp in subcomps.keys():
+            if comp != 'Raw':
+                unspecified = self.master_db.loc[
+                    [i for i in self.master_db.index if (self.master_db.loc[i, 'Compartment'] == comp and
+                                                         self.master_db.loc[i, 'Sub-compartment'] == '(unspecified)')]]
+                dff = unspecified.copy()
+                for subcomp in subcomps[comp]:
+                    df = unspecified.copy()
+                    df.loc[:, 'Sub-compartment'] = subcomp
+                    dff = pd.concat([dff, df])
+                proxy = pd.concat([proxy, dff])
+            # Special case for Raw. The subcomp depends on the impact categories
+            else:
+                # For the Fossil and nuclear energy use category
+                unspecified = self.master_db.loc[
+                    [i for i in self.master_db.index if (self.master_db.loc[i, 'Compartment'] == 'Raw' and
+                                                         self.master_db.loc[i, 'Sub-compartment'] == '(unspecified)' and
+                                                         self.master_db.loc[
+                                                             i, 'Impact category'] == 'Fossil and nuclear energy use')]]
+                biotic = unspecified.loc[
+                    [i for i in unspecified.index if ('wood' in unspecified.loc[i, 'Elem flow name'].lower() or
+                                                      'peat' in unspecified.loc[
+                                                          i, 'Elem flow name'].lower())]].copy()
+                fossil = unspecified.loc[
+                    [i for i in unspecified.index if ('wood' not in unspecified.loc[i, 'Elem flow name'].lower() and
+                                                      'peat' not in unspecified.loc[
+                                                          i, 'Elem flow name'].lower())]].copy()
+                biotic.loc[:, 'Sub-compartment'] = 'biotic'
+                fossil.loc[:, 'Sub-compartment'] = 'in ground'
+                proxy = pd.concat([proxy, unspecified, biotic, fossil])
+
+                # For the water flows
+                unspecified = self.master_db.loc[
+                    [i for i in self.master_db.index if (
+                            self.master_db.loc[i, 'Compartment'] == 'Raw' and
+                            self.master_db.loc[i, 'Sub-compartment'] == '(unspecified)' and
+                            self.master_db.loc[i, 'Impact category'] in ['Water scarcity',
+                                                                         'Thermally polluted water',
+                                                                         'Water availability, terrestrial ecosystem',
+                                                                         'Water availability, freshwater ecosystem',
+                                                                         'Water availability, human health']
+                    )]]
+                dff = unspecified.copy()
+                dff.loc[:, 'Sub-compartment'] = 'in water'
+                proxy = pd.concat([proxy, dff])
+
+            proxy = clean_up_dataframe(proxy)
+
+        # only add new subcomps values if they do not already exist in master_db
+        proxy.set_index(['Impact category', 'CF unit', 'Compartment', 'Sub-compartment', 'Elem flow name'],inplace=True)
+        proxy.update(self.master_db.set_index(['Impact category', 'CF unit', 'Compartment',
+                                               'Sub-compartment', 'Elem flow name']))
+        proxy = proxy.reset_index()
+        self.master_db = pd.concat([self.master_db, proxy]).drop_duplicates()
+
+        self.master_db = clean_up_dataframe(self.master_db)
+
+        # ------------ groundwater and ocean subcomps ------------
+
+        # for the groundwater and ocean subcomps, only in some impact categories are the values equal to unspecified
+        water_comp = self.master_db.loc[[i for i in self.master_db.index if self.master_db.loc[i, 'Compartment'] == 'Water']]
+        to_unspecified = {'groundwater': ['Water availability, freshwater ecosystem',
+                                          'Water availability, human health',
+                                          'Water scarcity'],
+                          'ocean': ['Ionizing radiation, ecosystem quality',
+                                    'Ionizing radiation, human health',
+                                    'Ionizing radiations',
+                                    'Marine eutrophication']}
+        to_zero = {'groundwater': ['Freshwater ecotoxicity',
+                                   'Freshwater ecotoxicity, long term',
+                                   'Freshwater ecotoxicity, short term',
+                                   'Freshwater eutrophication',
+                                   'Human toxicity cancer',
+                                   'Human toxicity cancer, long term',
+                                   'Human toxicity cancer, short term',
+                                   'Human toxicity non cancer',
+                                   'Human toxicity non cancer, long term',
+                                   'Human toxicity non cancer, short term',
+                                   'Ionizing radiation, ecosystem quality',
+                                   'Ionizing radiation, human health',
+                                   'Ionizing radiations',
+                                   'Marine eutrophication'],
+                   'ocean': ['Freshwater ecotoxicity',
+                             'Freshwater ecotoxicity, long term',
+                             'Freshwater ecotoxicity, short term',
+                             'Freshwater eutrophication',
+                             'Human toxicity cancer',
+                             'Human toxicity cancer, long term',
+                             'Human toxicity cancer, short term',
+                             'Human toxicity non cancer',
+                             'Human toxicity non cancer, long term',
+                             'Human toxicity non cancer, short term',
+                             'Water availability, freshwater ecosystem',
+                             'Water availability, human health',
+                             'Water scarcity']}
+        for subcomp in to_unspecified:
+            for cat in to_unspecified[subcomp]:
+                data = water_comp.loc[[i for i in water_comp.index if (water_comp.loc[i, 'Impact category'] == cat and
+                                                                       water_comp.loc[
+                                                                           i, 'Sub-compartment'] == '(unspecified)')]]
+                proxy = data.copy()
+                proxy.loc[:, 'Sub-compartment'] = subcomp
+                proxy.set_index(['Impact category', 'CF unit', 'Compartment', 'Sub-compartment', 'Elem flow name'],
+                                inplace=True)
+                proxy.update(self.master_db.set_index(['Impact category', 'CF unit', 'Compartment',
+                                                  'Sub-compartment', 'Elem flow name']))
+                proxy = proxy.reset_index()
+                self.master_db = pd.concat([self.master_db, proxy]).drop_duplicates()
+                self.master_db = clean_up_dataframe(self.master_db)
+
+        for subcomp in to_zero:
+            for cat in to_zero[subcomp]:
+                data = water_comp.loc[[i for i in water_comp.index if (water_comp.loc[i, 'Impact category'] == cat and
+                                                                       water_comp.loc[
+                                                                           i, 'Sub-compartment'] == '(unspecified)')]]
+                proxy = data.copy()
+                proxy.loc[:, 'Sub-compartment'] = subcomp
+                proxy.loc[:, 'CF value'] = 0
+                proxy.set_index(['Impact category', 'CF unit', 'Compartment', 'Sub-compartment', 'Elem flow name'],
+                                inplace=True)
+                proxy.update(self.master_db.set_index(['Impact category', 'CF unit', 'Compartment',
+                                                  'Sub-compartment', 'Elem flow name']))
+                proxy = proxy.reset_index()
+                self.master_db = pd.concat([self.master_db, proxy]).drop_duplicates()
+                self.master_db = clean_up_dataframe(self.master_db)
+
+        # -------------- long term subcomps --------------
+
+        # long term subcomps values should be equla to unspecified in long term impact category and fixed to zero in
+        # short term impact categories
+        replace = {'low. pop., long-term': 'low. pop.', 'groundwater, long term': 'groundwater'}
+        proxy = pd.DataFrame()
+        for subcomp in replace.keys():
+            origin = self.master_db.loc[
+                [i for i in self.master_db.index if self.master_db.loc[i, 'Sub-compartment'] in replace[subcomp]]].copy()
+            df = origin.copy()
+            df.loc[:, 'Sub-compartment'] = subcomp
+            proxy = pd.concat([proxy, origin, df])
+        proxy.set_index(['Impact category', 'CF unit', 'Compartment', 'Sub-compartment', 'Elem flow name'],
+                        inplace=True)
+        proxy.update(
+            self.master_db.set_index(['Impact category', 'CF unit', 'Compartment', 'Sub-compartment', 'Elem flow name']))
+        proxy = proxy.reset_index()
+
+        self.master_db = pd.concat([self.master_db, proxy]).drop_duplicates()
+
+        self.master_db = clean_up_dataframe(self.master_db)
+
+        # now we force short term categories to zero for long term emissions
+        short_term_categories = ['Climate change, ecosystem quality, short term',
+                                 'Climate change, human health, short term',
+                                 'Freshwater ecotoxicity, short term',
+                                 'Human toxicity cancer, short term',
+                                 'Human toxicity non-cancer, short term',
+                                 'Marine acidification, short term',
+                                 'Climate change, short term']
+
+        self.master_db.loc[[i for i in self.master_db.index if (self.master_db.loc[i, 'Sub-compartment'] in replace and
+                                                                self.master_db.loc[
+                                                                    i, 'Impact category'] in short_term_categories)],
+                           'CF value'] = 0
 
     def produce_files(self, path):
         """
@@ -541,3 +794,4 @@ def clean_up_dataframe(df):
     df = df.drop_duplicates()
     # fix index
     df = df.reset_index().drop('index',axis=1)
+    return df
