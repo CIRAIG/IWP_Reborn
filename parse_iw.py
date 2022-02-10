@@ -680,6 +680,9 @@ class Parse:
         to_unspecified = {'groundwater': ['Water availability, freshwater ecosystem',
                                           'Water availability, human health',
                                           'Water scarcity'],
+                          'groundwater, long-term': ['Water availability, freshwater ecosystem',
+                                                     'Water availability, human health',
+                                                     'Water scarcity'],
                           'ocean': ['Ionizing radiation, ecosystem quality',
                                     'Ionizing radiation, human health',
                                     'Ionizing radiations',
@@ -698,6 +701,20 @@ class Parse:
                                    'Ionizing radiation, human health',
                                    'Ionizing radiations',
                                    'Marine eutrophication'],
+                   'groundwater, long-term': ['Freshwater ecotoxicity',
+                                              'Freshwater ecotoxicity, long term',
+                                              'Freshwater ecotoxicity, short term',
+                                              'Freshwater eutrophication',
+                                              'Human toxicity cancer',
+                                              'Human toxicity cancer, long term',
+                                              'Human toxicity cancer, short term',
+                                              'Human toxicity non cancer',
+                                              'Human toxicity non cancer, long term',
+                                              'Human toxicity non cancer, short term',
+                                              'Ionizing radiation, ecosystem quality',
+                                              'Ionizing radiation, human health',
+                                              'Ionizing radiations',
+                                              'Marine eutrophication'],
                    'ocean': ['Freshwater ecotoxicity',
                              'Freshwater ecotoxicity, long term',
                              'Freshwater ecotoxicity, short term',
@@ -742,41 +759,60 @@ class Parse:
                 self.master_db = pd.concat([self.master_db, proxy]).drop_duplicates()
                 self.master_db = clean_up_dataframe(self.master_db)
 
-        # -------------- long term subcomps --------------
+        # -------------- low. pop., long-term --------------
 
-        # long term subcomps values should be equla to unspecified in long term impact category and fixed to zero in
-        # short term impact categories
-        replace = {'low. pop., long-term': 'low. pop.', 'groundwater, long term': 'groundwater'}
-        proxy = pd.DataFrame()
-        for subcomp in replace.keys():
-            origin = self.master_db.loc[
-                [i for i in self.master_db.index if self.master_db.loc[i, 'Sub-compartment'] in replace[subcomp]]].copy()
-            df = origin.copy()
+        long_term_subcomps = {'low. pop., long-term': 'low. pop.'}
+
+        long_term_cats = ['Climate change, ecosystem quality', 'Climate change, human health',
+                                            'Freshwater ecotoxicity','Human toxicity cancer',
+                                            'Human toxicity non-cancer','Marine acidification']
+
+        for subcomp in long_term_subcomps.keys():
+            # slice dataframe to only keep the corresponding subcomp
+            data = self.master_db.loc[[i for i in self.master_db.index if (self.master_db.loc[i, 'Sub-compartment']
+                                                                           == long_term_subcomps[subcomp])]].copy()
+            for cat in long_term_cats:
+                # slice dataframe to only keep corresponding impact category
+                df = data.loc[[i for i in data.index if (cat in data.loc[i, 'Impact category'] and
+                                                         cat != data.loc[i, 'Impact category'])]]
+                # remove the "short term" and "long term" from impact category name
+                df.loc[:, 'Impact category'] = [','.join(i.split(',')[:-1]) for i in df.loc[:, 'Impact category']]
+                # now that they have the same category name, we can add their CF value by merging dataframes
+                df = df.groupby(by=['Impact category', 'CF unit', 'Compartment', 'Sub-compartment', 'Elem flow name',
+                                    'CAS number', 'Elem flow unit', 'MP or Damage',
+                                    'Native geographical resolution scale']).sum().reset_index()
+                # rename the subcomp
+                df.loc[:, 'Sub-compartment'] = subcomp
+                # reimplement the "long term" in the imapct category name
+                df.loc[:, 'Impact category'] = [i + ', long term' for i in df.loc[:, 'Impact category']]
+                # concatenate new CFs to master_db
+                self.master_db = pd.concat([self.master_db, df])
+                # now change "long term" in impact category name for "short term"
+                df.loc[:, 'Impact category'] = [i.replace('long term', 'short term') for i in
+                                                df.loc[:, 'Impact category']]
+                # fix the value for these CFs to zero
+                df.loc[:, 'CF value'] = 0
+                # and simply concatenate them to master_db as well
+                self.master_db = pd.concat([self.master_db, df])
+                # clean up index
+                self.master_db = clean_up_dataframe(self.master_db)
+
+        # now for midpoint categories
+        for subcomp in long_term_subcomps.keys():
+            data = self.master_db.loc[[i for i in self.master_db.index if (self.master_db.loc[i, 'Sub-compartment']
+                                                                           == long_term_subcomps[subcomp] and
+                                                                           self.master_db.loc[
+                                                                               i, 'MP or Damage'] == 'Midpoint')]].copy()
+            df = data.copy()
             df.loc[:, 'Sub-compartment'] = subcomp
-            proxy = pd.concat([proxy, origin, df])
-        proxy.set_index(['Impact category', 'CF unit', 'Compartment', 'Sub-compartment', 'Elem flow name'],
-                        inplace=True)
-        proxy.update(
-            self.master_db.set_index(['Impact category', 'CF unit', 'Compartment', 'Sub-compartment', 'Elem flow name']))
-        proxy = proxy.reset_index()
+            self.master_db = pd.concat([self.master_db, df])
+            # clean up index
+            self.master_db = clean_up_dataframe(self.master_db)
 
-        self.master_db = pd.concat([self.master_db, proxy]).drop_duplicates()
-
-        self.master_db = clean_up_dataframe(self.master_db)
-
-        # now we force short term categories to zero for long term emissions
-        short_term_categories = ['Climate change, ecosystem quality, short term',
-                                 'Climate change, human health, short term',
-                                 'Freshwater ecotoxicity, short term',
-                                 'Human toxicity cancer, short term',
-                                 'Human toxicity non-cancer, short term',
-                                 'Marine acidification, short term',
-                                 'Climate change, short term']
-
-        self.master_db.loc[[i for i in self.master_db.index if (self.master_db.loc[i, 'Sub-compartment'] in replace and
-                                                                self.master_db.loc[
-                                                                    i, 'Impact category'] in short_term_categories)],
-                           'CF value'] = 0
+        # special case climate change, short term, i.e., the only short term impact category at midpoint
+        self.master_db.loc[[i for i in self.master_db.index if
+                            (self.master_db.loc[i, 'Impact category'] == 'Climate change, short term' and
+                             self.master_db.loc[i, 'Sub-compartment'] == 'low. pop., long-term')], 'CF value'] = 0
 
     def produce_files(self, path):
         """
@@ -795,3 +831,42 @@ def clean_up_dataframe(df):
     # fix index
     df = df.reset_index().drop('index',axis=1)
     return df
+
+
+def mapping_with_ei35():
+    """
+    Support function kept for transparency on how the mapping with ecoinvent was performed.
+    :return: nothing
+    """
+    with gzip.open( '.../ecoinvent3.5.cutoffPandas_symmNorm.gz.pickle','rb') as f:
+        eco_35 = pd.read_pickle(f)
+
+    # check which substances have a direct match with their names
+    matching_by_name = self.master_db.loc[:, ['Elem flow name']].merge(eco_35['STR'].loc[:, ['name']],
+                                                                     left_on='Elem flow name',
+                                                                     right_on='name', how='inner').drop_duplicates()
+    # harmonize CAS numbers
+    eco_35['STR'].cas = [i.lstrip('0') if i != None else None for i in eco_35['STR'].cas]
+    corrected_cas = []
+    for i in self.master_db.loc[:, 'CAS number']:
+        if type(i) != float and i != None:
+            corrected_cas.append(i.lstrip('0'))
+        else:
+            corrected_cas.append(None)
+    self.master_db.loc[:, 'CAS number'] = corrected_cas
+    # merge dataframes
+    matching_by_cas = self.master_db.loc[:, ['CAS number', 'Elem flow name']].merge(eco_35['STR'].loc[:, ['name', 'cas']],
+                                                                                  left_on='CAS number',
+                                                                                  right_on='cas',
+                                                                                  how='inner').drop_duplicates().dropna()
+    # if there is a duplicate it means 2 different ecoinvent names are linked to a single IW name
+    # can't have that, it will require matching by hand to sort it out
+    issues_matching_cas = list(
+        set(matching_by_cas[matching_by_cas.loc[:, 'Elem flow name'].duplicated()].loc[:, 'Elem flow name']))
+    matching_by_cas = matching_by_cas.loc[
+        [i for i in matching_by_cas.index if matching_by_cas.loc[i, 'Elem flow name'] not in issues_matching_cas]]
+
+    auto_matching = pd.concat([matching_by_name, matching_by_cas])
+    auto_matching.drop(['CAS number', 'cas'], axis=1, inplace=True)
+
+    # plus add manual mapping later on
