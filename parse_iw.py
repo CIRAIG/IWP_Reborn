@@ -22,9 +22,11 @@ python version= 3.9
 
 import pyodbc
 import pandas as pd
+import os
+import pkg_resources
 
 class Parse:
-    def __init__(self, path_access_db, version):
+    def __init__(self, path_access_db, version, version_ei):
         """
         :param path_access_db: path to the Microsoft access database (source version)
         :param version: the version of IW+ to parse
@@ -37,7 +39,11 @@ class Parse:
 
         self.path_access_db = path_access_db
         self.version = str(version)
-        self.master_db = None
+        self.version_ei = str(version_ei)
+
+        # OUTPUTs
+        self.master_db = pd.DataFrame()
+        self.ei_iw_db = pd.DataFrame()
 
         # connect to the access database
         self.conn = pyodbc.connect(r'Driver={Microsoft Access Driver (*.mdb, *.accdb)};'
@@ -814,14 +820,69 @@ class Parse:
                             (self.master_db.loc[i, 'Impact category'] == 'Climate change, short term' and
                              self.master_db.loc[i, 'Sub-compartment'] == 'low. pop., long-term')], 'CF value'] = 0
 
-    def produce_files(self, path):
+    def link_to_ecoinvent(self):
+        """
+        Function that links names of substance from IW+ to the names of ecoinvent.
+        :param version_ei: the version of ecoinvent to link to IW+. SHould choose the latest available by default
+        :return: self.ei_iw_db
+        """
+
+        self.ei_iw_db = self.master_db.copy()
+
+        ei_mapping = pd.read_excel(pkg_resources.resource_stream(__name__, '/Data/mappings/ei'+
+                                                                 self.version_ei.replace('.','')+
+                                                                 '/ei_iw_mapping.xlsx'))
+        ei_mapping = ei_mapping.loc[:, ['ecoinvent name', 'iw name']].dropna()
+        not_one_for_one = ei_mapping[ei_mapping.loc[:, 'iw name'].duplicated(False)]
+        one_for_one = ei_mapping[~ei_mapping.loc[:, 'iw name'].duplicated(False)]
+
+        # for one_for_one it's easy! We just replace one for one
+        self.ei_iw_db.loc[:, 'Elem flow name'] = self.ei_iw_db.loc[:, 'Elem flow name'].replace(
+            one_for_one.loc[:, 'iw name'].tolist(), one_for_one.loc[:, 'ecoinvent name'].tolist())
+
+        # for not_one_for_one it's harder, e.g., the "Zinc" substance from iw+ must be linked to multiple elementary flows in ecoinvent
+        unique_not_one_for_one = set(not_one_for_one.loc[:, 'iw name'])
+        for subst in unique_not_one_for_one:
+            ei_df = not_one_for_one.loc[[i for i in not_one_for_one.index if not_one_for_one.loc[i, 'iw name'] == subst]]
+            iw_df = self.ei_iw_db.loc[[i for i in self.ei_iw_db.index if self.ei_iw_db.loc[i, 'Elem flow name'] == subst]]
+            new_df = pd.concat([iw_df] * len(ei_df))
+            new_df = new_df.reset_index().drop('index', axis=1)
+            for i, new_name in enumerate(ei_df.loc[:, 'ecoinvent name']):
+                new_df.loc[len(iw_df) * i:len(iw_df) * (i + 1), 'Elem flow name'] = new_name
+            self.ei_iw_db = pd.concat([self.ei_iw_db, new_df])
+            self.ei_iw_db = clean_up_dataframe(self.ei_iw_db)
+
+        # remove CFs from IW for substances that are not in ecoinvent
+        self.ei_iw_db = self.ei_iw_db.loc[[i for i in self.ei_iw_db.index if
+                                 self.ei_iw_db.loc[i, 'Elem flow name'] in ei_mapping.loc[:, 'ecoinvent name'].tolist()]]
+        # CFs for minerals should only be for Mineral resources use and Fossil and nuclear energy use impact categories
+        minerals = [i for i in self.ei_iw_db.index if (', in ground' in self.ei_iw_db.loc[i, 'Elem flow name'] and
+                                                  self.ei_iw_db.loc[i, 'Impact category'] not in [
+                                                      'Fossil and nuclear energy use',
+                                                      'Mineral resources use'])]
+        self.ei_iw_db.drop(minerals, axis=0, inplace=True)
+
+        # clean-up
+        self.ei_iw_db = clean_up_dataframe(self.ei_iw_db)
+
+        # sort
+        self.ei_iw_db = self.ei_iw_db.sort_values(by=['Impact category', 'Elem flow name'])
+        self.ei_iw_db = self.ei_iw_db.reset_index().drop('index', axis=1)
+
+    def produce_files(self):
         """
         Function producing the different IW+ files for the different versions.
         :param path: path of the folder where to store the files
         :return: the IW+ files
         """
 
-        self.master_db.to_excel(path+'/impact_world_plus_dev_v'+self.version+'.xlsx')
+        path = pkg_resources.resource_filename(__name__, '/Databases/Impact_world_' + self.version)
+
+        if not os.path.exists(path):
+            os.makedirs(path)
+
+        self.master_db.to_excel(path + '/impact_world_plus_'+self.version+'_dev.xlsx')
+        self.ei_iw_db.to_excel(path + '/impact_world_plus_'+self.version+'_ecoinvent_v.' + self.version_ei + '.xlsx')
 
 # -------------- Support modules -------------------
 
