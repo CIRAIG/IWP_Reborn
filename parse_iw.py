@@ -24,9 +24,11 @@ import pyodbc
 import pandas as pd
 import os
 import pkg_resources
+import json
+import scipy.sparse
 
 class Parse:
-    def __init__(self, path_access_db, version, version_ei):
+    def __init__(self, path_access_db, version):
         """
         :param path_access_db: path to the Microsoft access database (source version)
         :param version: the version of IW+ to parse
@@ -39,11 +41,17 @@ class Parse:
 
         self.path_access_db = path_access_db
         self.version = str(version)
-        self.version_ei = str(version_ei)
 
         # OUTPUTs
         self.master_db = pd.DataFrame()
-        self.ei_iw_db = pd.DataFrame()
+        self.ei35_iw = pd.DataFrame()
+        self.ei36_iw = pd.DataFrame()
+        self.ei371_iw = pd.DataFrame()
+        self.ei38_iw = pd.DataFrame()
+        self.ei35_iw_as_matrix = pd.DataFrame()
+        self.ei36_iw_as_matrix = pd.DataFrame()
+        self.ei371_iw_as_matrix = pd.DataFrame()
+        self.ei38_iw_as_matrix = pd.DataFrame()
 
         # connect to the access database
         self.conn = pyodbc.connect(r'Driver={Microsoft Access Driver (*.mdb, *.accdb)};'
@@ -398,6 +406,20 @@ class Parse:
 
         self.master_db = clean_up_dataframe(self.master_db)
 
+        # creating the other water flows from the default water flow
+        other_water = ['Water, lake','Water, river','Water, unspecified natural origin',
+                       'Water, well, in ground','Water, cooling, unspecified natural origin']
+        for water in other_water:
+            df = self.master_db.loc[
+                [i for i in self.master_db.index if (self.master_db.loc[i, 'Impact category'] == 'Water scarcity' and
+                                                   self.master_db.loc[i, 'Elem flow name'] == 'Water' and
+                                                   self.master_db.loc[i, 'Compartment'] == 'Raw')]]
+            df.loc[:,'Elem flow name'] = water
+            self.master_db = pd.concat([self.master_db,df])
+            self.master_db = clean_up_dataframe(self.master_db)
+
+        self.master_db = clean_up_dataframe(self.master_db)
+
     def load_water_availability_eq_cfs(self):
         """
         Load CFs for water availability freshwater ecosystem.
@@ -431,6 +453,20 @@ class Parse:
         self.master_db.loc[id_count, 'Elem flow name'] = 'Water'
         self.master_db.loc[id_count, 'Compartment'] = 'Raw'
         self.master_db.loc[id_count, 'CF value'] = db.loc[:, 'CF value'].median()
+
+        self.master_db = clean_up_dataframe(self.master_db)
+
+        # creating the other water flows from the default water flow
+        other_water = ['Water, lake','Water, river','Water, unspecified natural origin',
+                       'Water, well, in ground','Water, cooling, unspecified natural origin']
+        for water in other_water:
+            df = self.master_db.loc[
+                [i for i in self.master_db.index if (self.master_db.loc[i, 'Impact category'] == 'Water availability, freshwater ecosystem' and
+                                                   self.master_db.loc[i, 'Elem flow name'] == 'Water' and
+                                                   self.master_db.loc[i, 'Compartment'] == 'Raw')]]
+            df.loc[:,'Elem flow name'] = water
+            self.master_db = pd.concat([self.master_db,df])
+            self.master_db = clean_up_dataframe(self.master_db)
 
         self.master_db = clean_up_dataframe(self.master_db)
 
@@ -521,7 +557,7 @@ class Parse:
         add_generic_water_avai_hh_intel(self.master_db, id_count)
         self.master_db.loc[id_count, 'Compartment'] = 'Raw'
         self.master_db.loc[id_count, 'Sub-compartment'] = '(unspecified)'
-        self.master_db.loc[id_count, 'Elem flow name'] = 'Water, well'
+        self.master_db.loc[id_count, 'Elem flow name'] = 'Water, well, in ground'
         self.master_db.loc[id_count, 'CF value'] = db.loc[[i for i in db.index if (db.loc[i, 'Resolution'] in 'Global' and
                                                                               db.loc[i, 'Elem flow'] == 'Ground')],
                                                      'Weighted Average'].iloc[0]
@@ -666,6 +702,9 @@ class Parse:
                     )]]
                 dff = unspecified.copy()
                 dff.loc[:, 'Sub-compartment'] = 'in water'
+                proxy = pd.concat([proxy, dff])
+                dff = unspecified.copy()
+                dff.loc[:, 'Sub-compartment'] = 'in ground'
                 proxy = pd.concat([proxy, dff])
 
             proxy = clean_up_dataframe(proxy)
@@ -815,6 +854,23 @@ class Parse:
             # clean up index
             self.master_db = clean_up_dataframe(self.master_db)
 
+        # finally for the endpoint categories that have no long/short term differentiation
+        ics = ['Marine eutrophication', 'Ozone layer depletion', 'Photochemical oxidant formation',
+               'Terrestrial acidification', 'Particulate matter formation', 'Ionizing radiation, ecosystem quality',
+               'Ionizing radiation, human health', 'Freshwater acidification']
+        for subcomp in long_term_subcomps.keys():
+            data = self.master_db.loc[[i for i in self.master_db.index if (self.master_db.loc[i, 'Sub-compartment']
+                                                                           == long_term_subcomps[subcomp] and
+                                                                           self.master_db.loc[
+                                                                               i, 'Impact category'] in ics and
+                                                                           self.master_db.loc[
+                                                                               i, 'MP or Damage'] == 'Damage')]].copy()
+            df = data.copy()
+            df.loc[:, 'Sub-compartment'] = subcomp
+            self.master_db = pd.concat([self.master_db, df])
+            # clean up index
+            self.master_db = clean_up_dataframe(self.master_db)
+
         # special case climate change, short term, i.e., the only short term impact category at midpoint
         self.master_db.loc[[i for i in self.master_db.index if
                             (self.master_db.loc[i, 'Impact category'] == 'Climate change, short term' and
@@ -823,66 +879,204 @@ class Parse:
     def link_to_ecoinvent(self):
         """
         Function that links names of substance from IW+ to the names of ecoinvent.
-        :param version_ei: the version of ecoinvent to link to IW+. SHould choose the latest available by default
-        :return: self.ei_iw_db
+        :return: self.ei35_iw, self.ei36_iw, self.ei371_iw, self.ei38_iw
         """
 
-        self.ei_iw_db = self.master_db.copy()
+        versions_ei = ['3.5', '3.6', '3.7.1', '3.8']
 
-        ei_mapping = pd.read_excel(pkg_resources.resource_stream(__name__, '/Data/mappings/ei'+
-                                                                 self.version_ei.replace('.','')+
-                                                                 '/ei_iw_mapping.xlsx'))
-        ei_mapping = ei_mapping.loc[:, ['ecoinvent name', 'iw name']].dropna()
-        not_one_for_one = ei_mapping[ei_mapping.loc[:, 'iw name'].duplicated(False)]
-        one_for_one = ei_mapping[~ei_mapping.loc[:, 'iw name'].duplicated(False)]
+        for version_ei in versions_ei:
+            ei_iw_db = self.master_db.copy()
 
-        # for one_for_one it's easy! We just replace one for one
-        self.ei_iw_db.loc[:, 'Elem flow name'] = self.ei_iw_db.loc[:, 'Elem flow name'].replace(
-            one_for_one.loc[:, 'iw name'].tolist(), one_for_one.loc[:, 'ecoinvent name'].tolist())
+            # -------------- Mapping substances --------------
 
-        # for not_one_for_one it's harder, e.g., the "Zinc" substance from iw+ must be linked to multiple elementary flows in ecoinvent
-        unique_not_one_for_one = set(not_one_for_one.loc[:, 'iw name'])
-        for subst in unique_not_one_for_one:
-            ei_df = not_one_for_one.loc[[i for i in not_one_for_one.index if not_one_for_one.loc[i, 'iw name'] == subst]]
-            iw_df = self.ei_iw_db.loc[[i for i in self.ei_iw_db.index if self.ei_iw_db.loc[i, 'Elem flow name'] == subst]]
-            new_df = pd.concat([iw_df] * len(ei_df))
-            new_df = new_df.reset_index().drop('index', axis=1)
-            for i, new_name in enumerate(ei_df.loc[:, 'ecoinvent name']):
-                new_df.loc[len(iw_df) * i:len(iw_df) * (i + 1), 'Elem flow name'] = new_name
-            self.ei_iw_db = pd.concat([self.ei_iw_db, new_df])
-            self.ei_iw_db = clean_up_dataframe(self.ei_iw_db)
+            ei_mapping = pd.read_excel(pkg_resources.resource_stream(__name__, '/Data/mappings/ei'+
+                                                                     version_ei.replace('.','')+
+                                                                     '/ei_iw_mapping.xlsx'))
+            ei_mapping = ei_mapping.loc[:, ['ecoinvent name', 'iw name']].dropna()
+            not_one_for_one = ei_mapping[ei_mapping.loc[:, 'iw name'].duplicated(False)]
+            one_for_one = ei_mapping[~ei_mapping.loc[:, 'iw name'].duplicated(False)]
 
-        # remove CFs from IW for substances that are not in ecoinvent
-        self.ei_iw_db = self.ei_iw_db.loc[[i for i in self.ei_iw_db.index if
-                                 self.ei_iw_db.loc[i, 'Elem flow name'] in ei_mapping.loc[:, 'ecoinvent name'].tolist()]]
-        # CFs for minerals should only be for Mineral resources use and Fossil and nuclear energy use impact categories
-        minerals = [i for i in self.ei_iw_db.index if (', in ground' in self.ei_iw_db.loc[i, 'Elem flow name'] and
-                                                  self.ei_iw_db.loc[i, 'Impact category'] not in [
-                                                      'Fossil and nuclear energy use',
-                                                      'Mineral resources use'])]
-        self.ei_iw_db.drop(minerals, axis=0, inplace=True)
+            # for one_for_one it's easy! We just replace one for one
+            ei_iw_db.loc[:, 'Elem flow name'] = ei_iw_db.loc[:, 'Elem flow name'].replace(
+                one_for_one.loc[:, 'iw name'].tolist(), one_for_one.loc[:, 'ecoinvent name'].tolist())
 
-        # clean-up
-        self.ei_iw_db = clean_up_dataframe(self.ei_iw_db)
+            # for not_one_for_one it's harder, e.g., the "Zinc" substance from iw+ must be linked to multiple elementary flows in ecoinvent
+            unique_not_one_for_one = set(not_one_for_one.loc[:, 'iw name'])
+            for subst in unique_not_one_for_one:
+                ei_df = not_one_for_one.loc[[i for i in not_one_for_one.index if not_one_for_one.loc[i, 'iw name'] == subst]]
+                iw_df = ei_iw_db.loc[[i for i in ei_iw_db.index if ei_iw_db.loc[i, 'Elem flow name'] == subst]]
+                new_df = pd.concat([iw_df] * len(ei_df))
+                new_df = new_df.reset_index().drop('index', axis=1)
+                for i, new_name in enumerate(ei_df.loc[:, 'ecoinvent name']):
+                    new_df.loc[len(iw_df) * i:len(iw_df) * (i + 1), 'Elem flow name'] = new_name
+                ei_iw_db = pd.concat([ei_iw_db, new_df])
+                ei_iw_db = clean_up_dataframe(ei_iw_db)
 
-        # sort
-        self.ei_iw_db = self.ei_iw_db.sort_values(by=['Impact category', 'Elem flow name'])
-        self.ei_iw_db = self.ei_iw_db.reset_index().drop('index', axis=1)
+            # remove CFs from IW for substances that are not in ecoinvent
+            ei_iw_db = ei_iw_db.loc[[i for i in ei_iw_db.index if
+                                     ei_iw_db.loc[i, 'Elem flow name'] in ei_mapping.loc[:, 'ecoinvent name'].tolist()]]
+            # CFs for minerals should only be for Mineral resources use and Fossil and nuclear energy use impact categories
+            minerals = [i for i in ei_iw_db.index if (', in ground' in ei_iw_db.loc[i, 'Elem flow name'] and
+                                                      ei_iw_db.loc[i, 'Impact category'] not in [
+                                                          'Fossil and nuclear energy use',
+                                                          'Mineral resources use'] and
+                                                      'Water' not in ei_iw_db.loc[i, 'Elem flow name'])]
+            ei_iw_db.drop(minerals, axis=0, inplace=True)
+
+            # clean-up
+            ei_iw_db = clean_up_dataframe(ei_iw_db)
+
+            # sort
+            ei_iw_db = ei_iw_db.sort_values(by=['Impact category', 'Elem flow name'])
+            ei_iw_db = ei_iw_db.reset_index().drop('index', axis=1)
+
+            # --------- Comp & subcomp shenanigans ------------
+
+            with open(pkg_resources.resource_filename(__name__, "Data/mappings/ei"+
+                                                                     version_ei.replace('.','')+
+                                                                     "/comps.json"), "r") as f:
+                comps = json.load(f)
+            with open(pkg_resources.resource_filename(__name__, "Data/mappings/ei"+
+                                                                     version_ei.replace('.','')+
+                                                                     "/subcomps.json"), "r") as f:
+                subcomps = json.load(f)
+
+            ei_iw_db.Compartment = [comps[i] for i in ei_iw_db.Compartment]
+            ei_iw_db.loc[:, 'Sub-compartment'] = [subcomps[i] if i in subcomps else None for i in
+                                                    ei_iw_db.loc[:, 'Sub-compartment']]
+
+            # special cases: forestry subcomp = unspecified subcomp
+            df = ei_iw_db.loc[
+                [i for i in ei_iw_db.index if (ei_iw_db.loc[i, 'Sub-compartment'] == 'unspecified' and
+                                               ei_iw_db.loc[i, 'Compartment'] == 'soil')]].copy()
+            df.loc[:, 'Sub-compartment'] = 'forestry'
+            ei_iw_db = pd.concat([ei_iw_db, df])
+            ei_iw_db = clean_up_dataframe(ei_iw_db)
+
+            # special cases: fossil well subcomp in water comp = ground- subcomp
+            df = ei_iw_db.loc[[i for i in ei_iw_db.index if (ei_iw_db.loc[i, 'Sub-compartment'] == 'ground-' and
+                                                                 ei_iw_db.loc[i, 'Compartment'] == 'water')]].copy()
+            df.loc[:, 'Sub-compartment'] = 'fossil well'
+            ei_iw_db = pd.concat([ei_iw_db, df])
+            ei_iw_db = clean_up_dataframe(ei_iw_db)
+
+            # special cases: fossil well subcomp in raw comp = in ground subcomp
+            df = ei_iw_db.loc[[i for i in ei_iw_db.index if (ei_iw_db.loc[i, 'Sub-compartment'] == 'in ground' and
+                                                                 ei_iw_db.loc[
+                                                                     i, 'Compartment'] == 'natural resource')]].copy()
+            df.loc[:, 'Sub-compartment'] = 'fossil well'
+            ei_iw_db = pd.concat([ei_iw_db, df])
+            ei_iw_db = clean_up_dataframe(ei_iw_db)
+
+            # ----------- Unit shenanigans -------------
+            ei_iw_db.loc[
+                [i for i in ei_iw_db.index if ei_iw_db.loc[i, 'Elem flow unit'] == 'Bq'], 'CF value'] *= 1000
+            ei_iw_db.loc[
+                [i for i in ei_iw_db.index if ei_iw_db.loc[i, 'Elem flow unit'] == 'Bq'], 'Elem flow unit'] = 'kBq'
+            ei_iw_db.loc[[i for i in ei_iw_db.index if
+                            ei_iw_db.loc[i, 'Elem flow unit'] == 'm2.yr'], 'Elem flow unit'] = 'm2*year'
+
+            # ---------- Odd cases ------------
+
+            # some weird subcomps for energy flows
+            energies = ['Energy, potential (in hydropower reservoir), converted',
+                        'Energy, solar, converted',
+                        'Energy, kinetic (in wind), converted',
+                        'Energy, gross calorific value, in biomass, primary forest',
+                        'Energy, gross calorific value, in biomass',
+                        'Energy, geothermal, converted']
+            subcomps_to_add = ['in air', 'in water', 'biotic']
+            # does not make sense but it does not matter because it's corrected by linking to ecoinvent afterwards
+            for energy in energies:
+                for subcomp in subcomps_to_add:
+                    add = pd.DataFrame(
+                        ['Fossil and nuclear energy use', 'MJ deprived', 'natural resource', subcomp, energy, None, 1.0,
+                         'MJ', 'Midpoint', 'Global'],
+                        ['Impact category', 'CF unit', 'Compartment', 'Sub-compartment', 'Elem flow name', 'CAS number',
+                         'CF value',
+                         'Elem flow unit', 'MP or Damage', 'Native geographical resolution scale']).T
+                    ei_iw_db = pd.concat([ei_iw_db, add])
+                    ei_iw_db = clean_up_dataframe(ei_iw_db)
+
+            if version_ei == '3.5':
+                self.ei35_iw = ei_iw_db
+            elif version_ei == '3.6':
+                self.ei36_iw = ei_iw_db
+            elif version_ei == '3.7.1':
+                self.ei371_iw = ei_iw_db
+            elif version_ei == '3.8':
+                self.ei38_iw = ei_iw_db
+
+            # introducing UUID for stressors of ecoinvent
+            stressors_ei = pd.read_excel(pkg_resources.resource_stream(__name__, '/Data/metadata/ei'+
+                                                                     version_ei.replace('.','')+
+                                                                     '/stressors.xlsx'))
+            # matching with uuids
+            df_ei = stressors_ei.set_index(['name', 'unit', 'comp', 'subcomp']).drop('cas', axis=1)
+            df_ei.index.names = (None, None, None, None)
+            df_iw = ei_iw_db.set_index(['Elem flow name', 'Elem flow unit', 'Compartment', 'Sub-compartment'])
+            df_iw.index.names = (None, None, None, None)
+            ei_iw_db = df_ei.join(df_iw).dropna(subset=['Impact category', 'CF value'])
+            ei_iw_db = ei_iw_db.set_index('id').drop(['CAS number', 'MP or Damage', 'Native geographical resolution scale'],
+                                               axis=1)
+            # changing into a dataframe format readily available for matrix calculations
+            ei_iw_db = ei_iw_db.pivot_table(values='CF value', index='id', columns=['Impact category', 'CF unit']).fillna(0)
+            ei_iw_db = ei_iw_db.reindex(stressors_ei.id).fillna(0)
+
+            if version_ei == '3.5':
+                self.ei35_iw_as_matrix = ei_iw_db.T
+            elif version_ei == '3.6':
+                self.ei36_iw_as_matrix = ei_iw_db.T
+            elif version_ei == '3.7.1':
+                self.ei371_iw_as_matrix = ei_iw_db.T
+            elif version_ei == '3.8':
+                self.ei38_iw_as_matrix = ei_iw_db.T
 
     def produce_files(self):
         """
         Function producing the different IW+ files for the different versions.
-        :param path: path of the folder where to store the files
         :return: the IW+ files
         """
 
         path = pkg_resources.resource_filename(__name__, '/Databases/Impact_world_' + self.version)
 
-        if not os.path.exists(path):
-            os.makedirs(path)
+        if not os.path.exists(path + '/Excel/'):
+            os.makedirs(path + '/Excel/')
+        if not os.path.exists(path + '/DataFrame/'):
+            os.makedirs(path + '/DataFrame/')
 
-        self.master_db.to_excel(path + '/impact_world_plus_'+self.version+'_dev.xlsx')
-        self.ei_iw_db.to_excel(path + '/impact_world_plus_'+self.version+'_ecoinvent_v.' + self.version_ei + '.xlsx')
+        self.master_db.to_excel(path + '/Excel/impact_world_plus_' + self.version + '_dev.xlsx')
+        self.ei35_iw.to_excel(path + '/Excel/impact_world_plus_' + self.version + '_ecoinvent_v35.xlsx')
+        self.ei36_iw.to_excel(path + '/Excel/impact_world_plus_' + self.version + '_ecoinvent_v36.xlsx')
+        self.ei371_iw.to_excel(path + '/Excel/impact_world_plus_' + self.version + '_ecoinvent_v371.xlsx')
+        self.ei38_iw.to_excel(path + '/Excel/impact_world_plus_' + self.version + '_ecoinvent_v38.xlsx')
+        self.ei35_iw_as_matrix.to_excel(path + '/DataFrame/impact_world_plus_' + self.version + '_ecoinvent_v35.xlsx')
+        self.ei36_iw_as_matrix.to_excel(path + '/DataFrame/impact_world_plus_' + self.version + '_ecoinvent_v36.xlsx')
+        self.ei371_iw_as_matrix.to_excel(path + '/DataFrame/impact_world_plus_' + self.version + '_ecoinvent_v371.xlsx')
+        self.ei38_iw_as_matrix.to_excel(path + '/DataFrame/impact_world_plus_' + self.version + '_ecoinvent_v38.xlsx')
+
+    def produce_files_hybrid_ecoinvent(self):
+        """Specific method to create the files matching with hybrid-ecoinvent (pylcaio)."""
+
+        path = pkg_resources.resource_filename(__name__, '/Databases/Impact_world_' + self.version)
+
+        if not os.path.exists(path + '/for_hybrid_ecoinvent/ei35/'):
+            os.makedirs(path + '/for_hybrid_ecoinvent/ei35/')
+        if not os.path.exists(path + '/for_hybrid_ecoinvent/ei36/'):
+            os.makedirs(path + '/for_hybrid_ecoinvent/ei36/')
+        if not os.path.exists(path + '/for_hybrid_ecoinvent/ei371/'):
+            os.makedirs(path + '/for_hybrid_ecoinvent/ei371/')
+        if not os.path.exists(path + '/for_hybrid_ecoinvent/ei38/'):
+            os.makedirs(path + '/for_hybrid_ecoinvent/ei38/')
+
+        scipy.sparse.save_npz(path+'/for_hybrid_ecoinvent/ei35/Ecoinvent_not_regionalized.npz',
+                              scipy.sparse.csr_matrix(self.ei35_iw_as_matrix))
+        scipy.sparse.save_npz(path+'/for_hybrid_ecoinvent/ei36/Ecoinvent_not_regionalized.npz',
+                              scipy.sparse.csr_matrix(self.ei36_iw_as_matrix))
+        scipy.sparse.save_npz(path+'/for_hybrid_ecoinvent/ei371/Ecoinvent_not_regionalized.npz',
+                              scipy.sparse.csr_matrix(self.ei371_iw_as_matrix))
+        scipy.sparse.save_npz(path+'/for_hybrid_ecoinvent/ei38/Ecoinvent_not_regionalized.npz',
+                              scipy.sparse.csr_matrix(self.ei38_iw_as_matrix))
 
 # -------------- Support modules -------------------
 
