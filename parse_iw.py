@@ -113,6 +113,12 @@ class Parse:
         self.master_db = pd.read_sql(sql='SELECT * FROM [CF - not regionalized - All other impact categories]',
                                      con=self.conn).drop('ID', axis=1)
 
+        # for some reason, some queries are not happening correctly, e.g., "Perfluorooctane, PFC-7-1-18\r\n\r\nPerfluorooctane, PFC-7-1-18"
+        # we correct it by splitting at the right place and replacing the value
+        read_sql_issues = [i for i in self.master_db.index if '\n' in self.master_db.loc[i, 'Elem flow name']]
+        self.master_db.loc[read_sql_issues, 'Elem flow name'] = [i.split("\r")[0] for i in
+                                                               self.master_db.loc[read_sql_issues, 'Elem flow name']]
+
     def load_acid_eutro_cfs(self):
         """
         Loading the CFs for the acidification and eutrophication impact categories. This includes CFs coming from the
@@ -813,9 +819,14 @@ class Parse:
                                             'Human toxicity non-cancer','Marine acidification']
 
         for subcomp in long_term_subcomps.keys():
-            # slice dataframe to only keep the corresponding subcomp
+            # slice dataframe to only keep the corresponding subcomp (low. pop., long-term)
             data = self.master_db.loc[[i for i in self.master_db.index if (self.master_db.loc[i, 'Sub-compartment']
                                                                            == long_term_subcomps[subcomp])]].copy()
+            # remove already existing subcomp values, these values will be redefined properly in this function
+            self.master_db.drop(
+                [i for i in self.master_db.index if (self.master_db.loc[i, 'Sub-compartment'] == subcomp and
+                                                     ','.join(self.master_db.loc[i, 'Impact category'].split(',')[
+                                                              :-1]) in long_term_cats)], inplace=True)
             for cat in long_term_cats:
                 # slice dataframe to only keep corresponding impact category
                 df = data.loc[[i for i in data.index if (cat in data.loc[i, 'Impact category'] and
@@ -825,11 +836,13 @@ class Parse:
                 # now that they have the same category name, we can add their CF value by merging dataframes
                 df = df.groupby(by=['Impact category', 'CF unit', 'Compartment', 'Sub-compartment', 'Elem flow name',
                                     'CAS number', 'Elem flow unit', 'MP or Damage',
-                                    'Native geographical resolution scale']).sum().reset_index()
+                                    # dropna=False because there are some NaNs with CAS numbers, which you remove some elementary flows from the dataframe
+                                    'Native geographical resolution scale'], dropna=False).sum().reset_index()
                 # rename the subcomp
                 df.loc[:, 'Sub-compartment'] = subcomp
                 # reimplement the "long term" in the imapct category name
                 df.loc[:, 'Impact category'] = [i + ', long term' for i in df.loc[:, 'Impact category']]
+
                 # concatenate new CFs to master_db
                 self.master_db = pd.concat([self.master_db, df])
                 # now change "long term" in impact category name for "short term"
