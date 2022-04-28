@@ -25,6 +25,7 @@ import pandas as pd
 import os
 import pkg_resources
 import json
+import country_converter as coco
 import scipy.sparse
 
 class Parse:
@@ -70,13 +71,13 @@ class Parse:
         self.load_water_scarcity_cfs()
         self.load_water_availability_eq_cfs()
         self.load_water_availability_hh_cfs()
-        self.load_water_availability_terr_cfs()
-        self.load_thermally_polluted_water_cfs()
-
-        self.apply_rules()
-
-        self.master_db = self.master_db.sort_values(by=['Impact category', 'Elem flow name'])
-        self.master_db = self.master_db.reset_index().drop('index', axis=1)
+        # self.load_water_availability_terr_cfs()
+        # self.load_thermally_polluted_water_cfs()
+        #
+        # self.apply_rules()
+        #
+        # self.master_db = self.master_db.sort_values(by=['Impact category', 'Elem flow name'])
+        # self.master_db = self.master_db.reset_index().drop('index', axis=1)
 
     def load_basic_cfs(self):
         """
@@ -144,8 +145,8 @@ class Parse:
         for cat in concerned_cat:
             # load the corresponding access table
             db = pd.read_sql(sql='SELECT * FROM [' + cat[0] + ']', con=self.conn)
-            # only keep global average values
-            db = db.loc[[i for i in db.index if db.loc[i, 'Resolution'] in ['Global', 'Not regionalized']]]
+            # converting 3-letters ISO codes to 2-letters ISO codes
+            db = convert_country_codes(db)
             # select the impact category within the dataframe
             stoec_ratios_cat = stoec_ratios.loc[
                 [i for i in stoec_ratios.index if stoec_ratios.loc[i, 'Impact category'] == cat[1]]]
@@ -164,10 +165,11 @@ class Parse:
                     df.loc[id_count, 'Elem flow unit'] = 'kg'
                     df.loc[id_count, 'Compartment'] = base_values.loc[j, 'Compartment']
                     df.loc[id_count, 'Sub-compartment'] = base_values.loc[j, 'Sub-compartment']
-                    df.loc[id_count, 'Elem flow name'] = stoec_ratios_cat.loc[i, 'Elem flow name in Simapro']
+                    df.loc[id_count, 'Elem flow name'] = stoec_ratios_cat.loc[i, 'Elem flow name in Simapro'] + ' - ' + \
+                                                         base_values.loc[j, 'Region code']
                     df.loc[id_count, 'CAS number'] = stoec_ratios_cat.loc[i, 'CAS number']
                     df.loc[id_count, 'MP or Damage'] = base_values.loc[j, 'MP or Damage']
-                    df.loc[id_count, 'Native geographical resolution scale'] = 'Global'
+                    df.loc[id_count, 'Native geographical resolution scale'] = base_values.loc[j, 'Resolution']
                     df.loc[id_count, 'CF value'] = new_values.loc[j]
                     id_count += 1
                 self.master_db = pd.concat([self.master_db, df])
@@ -189,8 +191,8 @@ class Parse:
 
         db = pd.read_sql(sql='SELECT * FROM [CF - regionalized - LandOcc - aggregated]', con=self.conn)
 
-        # only selecting global average CFs
-        db = db.loc[[i for i in db.index if db.loc[i, 'Resolution'] in 'Global']]
+        # converting 3-letters ISO codes to 2-letters ISO codes
+        db = convert_country_codes(db)
 
         # the dataframe where we will reconstruct the database
         df = pd.DataFrame(None, columns=self.master_db.columns)
@@ -203,13 +205,14 @@ class Parse:
             # hardcoded comp and subcomp
             df.loc[id_count, 'Compartment'] = 'Raw'
             df.loc[id_count, 'Sub-compartment'] = 'land'
-            df.loc[id_count, 'Elem flow name'] = db.loc[i, 'Elem flow']
+            df.loc[id_count, 'Elem flow name'] = db.loc[i, 'Elem flow'] + ' - ' + db.loc[i, 'Region code']
             # careful, different name
             df.loc[id_count, 'MP or Damage'] = db.loc[i, 'MP or Damage']
-            df.loc[id_count, 'Native geographical resolution scale'] = 'Global'
+            df.loc[id_count, 'Native geographical resolution scale'] = db.loc[i, 'Resolution']
             df.loc[id_count, 'CF value'] = db.loc[i, 'Weighted Average']
             id_count += 1
-            self.master_db = pd.concat([self.master_db, df])
+
+        self.master_db = pd.concat([self.master_db, df])
 
         self.master_db = clean_up_dataframe(self.master_db)
 
@@ -217,8 +220,8 @@ class Parse:
 
         db = pd.read_sql(sql='SELECT * FROM [CF - regionalized - LandTrans - aggregated]', con=self.conn)
 
-        # only selecting global average CFs
-        db = db.loc[[i for i in db.index if db.loc[i, 'Resolution'] in 'Global']]
+        # converting 3-letters ISO codes to 2-letters ISO codes
+        db = convert_country_codes(db)
 
         # the dataframe where we will reconstruct the database
         df = pd.DataFrame(None, columns=self.master_db.columns)
@@ -231,13 +234,14 @@ class Parse:
             # hardcoded comp and subcomp
             df.loc[id_count, 'Compartment'] = 'Raw'
             df.loc[id_count, 'Sub-compartment'] = 'land'
-            df.loc[id_count, 'Elem flow name'] = db.loc[i, 'Elem flow']
+            df.loc[id_count, 'Elem flow name'] = db.loc[i, 'Elem flow'] + ' - ' + db.loc[i, 'Region code']
             # careful, different name
             df.loc[id_count, 'MP or Damage'] = db.loc[i, 'MP or Damage']
-            df.loc[id_count, 'Native geographical resolution scale'] = 'Global'
+            df.loc[id_count, 'Native geographical resolution scale'] = db.loc[i, 'Resolution']
             df.loc[id_count, 'CF value'] = db.loc[i, 'Weighted Average']
             id_count += 1
-            self.master_db = pd.concat([self.master_db, df])
+
+        self.master_db = pd.concat([self.master_db, df])
 
         self.master_db = clean_up_dataframe(self.master_db)
 
@@ -379,49 +383,55 @@ class Parse:
 
         db = pd.read_sql(sql='SELECT * FROM [CF - regionalized - WaterScarc - aggregated]', con=self.conn)
 
+        # converting 3-letters ISO codes to 2-letters ISO codes
+        db = convert_country_codes(db)
+
         def add_generic_scarcity_intel(master_db, id_count):
             master_db.loc[id_count, 'Impact category'] = 'Water scarcity'
             master_db.loc[id_count, 'Elem flow unit'] = 'm3'
-            master_db.loc[id_count, 'Native geographical resolution scale'] = 'Global'
             master_db.loc[id_count, 'MP or Damage'] = 'Midpoint'
             master_db.loc[id_count, 'Sub-compartment'] = '(unspecified)'
             master_db.loc[id_count, 'CF unit'] = 'm3 world-eq'
             master_db.loc[id_count, 'CAS number'] = '007732-18-5'
 
         for flow in ['UNKNOWN', 'AGRI', 'NON-AGRI']:
-            data = db.loc[
-                [i for i in db.index if (db.loc[i, 'Resolution'] in 'Global' and db.loc[i, 'Elem flow'] == flow)]]
-            # Water comp
-            id_count = len(self.master_db)
-            add_generic_scarcity_intel(self.master_db, id_count)
-            self.master_db.loc[id_count, 'Compartment'] = 'Water'
-            self.master_db.loc[id_count, 'CF value'] = - data.loc[:, 'Weighted Average'].iloc[0]
-            if flow == 'UNKNOWN':
-                self.master_db.loc[id_count, 'Elem flow name'] = 'Water'
-            else:
-                self.master_db.loc[id_count, 'Elem flow name'] = 'Water, ' + flow.lower()
-            # Raw comp
-            id_count += 1
-            add_generic_scarcity_intel(self.master_db, id_count)
-            self.master_db.loc[id_count, 'Compartment'] = 'Raw'
-            self.master_db.loc[id_count, 'CF value'] = data.loc[:, 'Weighted Average'].iloc[0]
-            if flow == 'UNKNOWN':
-                self.master_db.loc[id_count, 'Elem flow name'] = 'Water'
-            else:
-                self.master_db.loc[id_count, 'Elem flow name'] = 'Water, ' + flow.lower()
+            data = db.loc[[i for i in db.index if db.loc[i, 'Elem flow'] == flow]]
+            for j in data.index:
+                # Water comp
+                id_count = len(self.master_db)
+                add_generic_scarcity_intel(self.master_db, id_count)
+                self.master_db.loc[id_count, 'Native geographical resolution scale'] = data.loc[j, 'Resolution']
+                self.master_db.loc[id_count, 'Compartment'] = 'Water'
+                self.master_db.loc[id_count, 'CF value'] = - data.loc[:, 'Weighted Average'].iloc[0]
+                if flow == 'UNKNOWN':
+                    self.master_db.loc[id_count, 'Elem flow name'] = 'Water' + ' - ' + data.loc[j, 'Region code']
+                else:
+                    self.master_db.loc[id_count, 'Elem flow name'] = 'Water, ' + flow.lower() + ' - ' + data.loc[
+                        j, 'Region code']
+                # Raw comp
+                id_count += 1
+                add_generic_scarcity_intel(self.master_db, id_count)
+                self.master_db.loc[id_count, 'Native geographical resolution scale'] = data.loc[j, 'Resolution']
+                self.master_db.loc[id_count, 'Compartment'] = 'Raw'
+                self.master_db.loc[id_count, 'CF value'] = data.loc[:, 'Weighted Average'].iloc[0]
+                if flow == 'UNKNOWN':
+                    self.master_db.loc[id_count, 'Elem flow name'] = 'Water' + ' - ' + data.loc[j, 'Region code']
+                else:
+                    self.master_db.loc[id_count, 'Elem flow name'] = 'Water, ' + flow.lower() + ' - ' + data.loc[
+                        j, 'Region code']
 
         self.master_db = clean_up_dataframe(self.master_db)
 
         # creating the other water flows from the default water flow
-        other_water = ['Water, lake','Water, river','Water, unspecified natural origin',
-                       'Water, well, in ground','Water, cooling, unspecified natural origin']
+        other_water = ['Water, lake', 'Water, river', 'Water, unspecified natural origin',
+                       'Water, well, in ground', 'Water, cooling, unspecified natural origin']
         for water in other_water:
             df = self.master_db.loc[
                 [i for i in self.master_db.index if (self.master_db.loc[i, 'Impact category'] == 'Water scarcity' and
-                                                   self.master_db.loc[i, 'Elem flow name'] == 'Water' and
-                                                   self.master_db.loc[i, 'Compartment'] == 'Raw')]]
-            df.loc[:,'Elem flow name'] = water
-            self.master_db = pd.concat([self.master_db,df])
+                                                     'Water -' in self.master_db.loc[i, 'Elem flow name'] and
+                                                     self.master_db.loc[i, 'Compartment'] == 'Raw')]]
+            df.loc[:, 'Elem flow name'] = [water + ' - ' + i.split(' - ')[1] for i in df.loc[:, 'Elem flow name']]
+            self.master_db = pd.concat([self.master_db, df])
             self.master_db = clean_up_dataframe(self.master_db)
 
         self.master_db = clean_up_dataframe(self.master_db)
@@ -488,85 +498,110 @@ class Parse:
 
         db = pd.read_sql(sql='SELECT * FROM [CF - regionalized - WaterAvailab_HH - aggregated]', con=self.conn)
 
+        # converting 3-letters ISO codes to 2-letters ISO codes
+        db = convert_country_codes(db)
+
+        # remove the Iraq-Saudi Arabia Neutral Zone geography which creates issues with country_converter because it yields a list and not a string
+        db = clean_up_dataframe(db.drop([i for i in db.index if type(db.loc[i, 'Region code']) != str]))
+
         def add_generic_water_avai_hh_intel(master_db, id_count):
             master_db.loc[id_count, 'Impact category'] = 'Water availability, human health'
             master_db.loc[id_count, 'Elem flow unit'] = 'm3'
-            master_db.loc[id_count, 'Native geographical resolution scale'] = 'Global'
             master_db.loc[id_count, 'MP or Damage'] = 'Damage'
             master_db.loc[id_count, 'CF unit'] = 'DALY'
 
         # Water comp / unspecified subcomp
-        id_count = len(self.master_db)
-        add_generic_water_avai_hh_intel(self.master_db, id_count)
-        self.master_db.loc[id_count, 'Compartment'] = 'Water'
-        self.master_db.loc[id_count, 'Sub-compartment'] = '(unspecified)'
-        self.master_db.loc[id_count, 'Elem flow name'] = 'Water'
-        self.master_db.loc[id_count, 'CF value'] = - db.loc[[i for i in db.index if (db.loc[i, 'Resolution'] in 'Global' and
-                                                                                db.loc[i, 'Elem flow'] == 'Unknown')],
-                                                       'Weighted Average'].iloc[0]
+        data = db.loc[[i for i in db.index if db.loc[i, 'Elem flow'] == 'Unknown']]
+        for i in data.index:
+            id_count = len(self.master_db)
+            add_generic_water_avai_hh_intel(self.master_db, id_count)
+            self.master_db.loc[id_count, 'Native geographical resolution scale'] = data.loc[i, 'Resolution']
+            self.master_db.loc[id_count, 'Compartment'] = 'Water'
+            self.master_db.loc[id_count, 'Sub-compartment'] = '(unspecified)'
+            self.master_db.loc[id_count, 'Elem flow name'] = 'Water' + ' - ' + data.loc[i, 'Region code']
+            self.master_db.loc[id_count, 'CF value'] = data.loc[i, 'Weighted Average']
+
         # Water comp / lake subcomp
-        id_count += 1
-        add_generic_water_avai_hh_intel(self.master_db, id_count)
-        self.master_db.loc[id_count, 'Compartment'] = 'Water'
-        self.master_db.loc[id_count, 'Sub-compartment'] = 'lake'
-        self.master_db.loc[id_count, 'Elem flow name'] = 'Water'
-        self.master_db.loc[id_count, 'CF value'] = - db.loc[[i for i in db.index if (db.loc[i, 'Resolution'] in 'Global' and
-                                                                                db.loc[i, 'Elem flow'] == 'Surface')],
-                                                       'Weighted Average'].iloc[0]
+        data = db.loc[[i for i in db.index if db.loc[i, 'Elem flow'] == 'Surface']]
+        for i in data.index:
+            id_count = len(self.master_db)
+            add_generic_water_avai_hh_intel(self.master_db, id_count)
+            self.master_db.loc[id_count, 'Native geographical resolution scale'] = data.loc[i, 'Resolution']
+            self.master_db.loc[id_count, 'Compartment'] = 'Water'
+            self.master_db.loc[id_count, 'Sub-compartment'] = 'lake'
+            self.master_db.loc[id_count, 'Elem flow name'] = 'Water' + ' - ' + data.loc[i, 'Region code']
+            self.master_db.loc[id_count, 'CF value'] = data.loc[i, 'Weighted Average']
+
         # Water comp / river subcomp
-        id_count += 1
-        add_generic_water_avai_hh_intel(self.master_db, id_count)
-        self.master_db.loc[id_count, 'Compartment'] = 'Water'
-        self.master_db.loc[id_count, 'Sub-compartment'] = 'river'
-        self.master_db.loc[id_count, 'Elem flow name'] = 'Water'
-        self.master_db.loc[id_count, 'CF value'] = - db.loc[[i for i in db.index if (db.loc[i, 'Resolution'] in 'Global' and
-                                                                                db.loc[i, 'Elem flow'] == 'Surface')],
-                                                       'Weighted Average'].iloc[0]
+        data = db.loc[[i for i in db.index if db.loc[i, 'Elem flow'] == 'Surface']]
+        for i in data.index:
+            id_count = len(self.master_db)
+            add_generic_water_avai_hh_intel(self.master_db, id_count)
+            self.master_db.loc[id_count, 'Native geographical resolution scale'] = data.loc[i, 'Resolution']
+            self.master_db.loc[id_count, 'Compartment'] = 'Water'
+            self.master_db.loc[id_count, 'Sub-compartment'] = 'river'
+            self.master_db.loc[id_count, 'Elem flow name'] = 'Water' + ' - ' + data.loc[i, 'Region code']
+            self.master_db.loc[id_count, 'CF value'] = data.loc[i, 'Weighted Average']
+
         # Water comp / groundwater subcomp
-        id_count += 1
-        add_generic_water_avai_hh_intel(self.master_db, id_count)
-        self.master_db.loc[id_count, 'Compartment'] = 'Water'
-        self.master_db.loc[id_count, 'Sub-compartment'] = 'groundwater'
-        self.master_db.loc[id_count, 'Elem flow name'] = 'Water'
-        self.master_db.loc[id_count, 'CF value'] = - db.loc[[i for i in db.index if (db.loc[i, 'Resolution'] in 'Global' and
-                                                                                db.loc[i, 'Elem flow'] == 'Ground')],
-                                                       'Weighted Average'].iloc[0]
+        data = db.loc[[i for i in db.index if db.loc[i, 'Elem flow'] == 'Ground']]
+        for i in data.index:
+            id_count = len(self.master_db)
+            add_generic_water_avai_hh_intel(self.master_db, id_count)
+            self.master_db.loc[id_count, 'Native geographical resolution scale'] = data.loc[i, 'Resolution']
+            self.master_db.loc[id_count, 'Compartment'] = 'Water'
+            self.master_db.loc[id_count, 'Sub-compartment'] = 'groundwater'
+            self.master_db.loc[id_count, 'Elem flow name'] = 'Water' + ' - ' + data.loc[i, 'Region code']
+            self.master_db.loc[id_count, 'CF value'] = data.loc[i, 'Weighted Average']
+
         # Raw comp / unspecified water
-        id_count += 1
-        add_generic_water_avai_hh_intel(self.master_db, id_count)
-        self.master_db.loc[id_count, 'Compartment'] = 'Raw'
-        self.master_db.loc[id_count, 'Sub-compartment'] = '(unspecified)'
-        self.master_db.loc[id_count, 'Elem flow name'] = 'Water, unspecified natural origin'
-        self.master_db.loc[id_count, 'CF value'] = db.loc[[i for i in db.index if (db.loc[i, 'Resolution'] in 'Global' and
-                                                                              db.loc[i, 'Elem flow'] == 'Unknown')],
-                                                     'Weighted Average'].iloc[0]
+        data = db.loc[[i for i in db.index if db.loc[i, 'Elem flow'] == 'Unknown']]
+        for i in data.index:
+            id_count = len(self.master_db)
+            add_generic_water_avai_hh_intel(self.master_db, id_count)
+            self.master_db.loc[id_count, 'Native geographical resolution scale'] = data.loc[i, 'Resolution']
+            self.master_db.loc[id_count, 'Compartment'] = 'Raw'
+            self.master_db.loc[id_count, 'Sub-compartment'] = '(unspecified)'
+            self.master_db.loc[id_count, 'Elem flow name'] = 'Water, unspecified natural origin' + ' - ' + data.loc[
+                i, 'Region code']
+            self.master_db.loc[id_count, 'CF value'] = data.loc[i, 'Weighted Average']
+
         # Raw comp / lake water
-        id_count += 1
-        add_generic_water_avai_hh_intel(self.master_db, id_count)
-        self.master_db.loc[id_count, 'Compartment'] = 'Raw'
-        self.master_db.loc[id_count, 'Sub-compartment'] = '(unspecified)'
-        self.master_db.loc[id_count, 'Elem flow name'] = 'Water, lake'
-        self.master_db.loc[id_count, 'CF value'] = db.loc[[i for i in db.index if (db.loc[i, 'Resolution'] in 'Global' and
-                                                                              db.loc[i, 'Elem flow'] == 'Surface')],
-                                                     'Weighted Average'].iloc[0]
+        data = db.loc[[i for i in db.index if db.loc[i, 'Elem flow'] == 'Surface']]
+        for i in data.index:
+            id_count = len(self.master_db)
+            add_generic_water_avai_hh_intel(self.master_db, id_count)
+            self.master_db.loc[id_count, 'Native geographical resolution scale'] = data.loc[i, 'Resolution']
+            self.master_db.loc[id_count, 'Compartment'] = 'Raw'
+            self.master_db.loc[id_count, 'Sub-compartment'] = '(unspecified)'
+            self.master_db.loc[id_count, 'Elem flow name'] = 'Water, lake' + ' - ' + data.loc[i, 'Region code']
+            self.master_db.loc[id_count, 'CF value'] = data.loc[i, 'Weighted Average']
+
         # Raw comp / river water
-        id_count += 1
-        add_generic_water_avai_hh_intel(self.master_db, id_count)
-        self.master_db.loc[id_count, 'Compartment'] = 'Raw'
-        self.master_db.loc[id_count, 'Sub-compartment'] = '(unspecified)'
-        self.master_db.loc[id_count, 'Elem flow name'] = 'Water, river'
-        self.master_db.loc[id_count, 'CF value'] = db.loc[[i for i in db.index if (db.loc[i, 'Resolution'] in 'Global' and
-                                                                              db.loc[i, 'Elem flow'] == 'Surface')],
-                                                     'Weighted Average'].iloc[0]
+        data = db.loc[[i for i in db.index if db.loc[i, 'Elem flow'] == 'Surface']]
+        for i in data.index:
+            id_count = len(self.master_db)
+            add_generic_water_avai_hh_intel(self.master_db, id_count)
+            self.master_db.loc[id_count, 'Native geographical resolution scale'] = data.loc[i, 'Resolution']
+            self.master_db.loc[id_count, 'Compartment'] = 'Raw'
+            self.master_db.loc[id_count, 'Sub-compartment'] = '(unspecified)'
+            self.master_db.loc[id_count, 'Elem flow name'] = 'Water, river' + ' - ' + data.loc[i, 'Region code']
+            self.master_db.loc[id_count, 'CF value'] = data.loc[i, 'Weighted Average']
+
         # Raw comp / well water
-        id_count += 1
-        add_generic_water_avai_hh_intel(self.master_db, id_count)
-        self.master_db.loc[id_count, 'Compartment'] = 'Raw'
-        self.master_db.loc[id_count, 'Sub-compartment'] = '(unspecified)'
-        self.master_db.loc[id_count, 'Elem flow name'] = 'Water, well, in ground'
-        self.master_db.loc[id_count, 'CF value'] = db.loc[[i for i in db.index if (db.loc[i, 'Resolution'] in 'Global' and
-                                                                              db.loc[i, 'Elem flow'] == 'Ground')],
-                                                     'Weighted Average'].iloc[0]
+        data = db.loc[[i for i in db.index if db.loc[i, 'Elem flow'] == 'Ground']]
+        for i in data.index:
+            id_count = len(self.master_db)
+            add_generic_water_avai_hh_intel(self.master_db, id_count)
+            self.master_db.loc[id_count, 'Native geographical resolution scale'] = data.loc[i, 'Resolution']
+            self.master_db.loc[id_count, 'Compartment'] = 'Raw'
+            self.master_db.loc[id_count, 'Sub-compartment'] = '(unspecified)'
+            self.master_db.loc[id_count, 'Elem flow name'] = 'Water, well, in ground' + ' - ' + data.loc[
+                i, 'Region code']
+            self.master_db.loc[id_count, 'CF value'] = data.loc[i, 'Weighted Average']
+
+        # drop NaN values
+        self.master_db.dropna(subset=['CF value'], inplace=True)
 
     def load_water_availability_terr_cfs(self):
         """
@@ -1100,6 +1135,21 @@ def clean_up_dataframe(df):
     df = df.reset_index().drop('index',axis=1)
     return df
 
+
+def convert_country_codes(db):
+    """
+    Converts 3 letters ISO codes to 2 letters ISO codes, which are used by ecoinvent.
+    :param db:
+    :return:
+    """
+    # lines of logger to avoid having warnings showing up
+    coco_logger = coco.logging.getLogger()
+    coco_logger.setLevel(coco.logging.CRITICAL)
+    # converting 3 letters ISO codes to 2 letters ISO codes, which are used by ecoinvent
+    db.loc[[i for i in db.index if db.loc[i, 'Resolution'] == 'Country'], 'Region code'] = coco.convert(
+        db.loc[[i for i in db.index if db.loc[i, 'Resolution'] == 'Country'], 'Region code'], to='ISO2', not_found=None)
+
+    return db
 
 def mapping_with_ei35():
     """
