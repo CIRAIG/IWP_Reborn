@@ -45,6 +45,7 @@ class Parse:
 
         # OUTPUTs
         self.master_db = pd.DataFrame()
+        self.master_db_not_regio = pd.DataFrame()
         self.ei35_iw = pd.DataFrame()
         self.ei36_iw = pd.DataFrame()
         self.ei371_iw = pd.DataFrame()
@@ -71,13 +72,15 @@ class Parse:
         self.load_water_scarcity_cfs()
         self.load_water_availability_eq_cfs()
         self.load_water_availability_hh_cfs()
-        # self.load_water_availability_terr_cfs()
-        # self.load_thermally_polluted_water_cfs()
-        #
-        # self.apply_rules()
-        #
-        # self.master_db = self.master_db.sort_values(by=['Impact category', 'Elem flow name'])
-        # self.master_db = self.master_db.reset_index().drop('index', axis=1)
+        self.load_water_availability_terr_cfs()
+        self.load_thermally_polluted_water_cfs()
+
+        self.apply_rules()
+
+        self.master_db = self.master_db.sort_values(by=['Impact category', 'Elem flow name'])
+        self.master_db = self.master_db.reset_index().drop('index', axis=1)
+
+        self.separate_regio_cfs()
 
     def load_basic_cfs(self):
         """
@@ -205,7 +208,7 @@ class Parse:
             # hardcoded comp and subcomp
             df.loc[id_count, 'Compartment'] = 'Raw'
             df.loc[id_count, 'Sub-compartment'] = 'land'
-            df.loc[id_count, 'Elem flow name'] = db.loc[i, 'Elem flow'] + ' - ' + db.loc[i, 'Region code']
+            df.loc[id_count, 'Elem flow name'] = 'Occupation, ' + db.loc[i, 'Elem flow'].lower() + ' - ' + db.loc[i, 'Region code']
             # careful, different name
             df.loc[id_count, 'MP or Damage'] = db.loc[i, 'MP or Damage']
             df.loc[id_count, 'Native geographical resolution scale'] = db.loc[i, 'Resolution']
@@ -234,7 +237,19 @@ class Parse:
             # hardcoded comp and subcomp
             df.loc[id_count, 'Compartment'] = 'Raw'
             df.loc[id_count, 'Sub-compartment'] = 'land'
-            df.loc[id_count, 'Elem flow name'] = db.loc[i, 'Elem flow'] + ' - ' + db.loc[i, 'Region code']
+            df.loc[id_count, 'Elem flow name'] = 'Transformation, from '+ db.loc[i, 'Elem flow'] + ' - ' + db.loc[i, 'Region code']
+            # careful, different name
+            df.loc[id_count, 'MP or Damage'] = db.loc[i, 'MP or Damage']
+            df.loc[id_count, 'Native geographical resolution scale'] = db.loc[i, 'Resolution']
+            df.loc[id_count, 'CF value'] = - db.loc[i, 'Weighted Average']
+            id_count += 1
+            df.loc[id_count, 'Impact category'] = db.loc[i, 'Impact category']
+            df.loc[id_count, 'CF unit'] = db.loc[i, 'Unit'].split('[')[1].split(']')[0].split('/')[0]
+            df.loc[id_count, 'Elem flow unit'] = db.loc[i, 'Unit'].split('[')[1].split(']')[0].split('/')[1]
+            # hardcoded comp and subcomp
+            df.loc[id_count, 'Compartment'] = 'Raw'
+            df.loc[id_count, 'Sub-compartment'] = 'land'
+            df.loc[id_count, 'Elem flow name'] = 'Transformation, to '+ db.loc[i, 'Elem flow'] + ' - ' + db.loc[i, 'Region code']
             # careful, different name
             df.loc[id_count, 'MP or Damage'] = db.loc[i, 'MP or Damage']
             df.loc[id_count, 'Native geographical resolution scale'] = db.loc[i, 'Resolution']
@@ -402,7 +417,7 @@ class Parse:
                 add_generic_scarcity_intel(self.master_db, id_count)
                 self.master_db.loc[id_count, 'Native geographical resolution scale'] = data.loc[j, 'Resolution']
                 self.master_db.loc[id_count, 'Compartment'] = 'Water'
-                self.master_db.loc[id_count, 'CF value'] = - data.loc[:, 'Weighted Average'].iloc[0]
+                self.master_db.loc[id_count, 'CF value'] = - data.loc[j, 'Weighted Average']
                 if flow == 'UNKNOWN':
                     self.master_db.loc[id_count, 'Elem flow name'] = 'Water' + ' - ' + data.loc[j, 'Region code']
                 else:
@@ -413,7 +428,7 @@ class Parse:
                 add_generic_scarcity_intel(self.master_db, id_count)
                 self.master_db.loc[id_count, 'Native geographical resolution scale'] = data.loc[j, 'Resolution']
                 self.master_db.loc[id_count, 'Compartment'] = 'Raw'
-                self.master_db.loc[id_count, 'CF value'] = data.loc[:, 'Weighted Average'].iloc[0]
+                self.master_db.loc[id_count, 'CF value'] = data.loc[j, 'Weighted Average']
                 if flow == 'UNKNOWN':
                     self.master_db.loc[id_count, 'Elem flow name'] = 'Water' + ' - ' + data.loc[j, 'Region code']
                 else:
@@ -451,7 +466,7 @@ class Parse:
         # Proper aggregation to determine the global value was not yet performed. Median is used instead.
         def add_generic_water_avail_eq_intel(master_db, id_count):
             master_db.loc[id_count, 'Impact category'] = 'Water availability, freshwater ecosystem'
-            master_db.loc[id_count, 'Native geographical resolution scale'] = 'Global'
+            master_db.loc[id_count, 'Native geographical resolution scale'] = 'Not regionalized'
             master_db.loc[id_count, 'MP or Damage'] = 'Damage'
             master_db.loc[id_count, 'CF unit'] = 'PDF.m2.yr'
             master_db.loc[id_count, 'Elem flow unit'] = 'm3'
@@ -615,22 +630,7 @@ class Parse:
 
         db = pd.read_sql(sql='SELECT * FROM [CF - regionalized - WaterAvailab_Terr - aggregated]', con=self.conn)
 
-        def add_generic_water_avai_terr_intel(master_db, id_count):
-            master_db.loc[id_count, 'Impact category'] = 'Water availability, terrestrial ecosystem'
-            master_db.loc[id_count, 'Elem flow unit'] = 'm3'
-            master_db.loc[id_count, 'Native geographical resolution scale'] = 'Global'
-            master_db.loc[id_count, 'MP or Damage'] = 'Damage'
-            master_db.loc[id_count, 'CF unit'] = 'PDF.m2.yr'
-            master_db.loc[id_count, 'Sub-compartment'] = 'in water'
-            master_db.loc[id_count, 'Compartment'] = 'Raw'
-
-        data = db.loc[[i for i in db.index if db.loc[i, 'Elem flow name'] in ['Water, shallow well, in ground',
-                                                                              'Water, well, in ground']]]
-        for water_flow in data.index:
-            id_count = len(self.master_db)
-            add_generic_water_avai_terr_intel(self.master_db, id_count)
-            self.master_db.loc[id_count, 'Elem flow name'] = data.loc[water_flow, 'Elem flow name']
-            self.master_db.loc[id_count, 'CF value'] = data.loc[water_flow, 'CF value']
+        self.master_db = pd.concat([self.master_db, db.drop('ID', axis=1)])
 
         self.master_db = clean_up_dataframe(self.master_db)
 
@@ -646,22 +646,7 @@ class Parse:
 
         db = pd.read_sql(sql='SELECT * FROM [CF - regionalized - ThermallyPollutedWater - aggregated]', con=self.conn)
 
-        def add_generic_thermally_intel(master_db, id_count):
-            master_db.loc[id_count, 'Impact category'] = 'Thermally polluted water'
-            master_db.loc[id_count, 'Elem flow unit'] = 'm3'
-            master_db.loc[id_count, 'Native geographical resolution scale'] = 'Global'
-            master_db.loc[id_count, 'MP or Damage'] = 'Damage'
-            master_db.loc[id_count, 'CF unit'] = 'PDF.m2.yr'
-            master_db.loc[id_count, 'Sub-compartment'] = 'in water'
-            master_db.loc[id_count, 'Compartment'] = 'Raw'
-
-        data = db.loc[
-            [i for i in db.index if db.loc[i, 'Elem flow name'] in ['Water, cooling, unspecified natural origin']]]
-        for water_flow in data.index:
-            id_count = len(self.master_db)
-            add_generic_thermally_intel(self.master_db, id_count)
-            self.master_db.loc[id_count, 'Elem flow name'] = data.loc[water_flow, 'Elem flow name']
-            self.master_db.loc[id_count, 'CF value'] = data.loc[water_flow, 'CF value']
+        self.master_db = pd.concat([self.master_db, db.drop('ID', axis=1)])
 
         self.master_db = clean_up_dataframe(self.master_db)
 
@@ -924,6 +909,20 @@ class Parse:
                             (self.master_db.loc[i, 'Impact category'] == 'Climate change, short term' and
                              self.master_db.loc[i, 'Sub-compartment'] == 'low. pop., long-term')], 'CF value'] = 0
 
+    def separate_regio_cfs(self):
+        """
+        Method to obtain two different versions of master_db. One with regionalized factors that will be used for
+        SimaPro and openLCA versions. One with only non regionalized factors that will be used for brightway and
+        ecoinvent versions.
+        """
+
+        self.master_db_not_regio = self.master_db.loc[[i for i in self.master_db.index if
+                                                self.master_db.loc[i, 'Native geographical resolution scale'] not in [
+                                                    'Continent', 'Country', 'Other region']]]
+        # removing " - GLO" from names of flows
+        self.master_db_not_regio.loc[:, 'Elem flow name'] = [i.split(' - GLO')[0] if ' - GLO' in i else i for i in
+                                                        self.master_db_not_regio.loc[:, 'Elem flow name']]
+
     def link_to_ecoinvent(self):
         """
         Function that links names of substance from IW+ to the names of ecoinvent.
@@ -933,7 +932,7 @@ class Parse:
         versions_ei = ['3.5', '3.6', '3.7.1', '3.8']
 
         for version_ei in versions_ei:
-            ei_iw_db = self.master_db.copy()
+            ei_iw_db = self.master_db_not_regio.copy()
 
             # -------------- Mapping substances --------------
 
