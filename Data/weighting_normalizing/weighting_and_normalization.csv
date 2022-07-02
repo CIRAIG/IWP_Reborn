@@ -1,0 +1,47 @@
+Damage category;
+Human health;DALY
+;
+Impact categories;
+Climate change, human health, long term;1.00E+00
+Climate change, human health, short term;1.00E+00
+Human toxicity cancer, long term;1.00E+00
+Human toxicity cancer, short term;1.00E+00
+Human toxicity non-cancer, long term;1.00E+00
+Human toxicity non-cancer, short term;1.00E+00
+Ionizing radiation, human health;1.00E+00
+Ozone layer depletion;1.00E+00
+Particulate matter formation;1.00E+00
+Photochemical oxidant formation;1.00E+00
+Water availability, human health;1.00E+00
+;
+Damage category;
+Ecosystem quality;PDF.m2.yr
+;
+Impact categories;
+Climate change, ecosystem quality, long term;1.00E+00
+Climate change, ecosystem quality, short term;1.00E+00
+Freshwater acidification;1.00E+00
+Freshwater ecotoxicity, long term;1.00E+00
+Freshwater ecotoxicity, short term;1.00E+00
+Freshwater eutrophication;1.00E+00
+Ionizing radiation, ecosystem quality;1.00E+00
+Land occupation, biodiversity;1.00E+00
+Land transformation, biodiversity;1.00E+00
+Marine acidification, long term;1.00E+00
+Marine acidification, short term;1.00E+00
+Marine eutrophication;1.00E+00
+Terrestrial acidification;1.00E+00
+Thermally polluted water;1.00E+00
+Water availability, freshwater ecosystem;1.00E+00
+Water availability, terrestrial ecosystem;1.00E+00
+;
+Normalization-Weighting set;
+IMPACT World+ (Stepwise 2006 values);
+;
+Normalization;
+Human health;1.37E+01
+Ecosystem quality;1.01E-04
+;
+Weighting;
+Human health;5401.459854
+Ecosystem quality;1386.138614
