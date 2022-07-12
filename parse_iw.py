@@ -86,8 +86,9 @@ class Parse:
 
         self.apply_rules()
 
-        self.master_db = self.master_db.sort_values(by=['Impact category', 'Elem flow name'])
-        self.master_db = self.master_db.reset_index().drop('index', axis=1)
+        self.create_not_regio_flows()
+
+        self.order_things_around()
 
         self.separate_regio_cfs()
 
@@ -456,9 +457,10 @@ class Parse:
         for water in other_water:
             df = self.master_db.loc[
                 [i for i in self.master_db.index if (self.master_db.loc[i, 'Impact category'] == 'Water scarcity' and
-                                                     'Water -' in self.master_db.loc[i, 'Elem flow name'] and
-                                                     self.master_db.loc[i, 'Compartment'] == 'Raw')]]
-            df.loc[:, 'Elem flow name'] = [water + ' - ' + i.split(' - ')[1] for i in df.loc[:, 'Elem flow name']]
+                                                     len(self.master_db.loc[i, 'Elem flow name'].split(',')) == 2 and
+                                                     'agri' not in self.master_db.loc[i, 'Elem flow name'] and
+                                                     self.master_db.loc[i,'Compartment'] == 'Raw')]]
+            df.loc[:, 'Elem flow name'] = [water + ', ' + i.split(', ')[1] for i in df.loc[:, 'Elem flow name']]
             self.master_db = pd.concat([self.master_db, df])
             self.master_db = clean_up_dataframe(self.master_db)
 
@@ -489,13 +491,13 @@ class Parse:
         # Water comp
         id_count = len(self.master_db)
         add_generic_water_avail_eq_intel(self.master_db, id_count)
-        self.master_db.loc[id_count, 'Elem flow name'] = 'Water'
+        self.master_db.loc[id_count, 'Elem flow name'] = 'Water, GLO'
         self.master_db.loc[id_count, 'Compartment'] = 'Water'
         self.master_db.loc[id_count, 'CF value'] = - db.loc[:, 'CF value'].median()
         # Raw comp
         id_count += 1
         add_generic_water_avail_eq_intel(self.master_db, id_count)
-        self.master_db.loc[id_count, 'Elem flow name'] = 'Water'
+        self.master_db.loc[id_count, 'Elem flow name'] = 'Water, GLO'
         self.master_db.loc[id_count, 'Compartment'] = 'Raw'
         self.master_db.loc[id_count, 'CF value'] = db.loc[:, 'CF value'].median()
 
@@ -507,11 +509,18 @@ class Parse:
         for water in other_water:
             df = self.master_db.loc[
                 [i for i in self.master_db.index if (self.master_db.loc[i, 'Impact category'] == 'Water availability, freshwater ecosystem' and
-                                                   self.master_db.loc[i, 'Elem flow name'] == 'Water' and
+                                                   self.master_db.loc[i, 'Elem flow name'] == 'Water, GLO' and
                                                    self.master_db.loc[i, 'Compartment'] == 'Raw')]]
-            df.loc[:,'Elem flow name'] = water
+            df.loc[:,'Elem flow name'] = water+', GLO'
             self.master_db = pd.concat([self.master_db,df])
             self.master_db = clean_up_dataframe(self.master_db)
+
+        # remove the flow "Water, GLO" from the "Raw" compartment. It was only there to easily create the other flows
+        self.master_db.drop([i for i in self.master_db.index if (
+                self.master_db.loc[i, 'Impact category'] == 'Water availability, freshwater ecosystem' and
+                self.master_db.loc[i, 'Compartment'] == 'Raw' and
+                self.master_db.loc[i, 'Elem flow name'] == 'Water, GLO'
+        )], inplace=True)
 
         self.master_db = clean_up_dataframe(self.master_db)
 
@@ -548,7 +557,7 @@ class Parse:
             self.master_db.loc[id_count, 'Compartment'] = 'Water'
             self.master_db.loc[id_count, 'Sub-compartment'] = '(unspecified)'
             self.master_db.loc[id_count, 'Elem flow name'] = 'Water' + ', ' + data.loc[i, 'Region code']
-            self.master_db.loc[id_count, 'CF value'] = data.loc[i, 'Weighted Average']
+            self.master_db.loc[id_count, 'CF value'] = -data.loc[i, 'Weighted Average']
 
         # Water comp / lake subcomp
         data = db.loc[[i for i in db.index if db.loc[i, 'Elem flow'] == 'Surface']]
@@ -559,7 +568,7 @@ class Parse:
             self.master_db.loc[id_count, 'Compartment'] = 'Water'
             self.master_db.loc[id_count, 'Sub-compartment'] = 'lake'
             self.master_db.loc[id_count, 'Elem flow name'] = 'Water' + ', ' + data.loc[i, 'Region code']
-            self.master_db.loc[id_count, 'CF value'] = data.loc[i, 'Weighted Average']
+            self.master_db.loc[id_count, 'CF value'] = -data.loc[i, 'Weighted Average']
 
         # Water comp / river subcomp
         data = db.loc[[i for i in db.index if db.loc[i, 'Elem flow'] == 'Surface']]
@@ -570,7 +579,7 @@ class Parse:
             self.master_db.loc[id_count, 'Compartment'] = 'Water'
             self.master_db.loc[id_count, 'Sub-compartment'] = 'river'
             self.master_db.loc[id_count, 'Elem flow name'] = 'Water' + ', ' + data.loc[i, 'Region code']
-            self.master_db.loc[id_count, 'CF value'] = data.loc[i, 'Weighted Average']
+            self.master_db.loc[id_count, 'CF value'] = -data.loc[i, 'Weighted Average']
 
         # Water comp / groundwater subcomp
         data = db.loc[[i for i in db.index if db.loc[i, 'Elem flow'] == 'Ground']]
@@ -581,7 +590,7 @@ class Parse:
             self.master_db.loc[id_count, 'Compartment'] = 'Water'
             self.master_db.loc[id_count, 'Sub-compartment'] = 'groundwater'
             self.master_db.loc[id_count, 'Elem flow name'] = 'Water' + ', ' + data.loc[i, 'Region code']
-            self.master_db.loc[id_count, 'CF value'] = data.loc[i, 'Weighted Average']
+            self.master_db.loc[id_count, 'CF value'] = -data.loc[i, 'Weighted Average']
 
         # Raw comp / unspecified water
         data = db.loc[[i for i in db.index if db.loc[i, 'Elem flow'] == 'Unknown']]
@@ -615,6 +624,17 @@ class Parse:
             self.master_db.loc[id_count, 'Compartment'] = 'Raw'
             self.master_db.loc[id_count, 'Sub-compartment'] = '(unspecified)'
             self.master_db.loc[id_count, 'Elem flow name'] = 'Water, river' + ', ' + data.loc[i, 'Region code']
+            self.master_db.loc[id_count, 'CF value'] = data.loc[i, 'Weighted Average']
+
+        # Raw comp / cooling, unspecified natural origin water
+        data = db.loc[[i for i in db.index if db.loc[i, 'Elem flow'] == 'Surface']]
+        for i in data.index:
+            id_count = len(self.master_db)
+            add_generic_water_avai_hh_intel(self.master_db, id_count)
+            self.master_db.loc[id_count, 'Native geographical resolution scale'] = data.loc[i, 'Resolution']
+            self.master_db.loc[id_count, 'Compartment'] = 'Raw'
+            self.master_db.loc[id_count, 'Sub-compartment'] = '(unspecified)'
+            self.master_db.loc[id_count, 'Elem flow name'] = 'Water, cooling, unspecified natural origin' + ', ' + data.loc[i, 'Region code']
             self.master_db.loc[id_count, 'CF value'] = data.loc[i, 'Weighted Average']
 
         # Raw comp / well water
@@ -923,6 +943,37 @@ class Parse:
                             (self.master_db.loc[i, 'Impact category'] == 'Climate change, short term' and
                              self.master_db.loc[i, 'Sub-compartment'] == 'low. pop., long-term')], 'CF value'] = 0
 
+    def create_not_regio_flows(self):
+        """
+        Method creates not regionalized flows (e.g., "Ammonia") from global values (e.g., "Ammonia, GLO"). Those flows
+        are necessary for linkage to databases accepting regionalized flows, such as SimaPro.
+        :return:
+        """
+
+        global_values = [i for i in self.master_db.index if ', GLO' in
+                         self.master_db.loc[i, 'Elem flow name']]
+        df = self.master_db.loc[global_values]
+        df['Elem flow name'] = [i.split(', GLO')[0] for i in df['Elem flow name']]
+        self.master_db = pd.concat([self.master_db, df])
+        self.master_db = clean_up_dataframe(self.master_db)
+
+    def order_things_around(self):
+        """
+        Simple method ordering the rows how we want them to appear, i.e., grouping midpoints together, DALY together
+        and PDF together.
+        :return:
+        """
+
+        self.master_db = self.master_db.sort_values(by=['Impact category', 'Elem flow name'])
+        self.master_db = self.master_db.reset_index().drop('index', axis=1)
+
+        DALY = self.master_db.loc[[i for i in self.master_db.index if self.master_db.loc[i, 'CF unit'] == 'DALY']]
+        PDF = self.master_db.loc[[i for i in self.master_db.index if self.master_db.loc[i, 'CF unit'] == 'PDF.m2.yr']]
+        MP = self.master_db.loc[
+            [i for i in self.master_db.index if self.master_db.loc[i, 'MP or Damage'] == 'Midpoint']]
+
+        self.master_db = clean_up_dataframe(pd.concat([MP, DALY, PDF]))
+
     def separate_regio_cfs(self):
         """
         Method to obtain two different versions of master_db. One with regionalized factors that will be used for
@@ -932,10 +983,11 @@ class Parse:
 
         self.master_db_not_regio = self.master_db.loc[[i for i in self.master_db.index if
                                                 self.master_db.loc[i, 'Native geographical resolution scale'] not in [
-                                                    'Continent', 'Country', 'Other region']]]
-        # removing " - GLO" from names of flows
-        self.master_db_not_regio.loc[:, 'Elem flow name'] = [i.split(' - GLO')[0] if ' - GLO' in i else i for i in
-                                                        self.master_db_not_regio.loc[:, 'Elem flow name']]
+                                                    'Continent', 'Country', 'Other region']]].copy()
+
+        # dropping flow names with ", GLO" in them
+        self.master_db_not_regio.drop([i for i in self.master_db_not_regio.index if ', GLO' in
+                                       self.master_db_not_regio.loc[i, 'Elem flow name']], inplace=True)
 
     def link_to_ecoinvent(self):
         """
@@ -1166,8 +1218,10 @@ class Parse:
         # SP does not like the "remote" subcomp of IW+ for particulate matter
         self.iw_sp.drop([i for i in self.iw_sp.index if self.iw_sp.loc[i, 'Sub-compartment'] == 'remote'], inplace=True)
 
-        # "Water" is a reserved name in SimaPro it seems, so we modify it
+        # Some water names are reserved names in SimaPro, so we modify it
         self.iw_sp.loc[self.iw_sp['Elem flow name'] == 'Water', 'Elem flow name'] = 'Water/m3'
+        self.iw_sp.loc[self.iw_sp['Elem flow name'] == 'Water, agri', 'Elem flow name'] = 'Water, agri/m3'
+        self.iw_sp.loc[self.iw_sp['Elem flow name'] == 'Water, non-agri', 'Elem flow name'] = 'Water, non-agri/m3'
 
         # now apply the mapping with the different SP flow names
         sp = pd.read_excel('C:/Users/11max/PycharmProjects/IW_Reborn/Data/mappings/SP/sp_mapping.xlsx').dropna()
