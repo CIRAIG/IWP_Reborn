@@ -488,39 +488,27 @@ class Parse:
             master_db.loc[id_count, 'Elem flow unit'] = 'm3'
             master_db.loc[id_count, 'Sub-compartment'] = '(unspecified)'
 
-        # Water comp
-        id_count = len(self.master_db)
-        add_generic_water_avail_eq_intel(self.master_db, id_count)
-        self.master_db.loc[id_count, 'Elem flow name'] = 'Water, GLO'
-        self.master_db.loc[id_count, 'Compartment'] = 'Water'
-        self.master_db.loc[id_count, 'CF value'] = - db.loc[:, 'CF value'].median()
-        # Raw comp
-        id_count += 1
-        add_generic_water_avail_eq_intel(self.master_db, id_count)
-        self.master_db.loc[id_count, 'Elem flow name'] = 'Water, GLO'
-        self.master_db.loc[id_count, 'Compartment'] = 'Raw'
-        self.master_db.loc[id_count, 'CF value'] = db.loc[:, 'CF value'].median()
-
-        self.master_db = clean_up_dataframe(self.master_db)
+        with open(pkg_resources.resource_filename(__name__, '/Data/geographies_water.json'), 'r') as f:
+            regions = json.load(f)
 
         # creating the other water flows from the default water flow
-        other_water = ['Water, lake','Water, river','Water, unspecified natural origin',
-                       'Water, well, in ground','Water, cooling, unspecified natural origin']
-        for water in other_water:
-            df = self.master_db.loc[
-                [i for i in self.master_db.index if (self.master_db.loc[i, 'Impact category'] == 'Water availability, freshwater ecosystem' and
-                                                   self.master_db.loc[i, 'Elem flow name'] == 'Water, GLO' and
-                                                   self.master_db.loc[i, 'Compartment'] == 'Raw')]]
-            df.loc[:,'Elem flow name'] = water+', GLO'
-            self.master_db = pd.concat([self.master_db,df])
-            self.master_db = clean_up_dataframe(self.master_db)
+        other_water = ['Water, lake', 'Water, river', 'Water, unspecified natural origin',
+                       'Water, well, in ground', 'Water, cooling, unspecified natural origin']
 
-        # remove the flow "Water, GLO" from the "Raw" compartment. It was only there to easily create the other flows
-        self.master_db.drop([i for i in self.master_db.index if (
-                self.master_db.loc[i, 'Impact category'] == 'Water availability, freshwater ecosystem' and
-                self.master_db.loc[i, 'Compartment'] == 'Raw' and
-                self.master_db.loc[i, 'Elem flow name'] == 'Water, GLO'
-        )], inplace=True)
+        for region in regions:
+            # Water comp
+            id_count = len(self.master_db)
+            add_generic_water_avail_eq_intel(self.master_db, id_count)
+            self.master_db.loc[id_count, 'Elem flow name'] = 'Water, ' + region
+            self.master_db.loc[id_count, 'Compartment'] = 'Water'
+            self.master_db.loc[id_count, 'CF value'] = - db.loc[:, 'CF value'].median()
+            for water in other_water:
+                # Raw comp
+                id_count = len(self.master_db)
+                add_generic_water_avail_eq_intel(self.master_db, id_count)
+                self.master_db.loc[id_count, 'Elem flow name'] = water + ', ' + region
+                self.master_db.loc[id_count, 'Compartment'] = 'Raw'
+                self.master_db.loc[id_count, 'CF value'] = db.loc[:, 'CF value'].median()
 
         self.master_db = clean_up_dataframe(self.master_db)
 
