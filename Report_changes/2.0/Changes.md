@@ -1,11 +1,12 @@
 ## Long term emissions and impact categories
-With IW+2.0, we applied our new vision for the relation between short/long-term emissions/impact categories.
+With IW+2.0, we properly applied our vision for the relation between short/long-term emissions/impact categories. In 
+previous versions, the implementation was not done correctly.
 
-In IW+, there are some damage categories which are split between short and long term: Climate change (both human health
+In IW+, there are some **_damage_** categories which are split between short and long term: Climate change (both human health
 and ecosystem quality), freshwater ecotoxicity, human toxicity (both cancer and non cancer) and marine acidification. 
-100 years is the period chosen to differentiate between short and long term. A total impact on one of these damage 
-categories is therefore split between the short and long term versions of the damage category as shown in the picture 
-below.
+Midpoint categories are not split between short and long term impact. <br> 100 years is the period chosen to differentiate 
+between short and long term. <br>A total impact on one of these damage categories is therefore split between the short and 
+long term versions of the damage category as shown in the picture below.
 
 ![image](images/short_term_emission.png)
 
@@ -28,7 +29,7 @@ fixed to be equal to the short term impact counterpart, i.e., instead of being 3
 
 ## Metal emissions in groundwater
 Metal emissions emitted directly to the groundwater sub-compartments were not properly all fixed to zero. Now they all 
-are.
+are which is coherent with the modeling approach taken with other impact categories and emissions.
 
 ## Marine eutrophication - air emissions
 Some emissions in the air were not characterized and many sub-compartments were missing. For missing sub-compartments,
@@ -39,7 +40,7 @@ Values for the land flows: annual crops, permanent crops and agriculture (mosaic
 
 ## Water impact categories new flows
 Many regionalized flows for water impact categories were added for new sub-regions covered in ecoinvent such as CN-AH or
-IN-AP.
+IN-AP. These values were taken equal with the national value, i.e., the CF for CN-AH is equal to the CF for CN.
 
 ## Detailed changes
 For the complete list of changes between version 1.31/1.49 and version 2, refer to the file SimaPro_version.xlsx.
