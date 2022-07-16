@@ -1257,8 +1257,8 @@ class Parse:
 
         # Some water names are reserved names in SimaPro, so we modify it
         self.iw_sp.loc[self.iw_sp['Elem flow name'] == 'Water', 'Elem flow name'] = 'Water/m3'
-        self.iw_sp.loc[self.iw_sp['Elem flow name'] == 'Water, agri', 'Elem flow name'] = 'Water, agri/m3'
-        self.iw_sp.loc[self.iw_sp['Elem flow name'] == 'Water, non-agri', 'Elem flow name'] = 'Water, non-agri/m3'
+        self.iw_sp.loc[self.iw_sp['Elem flow name'] == 'Water, agri', 'Elem flow name'] = 'Water/m3, agri'
+        self.iw_sp.loc[self.iw_sp['Elem flow name'] == 'Water, non-agri', 'Elem flow name'] = 'Water/m3, non-agri'
 
         # now apply the mapping with the different SP flow names
         sp = pd.read_excel('C:/Users/11max/PycharmProjects/IW_Reborn/Data/mappings/SP/sp_mapping.xlsx').dropna()
@@ -1274,6 +1274,13 @@ class Parse:
                 df = df[df['Impact category'] == 'Mineral resources use']
                 df.loc[:, 'Elem flow name'] = sp.loc[diff, 'SimaPro flows']
                 self.iw_sp = pd.concat([self.iw_sp, df])
+        self.iw_sp = clean_up_dataframe(self.iw_sp)
+
+        # need an unspecified subcomp for mineral resource uses, for some databases in SP (e.g., Industry2.0)
+        df = self.iw_sp.loc[
+            [i for i in self.iw_sp.index if self.iw_sp.loc[i, 'Impact category'] == 'Mineral resources use']].copy()
+        df['Sub-compartment'] = '(unspecified)'
+        self.iw_sp = pd.concat([self.iw_sp, df])
         self.iw_sp = clean_up_dataframe(self.iw_sp)
 
         # add some flows from SP that require conversions because of units
