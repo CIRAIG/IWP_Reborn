@@ -466,6 +466,15 @@ class Parse:
 
         self.master_db = clean_up_dataframe(self.master_db)
 
+        # add the RoW geography based on the Global value
+        df = self.master_db.loc[
+            [i for i in self.master_db.index if (self.master_db.loc[i, 'Impact category'] == 'Water scarcity' and
+                                                 'GLO' in self.master_db.loc[i, 'Elem flow name'])]]
+        df['Elem flow name'] = [i.split(', GLO')[0] + ', RoW' for i in df['Elem flow name']]
+        df['Native geographical resolution scale'] = 'Other region'
+        self.master_db = pd.concat([self.master_db, df])
+        self.master_db = clean_up_dataframe(self.master_db)
+
     def load_water_availability_eq_cfs(self):
         """
         Load CFs for water availability freshwater ecosystem.
@@ -510,6 +519,16 @@ class Parse:
                 self.master_db.loc[id_count, 'Compartment'] = 'Raw'
                 self.master_db.loc[id_count, 'CF value'] = db.loc[:, 'CF value'].median()
 
+        self.master_db = clean_up_dataframe(self.master_db)
+
+        # add the RoW geography based on the Global value
+        df = self.master_db.loc[
+            [i for i in self.master_db.index if (self.master_db.loc[i, 'Impact category'] ==
+                                                 'Water availability, freshwater ecosystem' and
+                                                 'GLO' in self.master_db.loc[i, 'Elem flow name'])]]
+        df['Elem flow name'] = [i.split(', GLO')[0] + ', RoW' for i in df['Elem flow name']]
+        df['Native geographical resolution scale'] = 'Other region'
+        self.master_db = pd.concat([self.master_db, df])
         self.master_db = clean_up_dataframe(self.master_db)
 
     def load_water_availability_hh_cfs(self):
@@ -640,6 +659,16 @@ class Parse:
         # drop NaN values
         self.master_db.dropna(subset=['CF value'], inplace=True)
 
+        # add the RoW geography based on the Global value
+        df = self.master_db.loc[
+            [i for i in self.master_db.index if (self.master_db.loc[i, 'Impact category'] ==
+                                                 'Water availability, human health' and
+                                                 'GLO' in self.master_db.loc[i, 'Elem flow name'])]]
+        df['Elem flow name'] = [i.split(', GLO')[0] + ', RoW' for i in df['Elem flow name']]
+        df['Native geographical resolution scale'] = 'Other region'
+        self.master_db = pd.concat([self.master_db, df])
+        self.master_db = clean_up_dataframe(self.master_db)
+
     def load_water_availability_terr_cfs(self):
         """
         Load CFs for water availability terrestrial ecosystem.
@@ -656,6 +685,16 @@ class Parse:
 
         self.master_db = clean_up_dataframe(self.master_db)
 
+        # add the RoW geography based on the Global value
+        df = self.master_db.loc[
+            [i for i in self.master_db.index if (self.master_db.loc[i, 'Impact category'] ==
+                                                 'Water availability, freshwater ecosystem' and
+                                                 'GLO' in self.master_db.loc[i, 'Elem flow name'])]]
+        df['Elem flow name'] = [i.split(', GLO')[0] + ', RoW' for i in df['Elem flow name']]
+        df['Native geographical resolution scale'] = 'Other region'
+        self.master_db = pd.concat([self.master_db, df])
+        self.master_db = clean_up_dataframe(self.master_db)
+
     def load_thermally_polluted_water_cfs(self):
         """
         Load CFs for thermally polluted water.
@@ -670,6 +709,16 @@ class Parse:
 
         self.master_db = pd.concat([self.master_db, db.drop('ID', axis=1)])
 
+        self.master_db = clean_up_dataframe(self.master_db)
+
+        # add the RoW geography based on the Global value
+        df = self.master_db.loc[
+            [i for i in self.master_db.index if (self.master_db.loc[i, 'Impact category'] ==
+                                                 'Water availability, freshwater ecosystem' and
+                                                 'GLO' in self.master_db.loc[i, 'Elem flow name'])]]
+        df['Elem flow name'] = [i.split(', GLO')[0] + ', RoW' for i in df['Elem flow name']]
+        df['Native geographical resolution scale'] = 'Other region'
+        self.master_db = pd.concat([self.master_db, df])
         self.master_db = clean_up_dataframe(self.master_db)
 
     def apply_rules(self):
