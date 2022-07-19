@@ -975,9 +975,10 @@ class Parse:
             # clean up index
             self.master_db = clean_up_dataframe(self.master_db)
 
-        # special case climate change, short term, i.e., the only short term impact category at midpoint
+        # special case climate change, short and long term midpoint which both span only on 100 years (so they are both short term actually)
         self.master_db.loc[[i for i in self.master_db.index if
-                            (self.master_db.loc[i, 'Impact category'] == 'Climate change, short term' and
+                            (self.master_db.loc[i, 'Impact category'] in ['Climate change, short term',
+                                                                          'Climate change, long term'] and
                              self.master_db.loc[i, 'Sub-compartment'] == 'low. pop., long-term')], 'CF value'] = 0
 
         # special case from/to soil or biomass flows should only be defined for short term damage categories so
