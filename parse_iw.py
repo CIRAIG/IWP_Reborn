@@ -836,9 +836,9 @@ class Parse:
                                    'Human toxicity cancer',
                                    'Human toxicity cancer, long term',
                                    'Human toxicity cancer, short term',
-                                   'Human toxicity non cancer',
-                                   'Human toxicity non cancer, long term',
-                                   'Human toxicity non cancer, short term',
+                                   'Human toxicity non-cancer',
+                                   'Human toxicity non-cancer, long term',
+                                   'Human toxicity non-cancer, short term',
                                    'Ionizing radiation, ecosystem quality',
                                    'Ionizing radiation, human health',
                                    'Ionizing radiations',
@@ -850,9 +850,9 @@ class Parse:
                                               'Human toxicity cancer',
                                               'Human toxicity cancer, long term',
                                               'Human toxicity cancer, short term',
-                                              'Human toxicity non cancer',
-                                              'Human toxicity non cancer, long term',
-                                              'Human toxicity non cancer, short term',
+                                              'Human toxicity non-cancer',
+                                              'Human toxicity non-cancer, long term',
+                                              'Human toxicity non-cancer, short term',
                                               'Ionizing radiation, ecosystem quality',
                                               'Ionizing radiation, human health',
                                               'Ionizing radiations',
@@ -864,9 +864,9 @@ class Parse:
                              'Human toxicity cancer',
                              'Human toxicity cancer, long term',
                              'Human toxicity cancer, short term',
-                             'Human toxicity non cancer',
-                             'Human toxicity non cancer, long term',
-                             'Human toxicity non cancer, short term',
+                             'Human toxicity non-cancer',
+                             'Human toxicity non-cancer, long term',
+                             'Human toxicity non-cancer, short term',
                              'Water availability, freshwater ecosystem',
                              'Water availability, human health',
                              'Water scarcity']}
@@ -979,6 +979,15 @@ class Parse:
         self.master_db.loc[[i for i in self.master_db.index if
                             (self.master_db.loc[i, 'Impact category'] == 'Climate change, short term' and
                              self.master_db.loc[i, 'Sub-compartment'] == 'low. pop., long-term')], 'CF value'] = 0
+
+        # special case from/to soil or biomass flows should only be defined for short term damage categories so
+        # remove the low. pop., long-term flow for them
+        self.master_db = self.master_db.drop([i for i in self.master_db.index if (
+                "soil or biomass" in self.master_db.loc[i,'Elem flow name'] and
+                self.master_db.loc[i,'Impact category'] in [
+                    'Climate change, ecosystem quality, long term',
+                    'Climate change, human health, long term',
+                    'Marine acidification, long term'])])
 
     def create_not_regio_flows(self):
         """
@@ -1146,6 +1155,18 @@ class Parse:
                          'CF value','Elem flow unit', 'MP or Damage', 'Native geographical resolution scale']).T
                     ei_iw_db = pd.concat([ei_iw_db, add])
                     ei_iw_db = clean_up_dataframe(ei_iw_db)
+
+            # remove from soil/biomass flows from long term impact categories (they're there because of the mapping)
+            ei_iw_db = ei_iw_db.drop([i for i in ei_iw_db.index if (
+                    "soil or biomass" in ei_iw_db.loc[i, 'Elem flow name'] and
+                    ei_iw_db.loc[i, 'Impact category'] in [
+                        'Climate change, ecosystem quality, long term',
+                        'Climate change, human health, long term',
+                        'Marine acidification, long term'])])
+            # also remove methane, from soil or biomass from resources
+            ei_iw_db = ei_iw_db.drop([i for i in ei_iw_db.index if (
+                    "Methane, from soil or biomass stock" == ei_iw_db.loc[i, 'Elem flow name'] and
+                    ei_iw_db.loc[i, 'Impact category'] == "Fossil and nuclear energy use")])
 
             if version_ei == '3.5':
                 self.ei35_iw = ei_iw_db
