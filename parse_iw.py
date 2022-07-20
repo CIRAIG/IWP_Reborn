@@ -79,19 +79,19 @@ class Parse:
         self.load_land_use_cfs()
         self.load_particulates_cfs()
         self.load_water_scarcity_cfs()
-        self.load_water_availability_eq_cfs()
-        self.load_water_availability_hh_cfs()
-        self.load_water_availability_terr_cfs()
-        self.load_thermally_polluted_water_cfs()
-
-        self.apply_rules()
-
-        self.create_not_regio_flows()
-        self.create_regio_flows_for_not_regio_ic()
-
-        self.order_things_around()
-
-        self.separate_regio_cfs()
+        # self.load_water_availability_eq_cfs()
+        # self.load_water_availability_hh_cfs()
+        # self.load_water_availability_terr_cfs()
+        # self.load_thermally_polluted_water_cfs()
+        #
+        # self.apply_rules()
+        #
+        # self.create_not_regio_flows()
+        # self.create_regio_flows_for_not_regio_ic()
+        #
+        # self.order_things_around()
+        #
+        # self.separate_regio_cfs()
 
     def load_basic_cfs(self):
         """
@@ -689,7 +689,7 @@ class Parse:
         # add the RoW geography based on the Global value
         df = self.master_db.loc[
             [i for i in self.master_db.index if (self.master_db.loc[i, 'Impact category'] ==
-                                                 'Water availability, freshwater ecosystem' and
+                                                 'Water availability, terrestrial ecosystem' and
                                                  'GLO' in self.master_db.loc[i, 'Elem flow name'])]]
         df['Elem flow name'] = [i.split(', GLO')[0] + ', RoW' for i in df['Elem flow name']]
         df['Native geographical resolution scale'] = 'Other region'
@@ -715,7 +715,7 @@ class Parse:
         # add the RoW geography based on the Global value
         df = self.master_db.loc[
             [i for i in self.master_db.index if (self.master_db.loc[i, 'Impact category'] ==
-                                                 'Water availability, freshwater ecosystem' and
+                                                 'Thermally polluted water' and
                                                  'GLO' in self.master_db.loc[i, 'Elem flow name'])]]
         df['Elem flow name'] = [i.split(', GLO')[0] + ', RoW' for i in df['Elem flow name']]
         df['Native geographical resolution scale'] = 'Other region'
@@ -1321,10 +1321,16 @@ class Parse:
 
             if ei_in_bw.loc[[ic], 'MP or Damage'].iloc[0] == 'Midpoint':
                 mid_end = 'Midpoint'
+                # create the name of the method
+                name = ('IMPACT World+ ' + mid_end + ' ' + self.version, 'Midpoint', ic[0])
             else:
                 mid_end = 'Damage'
-            # create the name of the method
-            name = ('IMPACT World+ ' + mid_end + ' ' + self.version, ic[0])
+                # create the name of the method
+                if ic[1] == 'DALY':
+                    name = ('IMPACT World+ ' + mid_end + ' ' + self.version, 'Human health', ic[0])
+                else:
+                    name = ('IMPACT World+ ' + mid_end + ' ' + self.version, 'Ecosystem quality', ic[0])
+
             # initialize the "Method" method
             new_method = bw2.Method(name)
             # register the new method
