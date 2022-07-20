@@ -87,6 +87,7 @@ class Parse:
         self.apply_rules()
 
         self.create_not_regio_flows()
+        self.create_regio_flows_for_not_regio_ic()
 
         self.order_things_around()
 
@@ -634,7 +635,7 @@ class Parse:
             self.master_db.loc[id_count, 'CF value'] = data.loc[i, 'Weighted Average']
 
         # Raw comp / cooling, unspecified natural origin water
-        data = db.loc[[i for i in db.index if db.loc[i, 'Elem flow'] == 'Surface']]
+        data = db.loc[[i for i in db.index if db.loc[i, 'Elem flow'] == 'Unknown']]
         for i in data.index:
             id_count = len(self.master_db)
             add_generic_water_avai_hh_intel(self.master_db, id_count)
@@ -870,17 +871,28 @@ class Parse:
                              'Water availability, freshwater ecosystem',
                              'Water availability, human health',
                              'Water scarcity']}
+        # if an impact category already has specified groundwater flows, use that value instead of the unspecified subcomp value
+        already_has_groundwater_values = set(
+            water_comp[water_comp['Sub-compartment'] == 'groundwater']['Impact category'])
+
         for subcomp in to_unspecified:
             for cat in to_unspecified[subcomp]:
-                data = water_comp.loc[[i for i in water_comp.index if (water_comp.loc[i, 'Impact category'] == cat and
-                                                                       water_comp.loc[
-                                                                           i, 'Sub-compartment'] == '(unspecified)')]]
+                if cat not in already_has_groundwater_values:
+                    data = water_comp.loc[
+                        [i for i in water_comp.index if (water_comp.loc[i, 'Impact category'] == cat and
+                                                         water_comp.loc[
+                                                             i, 'Sub-compartment'] == '(unspecified)')]]
+                else:
+                    data = water_comp.loc[
+                        [i for i in water_comp.index if (water_comp.loc[i, 'Impact category'] == cat and
+                                                         water_comp.loc[
+                                                             i, 'Sub-compartment'] == 'groundwater')]]
                 proxy = data.copy()
                 proxy.loc[:, 'Sub-compartment'] = subcomp
                 proxy.set_index(['Impact category', 'CF unit', 'Compartment', 'Sub-compartment', 'Elem flow name'],
                                 inplace=True)
                 proxy.update(self.master_db.set_index(['Impact category', 'CF unit', 'Compartment',
-                                                  'Sub-compartment', 'Elem flow name']))
+                                                       'Sub-compartment', 'Elem flow name']))
                 proxy = proxy.reset_index()
                 self.master_db = pd.concat([self.master_db, proxy]).drop_duplicates()
                 self.master_db = clean_up_dataframe(self.master_db)
@@ -975,6 +987,8 @@ class Parse:
             # clean up index
             self.master_db = clean_up_dataframe(self.master_db)
 
+        # ----------------- Special cases --------------------
+
         # special case climate change, short and long term midpoint which both span only on 100 years (so they are both short term actually)
         self.master_db.loc[[i for i in self.master_db.index if
                             (self.master_db.loc[i, 'Impact category'] in ['Climate change, short term',
@@ -990,6 +1004,19 @@ class Parse:
                     'Climate change, human health, long term',
                     'Marine acidification, long term'])])
 
+        # add zero flows for saline water to make it explicit for the user
+        df = self.master_db[self.master_db['Elem flow name'] == 'Water, lake'].copy()
+        df['Elem flow name'] = 'Water, salt, ocean'
+        df['CF value'] = 0
+        self.master_db = pd.concat([self.master_db, df])
+        self.master_db = clean_up_dataframe(self.master_db)
+        # add zero flows for saline water to make it explicit for the user
+        df = self.master_db[self.master_db['Elem flow name'] == 'Water, lake'].copy()
+        df['Elem flow name'] = 'Water, salt, sole'
+        df['CF value'] = 0
+        self.master_db = pd.concat([self.master_db, df])
+        self.master_db = clean_up_dataframe(self.master_db)
+
     def create_not_regio_flows(self):
         """
         Method creates not regionalized flows (e.g., "Ammonia") from global values (e.g., "Ammonia, GLO"). Those flows
@@ -1003,6 +1030,57 @@ class Parse:
         df['Elem flow name'] = [i.split(', GLO')[0] for i in df['Elem flow name']]
         self.master_db = pd.concat([self.master_db, df])
         self.master_db = clean_up_dataframe(self.master_db)
+
+    def create_regio_flows_for_not_regio_ic(self):
+        """
+        Some regionalized emissions (e.g., Ammonia) also impact non-regionalized impact categories (e.g.,
+        Particulate matter). Hence, this method create non-regionalized CFs for these emissions.
+        :return:
+        """
+
+        # identify regionalized flows, regions and impact categories
+
+        regio_flows = set([', '.join(i.split(', ')[:-1]) for i
+                           in self.master_db[self.master_db['Native geographical resolution scale'] == 'Country'].loc[
+                                                                  :, 'Elem flow name']])
+
+        regio_regions = set([i.split(', ')[-1] for i
+                             in self.master_db[self.master_db['Native geographical resolution scale'] == 'Country'].loc[:,
+                                                        'Elem flow name']])
+
+        regio_ic = set(
+            self.master_db[self.master_db['Native geographical resolution scale'] == 'Country'].loc[:, 'Impact category'])
+
+        # identify which regionalized flows need to be characterized for non-regionalized imapct categories
+
+        flows_to_create = {}
+
+        for ic in set(self.master_db.loc[:, 'Impact category']):
+            if ic not in regio_ic:
+                df = self.master_db[self.master_db['Impact category'] == ic].copy()
+                for flow in regio_flows:
+                    if flow in df['Elem flow name'].tolist():
+                        # if the CF is equal to zero we don't care
+                        if df.loc[[i for i in df.index if (df.loc[i, 'Elem flow name'] == flow and
+                                                           df.loc[i, 'Impact category'] == ic)], 'CF value'].sum() != 0:
+                            if ic in flows_to_create.keys():
+                                flows_to_create[ic].append(flow)
+                            else:
+                                flows_to_create[ic] = [flow]
+
+        # create CF for the previously identified flows
+
+        for ic in flows_to_create.keys():
+            df = self.master_db[self.master_db['Impact category'] == ic].copy()
+            for flow in flows_to_create[ic]:
+                dff = df[df['Elem flow name'] == flow]
+                list_flow_added = ([flow + ', ' + i for i in regio_regions] * len(dff))
+                list_flow_added.sort()
+                dff = pd.concat([dff] * (len(regio_regions)))
+                dff['Elem flow name'] = list_flow_added
+
+                self.master_db = pd.concat([self.master_db, dff])
+                self.master_db = clean_up_dataframe(self.master_db)
 
     def order_things_around(self):
         """
@@ -1157,17 +1235,17 @@ class Parse:
                     ei_iw_db = pd.concat([ei_iw_db, add])
                     ei_iw_db = clean_up_dataframe(ei_iw_db)
 
-            # remove from soil/biomass flows from long term impact categories (they're there because of the mapping)
-            ei_iw_db = ei_iw_db.drop([i for i in ei_iw_db.index if (
+            # fix to 0 "from soil/biomass" flows from long term impact categories
+            ei_iw_db.loc[[i for i in ei_iw_db.index if (
                     "soil or biomass" in ei_iw_db.loc[i, 'Elem flow name'] and
                     ei_iw_db.loc[i, 'Impact category'] in [
                         'Climate change, ecosystem quality, long term',
                         'Climate change, human health, long term',
-                        'Marine acidification, long term'])])
-            # also remove methane, from soil or biomass from resources
-            ei_iw_db = ei_iw_db.drop([i for i in ei_iw_db.index if (
+                        'Marine acidification, long term'])]] = 0
+            # same for "methane, from soil or biomass" from resources
+            ei_iw_db.loc[[i for i in ei_iw_db.index if (
                     "Methane, from soil or biomass stock" == ei_iw_db.loc[i, 'Elem flow name'] and
-                    ei_iw_db.loc[i, 'Impact category'] == "Fossil and nuclear energy use")])
+                    ei_iw_db.loc[i, 'Impact category'] == "Fossil and nuclear energy use")]] = 0
 
             if version_ei == '3.5':
                 self.ei35_iw = ei_iw_db
