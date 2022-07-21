@@ -79,19 +79,19 @@ class Parse:
         self.load_land_use_cfs()
         self.load_particulates_cfs()
         self.load_water_scarcity_cfs()
-        # self.load_water_availability_eq_cfs()
-        # self.load_water_availability_hh_cfs()
-        # self.load_water_availability_terr_cfs()
-        # self.load_thermally_polluted_water_cfs()
-        #
-        # self.apply_rules()
-        #
-        # self.create_not_regio_flows()
-        # self.create_regio_flows_for_not_regio_ic()
-        #
-        # self.order_things_around()
-        #
-        # self.separate_regio_cfs()
+        self.load_water_availability_eq_cfs()
+        self.load_water_availability_hh_cfs()
+        self.load_water_availability_terr_cfs()
+        self.load_thermally_polluted_water_cfs()
+
+        self.apply_rules()
+
+        self.create_not_regio_flows()
+        self.create_regio_flows_for_not_regio_ic()
+
+        self.order_things_around()
+
+        self.separate_regio_cfs()
 
     def load_basic_cfs(self):
         """
@@ -1556,7 +1556,8 @@ class Parse:
             midpoint_values.append([j, d_ic_unit[j], '', '', '', ''])
             midpoint_values.append(['', '', '', '', '', ''])
             midpoint_values.append(['Substances', '', '', '', '', ''])
-            df = self.iw_sp[self.iw_sp['Impact category'] == j][self.iw_sp['CF unit'] == d_ic_unit[j]]
+            df = self.iw_sp[self.iw_sp['Impact category'] == j]
+            df = df[df['CF unit'] == d_ic_unit[j]]
             df = df[['Compartment', 'Sub-compartment', 'Elem flow name', 'CAS number', 'CF value', 'Elem flow unit']]
             for i in df.index:
                 if type(df.loc[i, 'CAS number']) == float:
@@ -1574,7 +1575,8 @@ class Parse:
             damage_values.append([j, d_ic_unit[j], '', '', '', ''])
             damage_values.append(['', '', '', '', '', ''])
             damage_values.append(['Substances', '', '', '', '', ''])
-            df = self.iw_sp[self.iw_sp['Impact category'] == j][self.iw_sp['CF unit'] == d_ic_unit[j]]
+            df = self.iw_sp[self.iw_sp['Impact category'] == j]
+            df = df[df['CF unit'] == d_ic_unit[j]]
             df = df[['Compartment', 'Sub-compartment', 'Elem flow name', 'CAS number', 'CF value', 'Elem flow unit']]
             for i in df.index:
                 if type(df.loc[i, 'CAS number']) == float:
