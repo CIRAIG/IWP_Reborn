@@ -32,6 +32,7 @@ import bw2io
 import datetime
 from datetime import datetime
 import csv
+import warnings
 
 class Parse:
     def __init__(self, path_access_db, version, bw2_project=None):
@@ -42,13 +43,46 @@ class Parse:
 
         Object instance variables:
         -------------------------
-            - master_db : the master dataframe where CFs will be stored
-            - conn : the connector to the access database
+            - master_db : the master dataframe where basic IW CFs are stored (what is used to produce the dev.xlsx file)
+            - ei35_iw   : the dataframe where IW CFs linked to ecoinvent v3.5 elementary flows are stored
+            - ei36_iw   : the dataframe where IW CFs linked to ecoinvent v3.6 elementary flows are stored
+            - ei371_iw  : the dataframe where IW CFs linked to ecoinvent v3.7.1 elementary flows are stored
+            - ei38_iw   : the dataframe where IW CFs linked to ecoinvent v3.8 elementary flows are stored
+            - iw_sp : the dataframe where IW CFs linked to SimaPro elementary flows are stored
+
+        Object insteance methods:
+        -------------------------
+            - load_cfs()
+            - load_basic_cfs()
+            - load_acid_eutro_cfs()
+            - load_land_use_cfs()
+            - load_particulates_cfs()
+            - load_water_scarcity_cfs()
+            - load_water_availability_eq_cfs()
+            - load_water_availability_hh_cfs()
+            - load_water_availability_terr_cfs()
+            - load_thermally_polluted_water_cfs()
+            - apply_rules()
+            - create_not_regio_flows()
+            - create_regio_flows_for_not_regio_ic()
+            - order_things_around()
+            - separate_regio_cfs()
+            - link_to_ecoinvent()
+            - export_to_bw2()
+            - format_data_for_sp()
+            - export_to_sp()
+            - produce_files()
+            - produce_files_hybrid_ecoinvent()
+
         """
 
         self.path_access_db = path_access_db
         self.version = str(version)
         self.bw2_project = bw2_project
+
+        # SQL Alchemy warnings are annoying. Let's remove them from sight!
+        warnings.catch_warnings()
+        warnings.simplefilter("ignore")
 
         # OUTPUTs
         self.master_db = pd.DataFrame()
@@ -74,23 +108,30 @@ class Parse:
         :return: updated master_db
         """
 
+        print("Loading basic characterization factors...")
         self.load_basic_cfs()
+        print("Loading acidification and eutrophication characterization factors...")
         self.load_acid_eutro_cfs()
+        print("Loading land use characterization factors...")
         self.load_land_use_cfs()
+        print("Loading particulate matter characterization factors...")
         self.load_particulates_cfs()
+        print("Loading water scarcity characterization factors...")
         self.load_water_scarcity_cfs()
+        print("Loading water availability characterization factors...")
         self.load_water_availability_eq_cfs()
         self.load_water_availability_hh_cfs()
         self.load_water_availability_terr_cfs()
+        print("Loading thermally polluted water characterization factors...")
         self.load_thermally_polluted_water_cfs()
 
+        print("Applying rules...")
         self.apply_rules()
 
+        print("Treating regionalized factors...")
         self.create_not_regio_flows()
         self.create_regio_flows_for_not_regio_ic()
-
         self.order_things_around()
-
         self.separate_regio_cfs()
 
     def load_basic_cfs(self):
