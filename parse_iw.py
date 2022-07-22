@@ -1030,12 +1030,6 @@ class Parse:
 
         # ----------------- Special cases --------------------
 
-        # special case climate change, short and long term midpoint which both span only on 100 years (so they are both short term actually)
-        self.master_db.loc[[i for i in self.master_db.index if
-                            (self.master_db.loc[i, 'Impact category'] in ['Climate change, short term',
-                                                                          'Climate change, long term'] and
-                             self.master_db.loc[i, 'Sub-compartment'] == 'low. pop., long-term')], 'CF value'] = 0
-
         # special case from/to soil or biomass flows should only be defined for short term damage categories so
         # remove the low. pop., long-term flow for them
         self.master_db = self.master_db.drop([i for i in self.master_db.index if (
@@ -1860,3 +1854,52 @@ def mapping_with_sp():
     sp_emissions = add_flows_dbs(sp_emissions, 'C://Users/11max/PycharmProjects/IW_Reborn/Data/mappings/SP/WFDB.XLSX')
 
     sp_emissions = sp_emissions.dropna().drop_duplicates()
+
+
+def extract_olca_flows():
+    # export relevant information from json files into a single dict
+    path = 'C://Users/11max/PycharmProjects/IW_Reborn/Data/metadata/OLCA/ei38/flows/'
+    directory = os.fsencode(path)
+
+    all_flows = []
+    for file in os.listdir(directory):
+        filename = os.fsdecode(file)
+
+        with open(path + filename, 'r') as f:
+            read = json.load(f)
+
+        if 'cas' in read.keys():
+            flow = {'flow_name': read['name'], 'flow_id': read['@id'], 'comp': read['category']['@id'],
+                    'cas': read['cas'], 'unit': read['flowProperties'][0]['flowProperty']['@id']}
+        else:
+            flow = {'flow_name': read['name'], 'flow_id': read['@id'], 'comp': read['category']['@id'],
+                    'cas': None, 'unit': read['flowProperties'][0]['flowProperty']['@id']}
+
+        all_flows.append(flow)
+
+    # now we go fetch information on categories and units from the other json files
+    path = 'C://Users/11max/PycharmProjects/IW_Reborn/Data/metadata/OLCA/ei38/categories/'
+    directory = os.fsencode(path)
+
+    categories = {}
+
+    for file in os.listdir(directory):
+        filename = os.fsdecode(file)
+
+        with open(path + filename, 'r') as f:
+            read = json.load(f)
+
+        if 'category' in read.keys():
+            categories[read['@id']] = (read['category']['name'], read['name'])
+
+    # hardcoded because it's too much of a mess inside openLCA files
+    units = {'4e10f566-0358-489a-8e3a-d687b66c50e6': 'kg*a', 'f6811440-ee37-11de-8a39-0800200c9a66': 'MJ',
+             '93a60a56-a3c8-22da-a746-0800200c9a66': 'm3', '93a60a56-a3c8-17da-a746-0800200c9a66': 'kBq',
+             '93a60a56-a3c8-19da-a746-0800200c9a66': 'm2', '93a60a56-a3c8-21da-a746-0800200c9a66': 'm2*a',
+             '441238a3-ba09-46ec-b35b-c30cfba746d1': 'm3*a', '93a60a56-a3c8-11da-a746-0800200b9a66': 'kg'}
+
+    all_flows = pd.DataFrame(all_flows)
+    all_flows['comp'] = [categories[i] for i in all_flows['comp']]
+    all_flows['unit'] = [units[i] for i in all_flows['unit']]
+
+    return all_flows
