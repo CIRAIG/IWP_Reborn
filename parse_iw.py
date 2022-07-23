@@ -532,7 +532,7 @@ class Parse:
         # Proper aggregation to determine the global value was not yet performed. Median is used instead.
         def add_generic_water_avail_eq_intel(master_db, id_count):
             master_db.loc[id_count, 'Impact category'] = 'Water availability, freshwater ecosystem'
-            master_db.loc[id_count, 'Native geographical resolution scale'] = 'Not regionalized'
+            master_db.loc[id_count, 'Native geographical resolution scale'] = 'Country'
             master_db.loc[id_count, 'MP or Damage'] = 'Damage'
             master_db.loc[id_count, 'CAS number'] = '007732-18-5'
             master_db.loc[id_count, 'CF unit'] = 'PDF.m2.yr'
@@ -560,6 +560,10 @@ class Parse:
                 self.master_db.loc[id_count, 'Elem flow name'] = water + ', ' + region
                 self.master_db.loc[id_count, 'Compartment'] = 'Raw'
                 self.master_db.loc[id_count, 'CF value'] = db.loc[:, 'CF value'].median()
+
+        # changes value of resolution scale for the global flow
+        self.master_db.loc[[i for i in self.master_db.index if ', GLO' in self.master_db.loc[i,'Elem flow name']],
+                           'Native geographical resolution scale'] = 'Global'
 
         self.master_db = clean_up_dataframe(self.master_db)
 
@@ -1040,13 +1044,13 @@ class Parse:
                     'Marine acidification, long term'])])
 
         # add zero flows for saline water to make it explicit for the user
-        df = self.master_db[self.master_db['Elem flow name'] == 'Water, lake'].copy()
+        df = self.master_db[self.master_db['Elem flow name'] == 'Water, lake, GLO'].copy()
         df['Elem flow name'] = 'Water, salt, ocean'
         df['CF value'] = 0
         self.master_db = pd.concat([self.master_db, df])
         self.master_db = clean_up_dataframe(self.master_db)
         # add zero flows for saline water to make it explicit for the user
-        df = self.master_db[self.master_db['Elem flow name'] == 'Water, lake'].copy()
+        df = self.master_db[self.master_db['Elem flow name'] == 'Water, lake, GLO'].copy()
         df['Elem flow name'] = 'Water, salt, sole'
         df['CF value'] = 0
         self.master_db = pd.concat([self.master_db, df])
@@ -1195,6 +1199,10 @@ class Parse:
                                                           'Mineral resources use'] and
                                                       'Water' not in ei_iw_db.loc[i, 'Elem flow name'])]
             ei_iw_db.drop(minerals, axis=0, inplace=True)
+            # ions are only available in Water compartments! So remove those ions in air that don't make any sense.
+            ions = [i for i in ei_iw_db.index if (', ion' in ei_iw_db.loc[i, 'Elem flow name'] and
+                                                  ei_iw_db.loc[i, 'Compartment'] != 'Water')]
+            ei_iw_db.drop(ions, axis=0, inplace=True)
 
             # clean-up
             ei_iw_db = clean_up_dataframe(ei_iw_db)
