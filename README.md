@@ -31,6 +31,7 @@ available in Excel format and as a pandas.dataframe version to easily link IW+ a
   - US-ei2.2
   - USLCI
   - WFLDB
+- an openLCA version is in the making and will be available later
 
 #### Developer file
 For entities wishing to implement IW+ in their own software/code/... a dev version is also automatically generated.

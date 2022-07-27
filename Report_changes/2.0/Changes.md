@@ -1,46 +1,54 @@
-## Long term emissions and impact categories
-With IW+2.0, we properly applied our vision for the relation between short/long-term emissions/impact categories. In 
-previous versions, the implementation was not done correctly.
+## Long term emissions and time dependent impact categories
+With IW+2.0, we properly applied our vision for the relation between short/long-term and short/long-term categories. In 
+previous versions, there were some inconsistencies in the implementation of this feature.
 
-In IW+, there are some **_damage_** categories which are split between short and long term: Climate change (both human health
-and ecosystem quality), freshwater ecotoxicity, human toxicity (both cancer and non cancer) and marine acidification. 
-Midpoint categories are not split between short and long term impact. <br> 100 years is the period chosen to differentiate 
-between short and long term. <br>A total impact on one of these damage categories is therefore split between the short and 
-long term versions of the damage category as shown in the picture below.
+In IW+, there are some **_damage_** categories which are split between short and long term impact: Climate change (both human health
+and ecosystem quality), freshwater ecotoxicity, human toxicity (both cancer and non cancer) and marine acidification.
+For these damage categories, the total impact is split between a short term impact category and a long term one, as shown 
+in pictures below. <br> 100 years is the time horizon chosen to differentiate between short and long term impacts.
 
-![image](images/short_term_emission.png)
+<p align="center">
+  <img src="images/ST_emissions.png" />
+</p>
 
-Here we have an emission of carbon dioxide, hapening at year 0, i.e., a short term emission. Most emissions in typical 
-LCA databases are short term emissions as they are considered being immediatly emitted. The total impact of carbon 
-dioxide on climate change, ecosystem quality is 3.68e-6 PDF.m².yr. Of this impact, 8.18e-7 PDF.m².yr is attributed to 
-the short term impact and 2.86e-6 PDF.m².yr to the long term impact.
+Here we have an emission of carbon dioxide, happening at year 0, i.e., a short-term emission. Most emissions in typical 
+LCA databases are short term emissions as they are considered being immediately emitted. The total impact of carbon 
+dioxide on climate change, ecosystem quality is 3.68e-6 PDF.m².yr. Of this impact, 8.18e-7 PDF.m².yr will occur in 
+the short term impact and 2.86e-6 PDF.m².yr in the long term impact.
 
 Some LCA databases such as ecoinvent also introduced long term emissions. These are identified (in ecoinvent) with
 a sub-compartment with "long-term" in its name, such as: "low-population density, long-term". These emissions are thus 
-considered occurring 100 years later such as shown in the picture below.
+considered occurring more than 100 years after first emissions of the studied life cycle, as shown in the picture below.
 
-![image](images/long_term_emission.png)
+<p align="center">
+  <img src="images/LT_emissions.png" />
+</p>
 
-Now the split of the total impact (3.68e-6PDF.m².yr) cannot occur on the short term impact, because the emission occur 
-in 100 years. Therefore, IW+ attributes the totality of the impact to the long term category.
-In previous versions of IW+, the short term CF was mostly already set to zero (few exceptions) but the long term CF was
-fixed to be equal to the short term impact counterpart, i.e., instead of being 3.68e-6 PDF.m².yr, the previous CF was 
-2.86e-6 PDF.m².yr.
+Now the split of the total impact (3.68e-6PDF.m².yr) cannot be considered as short term impact, because the emission occurs 
+after the 100 years time horizon. Therefore, IW+ attributes the overall impact of this emission to the long term impact category.
+<br> In previous versions of IW+, the short term CF was mostly already set to zero, which was correct but the long term 
+CF was underestimated. Indeed, the long-term CF for long term emission was equal to the one for short term emission. 
+For instance, instead of being 3.68e-6 PDF.m².yr/kg, the previous long term CF for long term CO2 emission was 2.86e-6 PDF.m².yr/kg.
 
-## Metal emissions in groundwater
-Metal emissions emitted directly to the groundwater sub-compartments were not properly all fixed to zero. Now they all 
-are which is coherent with the modeling approach taken with other impact categories and emissions.
+## Toxicity and ecotoxicity - Metal emissions in groundwater
+Metal emissions emitted directly to the groundwater sub-compartments are now all properly fixed to zero to be consistent
+with the modeling approach for other impact categories and emissions.
 
 ## Marine eutrophication - air emissions
-Some emissions in the air were not characterized and many sub-compartments were missing. For missing sub-compartments,
+All emissions to air and all its sub-compartments are now characterized. For missing sub-compartments,
 the value for the unspecified sub-compartment was used.
 
 ## Land occupation and transformation update
-Values for the land flows: annual crops, permanent crops and agriculture (mosaic) were updated.
+CF values for land occupation and transformation elementary flows were updated for the following land use: annual crops,
+permanent crops and agriculture (mosaic).
 
-## Water impact categories new flows
-Many regionalized flows for water impact categories were added for new sub-regions covered in ecoinvent such as CN-AH or
-IN-AP. These values were taken equal with the national value, i.e., the CF for CN-AH is equal to the CF for CN.
+## Water impact categories new elementary flows
+CFs for many regionalized elementary flows for the categories: Water scarcity / Water availability, human health / Water availability, 
+freshwater ecosystem / Water availability, terrestrial ecosystem, were added for new sub-regions covered in ecoinvent such as CN-AH or
+IN-AP. CFs values for these new elementary flows are assumed to be equal to their national CF value, i.e., the CF for 
+CN-AH is equal to the CF for CN.
 
 ## Detailed changes
-For the complete list of changes between version 1.31/1.49 and version 2, refer to the file SimaPro_version.xlsx.
+For the complete list of changes between previous versions and v2.0 refer to:
+- SimaPro_version.xlsx (last available version 1.31-1.49)
+- bw2_version.xlsx (last available version 1.30-1.48)
