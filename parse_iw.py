@@ -796,7 +796,7 @@ class Parse:
 
         subcomps = {'Air': ['high. pop.', 'low. pop.', 'stratosphere + troposphere', 'indoor'],
                     'Water': ['lake', 'river'],
-                    'Soil': ['industrial'],
+                    'Soil': ['industrial','agricultural'],
                     'Raw': ['in ground', 'in water', 'biotic']}
 
         # create a dataframe in which all new subcomps are created based on the unspecified value
@@ -871,10 +871,7 @@ class Parse:
                           'groundwater, long-term': ['Water availability, freshwater ecosystem',
                                                      'Water availability, human health',
                                                      'Water scarcity'],
-                          'ocean': ['Ionizing radiation, ecosystem quality',
-                                    'Ionizing radiation, human health',
-                                    'Ionizing radiations',
-                                    'Marine eutrophication']}
+                          'ocean': ['Marine eutrophication']}
         to_zero = {'groundwater': ['Freshwater ecotoxicity',
                                    'Freshwater ecotoxicity, long term',
                                    'Freshwater ecotoxicity, short term',
@@ -907,6 +904,7 @@ class Parse:
                              'Freshwater ecotoxicity, long term',
                              'Freshwater ecotoxicity, short term',
                              'Freshwater eutrophication',
+                             'Ionizing radiation, ecosystem quality',
                              'Human toxicity cancer',
                              'Human toxicity cancer, long term',
                              'Human toxicity cancer, short term',
@@ -1162,6 +1160,7 @@ class Parse:
         versions_ei = ['3.5', '3.6', '3.7.1', '3.8']
 
         for version_ei in versions_ei:
+            print("Linking with ecoinvent"+str(version_ei)+"...")
             ei_iw_db = self.master_db_not_regio.copy()
 
             # -------------- Mapping substances --------------
@@ -1333,6 +1332,8 @@ class Parse:
         :return:
         """
 
+        print("Exporting to brightway2...")
+
         bw2.projects.set_current(self.bw2_project)
 
         bio = bw2.Database('biosphere3')
@@ -1463,6 +1464,7 @@ class Parse:
         # some other flows from SP that require conversions because of units
         new_flows = {
             'Gas, natural/kg': 'Gas, natural/m3', 'Uranium/kg': 'Uranium',
+            'Gas, mine, off-gas, process, coal mining/kg':'Gas, mine, off-gas, process, coal mining/m3',
             'Water, cooling, unspecified natural origin/kg': 'Water, cooling, unspecified natural origin',
             'Water, process, unspecified natural origin/kg': 'Water, cooling, unspecified natural origin',
             'Water, unspecified natural origin/kg': 'Water, unspecified natural origin',
@@ -1491,7 +1493,8 @@ class Parse:
                     'Water, process, surface': 'kg',
                     'Water, process, well': 'kg',
                     'Water, groundwater consumption': 'kg',
-                    'Water, surface water consumption': 'kg'}
+                    'Water, surface water consumption': 'kg',
+                    'Water, Saline water consumption': 'kg'}
 
         for problem_child in problems:
             self.iw_sp.loc[self.iw_sp['Elem flow name'] == problem_child, 'Elem flow unit'] = 'kg'
@@ -1501,6 +1504,8 @@ class Parse:
         This method creates the necessary information for the csv creation in SimaPro.
         :return:
         """
+
+        print("Exporting to SimaPro...")
 
         self.format_data_for_sp()
 
@@ -1670,6 +1675,8 @@ class Parse:
         Function producing the different IW+ files for the different versions.
         :return: the IW+ files
         """
+
+        print("Creating all the files...")
 
         path = pkg_resources.resource_filename(__name__, '/Databases/Impact_world_' + self.version)
 
