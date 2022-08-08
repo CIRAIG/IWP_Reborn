@@ -42,6 +42,10 @@ the value for the unspecified sub-compartment was used.
 CF values for land occupation and transformation elementary flows were updated for the following land use: annual crops,
 permanent crops and agriculture (mosaic).
 
+## Ionizing radiations
+CF values for the midpoint indicator and the human health damage indicator have been updated. New values for the water
+compartment and the ocean sub-compartment. Also, new substances have been added: Americium-241, Strontium-90, Thorium-230.
+
 ## Water impact categories new elementary flows
 CFs for many regionalized elementary flows for the categories: Water scarcity / Water availability, human health / Water availability, 
 freshwater ecosystem / Water availability, terrestrial ecosystem, were added for new sub-regions covered in ecoinvent such as CN-AH or
