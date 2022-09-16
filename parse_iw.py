@@ -33,6 +33,9 @@ import datetime
 from datetime import datetime
 import csv
 import warnings
+import uuid
+import shutil
+import zipfile
 
 class Parse:
     def __init__(self, path_access_db, version, bw2_project=None):
@@ -99,10 +102,14 @@ class Parse:
         self.simplified_version_sp = pd.DataFrame()
         self.simplified_version_bw = pd.DataFrame()
         self.sp_data = {}
+        self.olca_iw = pd.DataFrame()
+        self.olca_data = {}
 
         # connect to the access database
         self.conn = pyodbc.connect(r'Driver={Microsoft Access Driver (*.mdb, *.accdb)};'
                                    r'DBQ='+self.path_access_db+';')
+
+# -------------------------------------------- Main methods ------------------------------------------------------------
 
     def load_cfs(self):
         """
@@ -136,12 +143,556 @@ class Parse:
         self.order_things_around()
         self.separate_regio_cfs()
 
-        self.link_to_ecoinvent()
+        # print("Linking to ecoinvent elementary flows...")
+        # self.link_to_ecoinvent()
+        #
+        # print("Linking to SimaPro elementary flows...")
+        # self.link_to_sp()
 
-        print("Linking to SimaPro elementary flows...")
-        self.link_to_sp()
+        print("Linking to openLCA elementary flows...")
+        self.link_to_olca()
 
-        self.get_simplified_versions()
+        # self.get_simplified_versions()
+
+    def export_to_bw2(self, ei_flows_version=None):
+        """
+        This method creates a brightway2 method with the IW+ characterization factors.
+        :param ei_flows_version: [str] Provide a specific ei version (e.g., 3.6) to be used to determine the elementary flows
+                                 to be linked to iw+. Default values = eiv3.8 (in 2022)
+
+        :return:
+        """
+
+        print("Exporting to brightway2...")
+
+        bw2.projects.set_current(self.bw2_project)
+
+        bio = bw2.Database('biosphere3')
+
+        # extract the uuid codes for biosphere flows
+        bw_flows_with_codes = (
+            pd.DataFrame(
+                [(i.as_dict()['name'], i.as_dict()['categories'][0], i.as_dict()['categories'][1], i.as_dict()['code'])
+                 if len(i.as_dict()['categories']) == 2
+                 else (i.as_dict()['name'], i.as_dict()['categories'][0], 'unspecified', i.as_dict()['code'])
+                 for i in bio],
+                columns=['Elem flow name', 'Compartment', 'Sub-compartment', 'code'])
+        )
+
+        # merge with CF df to have the uuid codes and the corresponding CFs
+        if ei_flows_version == '3.5':
+            ei_in_bw = self.ei35_iw.merge(bw_flows_with_codes)
+        elif ei_flows_version == '3.6':
+            ei_in_bw = self.ei36_iw.merge(bw_flows_with_codes)
+        elif ei_flows_version == '3.7.1':
+            ei_in_bw = self.ei371_iw.merge(bw_flows_with_codes)
+        elif ei_flows_version == '3.8':
+            ei_in_bw = self.ei38_iw.merge(bw_flows_with_codes)
+        else:
+            ei_in_bw = self.ei38_iw.merge(bw_flows_with_codes)
+        ei_in_bw_simple = self.simplified_version_bw.merge(bw_flows_with_codes)
+
+        ei_in_bw.set_index(['Impact category', 'CF unit'], inplace=True)
+        ei_in_bw_simple.set_index(['Impact category', 'CF unit'], inplace=True)
+        impact_categories = ei_in_bw.index.drop_duplicates()
+        impact_categories_simple = ei_in_bw_simple.index.drop_duplicates()
+
+        # -------------- For complete version of IW+ ----------------
+        for ic in impact_categories:
+
+            if ei_in_bw.loc[[ic], 'MP or Damage'].iloc[0] == 'Midpoint':
+                mid_end = 'Midpoint'
+                # create the name of the method
+                name = ('IMPACT World+ ' + mid_end + ' ' + self.version, 'Midpoint', ic[0])
+            else:
+                mid_end = 'Damage'
+                # create the name of the method
+                if ic[1] == 'DALY':
+                    name = ('IMPACT World+ ' + mid_end + ' ' + self.version, 'Human health', ic[0])
+                else:
+                    name = ('IMPACT World+ ' + mid_end + ' ' + self.version, 'Ecosystem quality', ic[0])
+
+            # initialize the "Method" method
+            new_method = bw2.Method(name)
+            # register the new method
+            new_method.register()
+            # set its unit
+            new_method.metadata["unit"] = ic[1]
+
+            df = ei_in_bw.loc[[ic], ['code', 'CF value']].copy()
+            df.set_index('code', inplace=True)
+
+            data = []
+            for stressor in df.index:
+                data.append((('biosphere3', stressor), df.loc[stressor, 'CF value']))
+            new_method.write(data)
+
+        # -------------- For simplified version of IW+ ----------------
+        for ic in impact_categories_simple:
+
+            if ei_in_bw_simple.loc[[ic], 'MP or Damage'].iloc[0] == 'Midpoint':
+                # create the name of the method
+                name = ('IMPACT World+ ' + self.version + ' - Combined midpoint-damage profile', ic[0])
+            else:
+                # create the name of the method
+                if ic[1] == 'DALY':
+                    name = ('IMPACT World+ ' + self.version + ' - Combined midpoint-damage profile', ic[0])
+                else:
+                    name = ('IMPACT World+ ' + self.version + ' - Combined midpoint-damage profile', ic[0])
+
+            # initialize the "Method" method
+            new_method = bw2.Method(name)
+            # register the new method
+            new_method.register()
+            # set its unit
+            new_method.metadata["unit"] = ic[1]
+
+            df = ei_in_bw_simple.loc[[ic], ['code', 'CF value']].copy()
+            df.set_index('code', inplace=True)
+
+            data = []
+            for stressor in df.index:
+                data.append((('biosphere3', stressor), df.loc[stressor, 'CF value']))
+            new_method.write(data)
+
+    def export_to_sp(self):
+        """
+        This method creates the necessary information for the csv creation in SimaPro.
+        :return:
+        """
+
+        print("Exporting to SimaPro...")
+
+        # csv accepts strings only
+        self.iw_sp.loc[:, 'CF value'] = self.iw_sp.loc[:, 'CF value'].astype(str)
+        self.simplified_version_sp.loc[:, 'CF value'] = self.simplified_version_sp.loc[:, 'CF value'].astype(str)
+
+        # Metadata
+        l = ['SimaPro 9.3.0.3', 'methods', 'Date: ' + datetime.now().strftime("%D"),
+             'Time: ' + datetime.now().strftime("%H:%M:%S"),
+             'Project: Methods', 'CSV Format version: 8.0.5', 'CSV separator: Semicolon',
+             'Decimal separator: .', 'Date separator: -', 'Short date format: yyyy-MM-dd', 'Selection: Selection (1)',
+             'Related objects (system descriptions, substances, units, etc.): Yes',
+             'Include sub product stages and processes: No', "Open library: 'Methods'"]
+        metadata = []
+        for i in l:
+            s = '{' + i + '}'
+            metadata.append([s, '', '', '', '', ''])
+
+        # metadata on the midpoint method
+        midpoint_method_metadata = [['Method', '', '', '', '', ''], ['', '', '', '', '', ''],
+                                    ['Name', '', '', '', '', ''],
+                                    ['IMPACTWorld+ Midpoint ' + self.version, '', '', '', '', ''],
+                                    ['', '', '', '', '', ''], ['Version', '', '', '', '', ''],
+                                    [self.version.split('.')[0],self.version.split('.')[1], '', '', '', ''],
+                                    ['', '', '', '', '', ''], ['Comment', '', '', '', '', ''],
+                                    ['', '', '', '', '', ''], ['', '', '', '', '', ''],
+                                    ['Category', '', '', '', '', ''], ['Others', '', '', '', '', ''],
+                                    ['', '', '', '', '', ''],
+                                    ['Use Damage Assessment', '', '', '', '', ''], ['No', '', '', '', '', ''],
+                                    ['', '', '', '', '', ''],
+                                    ['Use Normalization', '', '', '', '', ''], ['No', '', '', '', '', ''],
+                                    ['', '', '', '', '', ''],
+                                    ['Use Weighting', '', '', '', '', ''], ['No', '', '', '', '', ''],
+                                    ['', '', '', '', '', ''],
+                                    ['Use Addition', '', '', '', '', ''], ['No', '', '', '', '', '']]
+        # metadata on the damage method
+        damage_method_metadata = [['Method', '', '', '', '', ''], ['', '', '', '', '', ''],
+                                  ['Name', '', '', '', '', ''],
+                                  ['IMPACTWorld+ Damage ' + self.version, '', '', '', '', ''],
+                                  ['', '', '', '', '', ''], ['Version', '', '', '', '', ''],
+                                  [self.version.split('.')[0],self.version.split('.')[1], '', '', '', ''],
+                                  ['', '', '', '', '', ''], ['Comment', '', '', '', '', ''],
+                                  ['', '', '', '', '', ''], ['', '', '', '', '', ''],
+                                  ['Category', '', '', '', '', ''], ['Others', '', '', '', '', ''],
+                                  ['', '', '', '', '', ''],
+                                  ['Use Damage Assessment', '', '', '', '', ''], ['Yes', '', '', '', '', ''],
+                                  ['', '', '', '', '', ''],
+                                  ['Use Normalization', '', '', '', '', ''], ['Yes', '', '', '', '', ''],
+                                  ['', '', '', '', '', ''],
+                                  ['Use Weighting', '', '', '', '', ''], ['Yes', '', '', '', '', ''],
+                                  ['', '', '', '', '', ''],
+                                  ['Use Addition', '', '', '', '', ''], ['Yes', '', '', '', '', '']]
+        # metadata on the combined method
+        combined_method_metadata = [['Method', '', '', '', '', ''], ['', '', '', '', '', ''],
+                                    ['Name', '', '', '', '', ''],
+                                    ['IMPACTWorld+ ' + self.version, '', '', '', '', ''],
+                                    ['', '', '', '', '', ''], ['Version', '', '', '', '', ''],
+                                    [self.version.split('.')[0], self.version.split('.')[1], '', '', '', ''],
+                                    ['', '', '', '', '', ''], ['Comment', '', '', '', '', ''],
+                                    ['', '', '', '', '', ''], ['', '', '', '', '', ''],
+                                    ['Category', '', '', '', '', ''], ['Others', '', '', '', '', ''],
+                                    ['', '', '', '', '', ''],
+                                    ['Use Damage Assessment', '', '', '', '', ''], ['Yes', '', '', '', '', ''],
+                                    ['', '', '', '', '', ''],
+                                    ['Use Normalization', '', '', '', '', ''], ['Yes', '', '', '', '', ''],
+                                    ['', '', '', '', '', ''],
+                                    ['Use Weighting', '', '', '', '', ''], ['Yes', '', '', '', '', ''],
+                                    ['', '', '', '', '', ''],
+                                    ['Use Addition', '', '', '', '', ''], ['Yes', '', '', '', '', '']]
+        # metadata on the simplified method
+        simplified_method_metadata = [['Method', '', '', '', '', ''], ['', '', '', '', '', ''],
+                                    ['Name', '', '', '', '', ''],
+                                    ['IMPACTWorld+ ' + self.version + ' combined midpoint-damage', '', '', '', '', ''],
+                                    ['', '', '', '', '', ''], ['Version', '', '', '', '', ''],
+                                    [self.version.split('.')[0],self.version.split('.')[1], '', '', '', ''],
+                                    ['', '', '', '', '', ''], ['Comment', '', '', '', '', ''],
+                                    ['', '', '', '', '', ''], ['', '', '', '', '', ''],
+                                    ['Category', '', '', '', '', ''], ['Others', '', '', '', '', ''],
+                                    ['', '', '', '', '', ''],
+                                    ['Use Damage Assessment', '', '', '', '', ''], ['No', '', '', '', '', ''],
+                                    ['', '', '', '', '', ''],
+                                    ['Use Normalization', '', '', '', '', ''], ['No', '', '', '', '', ''],
+                                    ['', '', '', '', '', ''],
+                                    ['Use Weighting', '', '', '', '', ''], ['No', '', '', '', '', ''],
+                                    ['', '', '', '', '', ''],
+                                    ['Use Addition', '', '', '', '', ''], ['No', '', '', '', '', '']]
+
+        # data for weighting and normalizing
+        df = pd.read_csv(pkg_resources.resource_filename(
+            __name__, '/Data/weighting_normalizing/weighting_and_normalization.csv'),
+            header=None, delimiter=';').fillna('')
+        weighting_info_damage = [[df.loc[i].tolist()[0], df.loc[i].tolist()[1], '', '', '', ''] for i in df.index]
+
+        weighting_info_combined = weighting_info_damage.copy()
+        weighting_info_combined[11] = ['Ozone layer depletion (damage)', '1.00E+00', '', '', '', '']
+        weighting_info_combined[12] = ['Particulate matter formation (damage)', '1.00E+00', '', '', '', '']
+        weighting_info_combined[13] = ['Photochemical oxidant formation (damage)', '1.00E+00', '', '', '', '']
+        weighting_info_combined[22] = ['Freshwater acidification (damage)', '1.00E+00', '', '', '', '']
+        weighting_info_combined[25] = ['Freshwater eutrophication (damage)', '1.00E+00', '', '', '', '']
+        weighting_info_combined[27] = ['Land occupation, biodiversity (damage)', '1.00E+00', '', '', '', '']
+        weighting_info_combined[28] = ['Land transformation, biodiversity (damage)', '1.00E+00', '', '', '', '']
+        weighting_info_combined[31] = ['Marine eutrophication (damage)', '1.00E+00', '', '', '', '']
+        weighting_info_combined[32] = ['Terrestrial acidification (damage)', '1.00E+00', '', '', '', '']
+
+        # extracting midpoint CFs
+        d_ic_unit = self.iw_sp.loc[self.iw_sp['MP or Damage'] == 'Midpoint',
+                              ['Impact category', 'CF unit']].drop_duplicates().set_index('Impact category').iloc[:,
+                    0].to_dict()
+        midpoint_values = []
+        for j in d_ic_unit.keys():
+            midpoint_values.append(['', '', '', '', '', ''])
+            midpoint_values.append(['Impact category', '', '', '', '', ''])
+            midpoint_values.append([j, d_ic_unit[j], '', '', '', ''])
+            midpoint_values.append(['', '', '', '', '', ''])
+            midpoint_values.append(['Substances', '', '', '', '', ''])
+            df = self.iw_sp[self.iw_sp['Impact category'] == j]
+            df = df[df['CF unit'] == d_ic_unit[j]]
+            df = df[['Compartment', 'Sub-compartment', 'Elem flow name', 'CAS number', 'CF value', 'Elem flow unit']]
+            for i in df.index:
+                if type(df.loc[i, 'CAS number']) == float:
+                    df.loc[i, 'CAS number'] = ''
+                midpoint_values.append(df.loc[i].tolist())
+
+        # extracting damage CFs
+        d_ic_unit = self.iw_sp.loc[self.iw_sp['MP or Damage'] == 'Damage',
+                              ['Impact category', 'CF unit']].drop_duplicates().set_index('Impact category').iloc[:,
+                    0].to_dict()
+        damage_values = []
+        for j in d_ic_unit.keys():
+            damage_values.append(['', '', '', '', '', ''])
+            damage_values.append(['Impact category', '', '', '', '', ''])
+            damage_values.append([j, d_ic_unit[j], '', '', '', ''])
+            damage_values.append(['', '', '', '', '', ''])
+            damage_values.append(['Substances', '', '', '', '', ''])
+            df = self.iw_sp[self.iw_sp['Impact category'] == j]
+            df = df[df['CF unit'] == d_ic_unit[j]]
+            df = df[['Compartment', 'Sub-compartment', 'Elem flow name', 'CAS number', 'CF value', 'Elem flow unit']]
+            for i in df.index:
+                if type(df.loc[i, 'CAS number']) == float:
+                    df.loc[i, 'CAS number'] = ''
+                damage_values.append(df.loc[i].tolist())
+
+        # extracting combined CFs
+        ic_unit = self.iw_sp.loc[:, ['Impact category', 'CF unit']].drop_duplicates()
+        same_names = ['Freshwater acidification','Freshwater eutrophication','Land occupation, biodiversity',
+                      'Land transformation, biodiversity','Marine eutrophication','Ozone layer depletion',
+                      'Particulate matter formation','Photochemical oxidant formation','Terrestrial acidification']
+        combined_values = []
+        for j in ic_unit.index:
+            combined_values.append(['', '', '', '', '', ''])
+            combined_values.append(['Impact category', '', '', '', '', ''])
+            if ic_unit.loc[j,'Impact category'] in same_names:
+                if ic_unit.loc[j,'CF unit'] in ['DALY','PDF.m2.yr']:
+                    combined_values.append([ic_unit.loc[j,'Impact category']+' (damage)',
+                                            ic_unit.loc[j,'CF unit'], '', '', '', ''])
+                else:
+                    combined_values.append([ic_unit.loc[j,'Impact category']+' (midpoint)',
+                                            ic_unit.loc[j,'CF unit'], '', '', '', ''])
+            else:
+                combined_values.append([ic_unit.loc[j, 'Impact category'],
+                                        ic_unit.loc[j, 'CF unit'], '', '', '', ''])
+            combined_values.append(['', '', '', '', '', ''])
+            combined_values.append(['Substances', '', '', '', '', ''])
+            df = self.iw_sp.loc[[i for i in self.iw_sp.index if (
+                    self.iw_sp.loc[i,'Impact category'] == ic_unit.loc[j,'Impact category'] and
+                    self.iw_sp.loc[i, 'CF unit'] == ic_unit.loc[j, 'CF unit'])]]
+            df = df[['Compartment', 'Sub-compartment', 'Elem flow name', 'CAS number', 'CF value', 'Elem flow unit']]
+            for i in df.index:
+                if type(df.loc[i, 'CAS number']) == float:
+                    df.loc[i, 'CAS number'] = ''
+                combined_values.append(df.loc[i].tolist())
+
+        # extracting simplified values
+        ic_unit = self.simplified_version_sp.loc[:, ['Impact category', 'CF unit']].drop_duplicates()
+        simplified_values = []
+        for j in ic_unit.index:
+            simplified_values.append(['', '', '', '', '', ''])
+            simplified_values.append(['Impact category', '', '', '', '', ''])
+            simplified_values.append([ic_unit.loc[j, 'Impact category'],
+                                      ic_unit.loc[j, 'CF unit'], '', '', '', ''])
+            simplified_values.append(['', '', '', '', '', ''])
+            simplified_values.append(['Substances', '', '', '', '', ''])
+            df = self.simplified_version_sp.loc[[i for i in self.simplified_version_sp.index if (
+                    self.simplified_version_sp.loc[i, 'Impact category'] == ic_unit.loc[j, 'Impact category'] and
+                    self.simplified_version_sp.loc[i, 'CF unit'] == ic_unit.loc[j, 'CF unit'])]]
+            df = df[['Compartment', 'Sub-compartment', 'Elem flow name', 'CAS number', 'CF value', 'Elem flow unit']]
+            for i in df.index:
+                simplified_values.append(df.loc[i].tolist())
+
+        # dump everything in an attribute
+        self.sp_data = {'metadata': metadata, 'midpoint_method_metadata': midpoint_method_metadata,
+                        'damage_method_metadata': damage_method_metadata,
+                        'combined_method_metadata': combined_method_metadata,
+                        'simplified_method_metadata': simplified_method_metadata,
+                        'weighting_info_damage': weighting_info_damage,
+                        'weighting_info_combined': weighting_info_combined,
+                        'midpoint_values': midpoint_values, 'damage_values': damage_values,
+                        'combined_values':combined_values, 'simplified_values':simplified_values}
+
+    def export_to_olca(self):
+        """
+        This method creates the necessary information for the creation of json files in openLCA.
+        :return:
+        """
+
+        # metadata method (category folder in oLCA app)
+
+        id_category = str(uuid.uuid4())
+
+        category_metadata = {"@context": "http://greendelta.github.io/olca-schema/context.jsonld",
+                             "@type": "Category",
+                             "@id": id_category,
+                             "name": "CIRAIG methods",
+                             "version": "0.00.000",
+                             "modelType": "IMPACT_METHOD"}
+
+        # metadata json for lcia methods
+
+        dict_ = self.olca_iw.reset_index().loc[:, ['Impact category', 'CF unit']].drop_duplicates().to_dict('list')
+        category_names = list(zip(dict_['Impact category'], dict_['CF unit']))
+        category_names = [(i[0], i[1], str(uuid.uuid4())) for i in category_names]
+        category_names = {(i[0], i[1]): i[2] for i in category_names}
+
+        id_iw = str(uuid.uuid4())
+
+        metadata_iw = {
+            "@context": "http://greendelta.github.io/olca-schema/context.jsonld",
+            "@type": "ImpactMethod",
+            "@id": id_iw,
+            "name": "IMPACT World+ v2.0",
+            "lastChange": "2022-09-15T17:25:43.725-05:00",
+            "category": {
+                "@type": "Category",
+                "@id": id_category,
+                "name": "CIRAIG methods",
+                "categoryType": "ImpactMethod"},
+            'impactCategories': []
+        }
+
+        for cat in category_names:
+            metadata_iw['impactCategories'].append(
+                {"@type": "ImpactCategory",
+                 "@id": category_names[cat],
+                 "name": cat[0],
+                 "refUnit": cat[1]}
+            )
+
+        # hardcoded, obtained from going inside the json files of an exported oLCA method
+        unit_groups = {
+            'kg': '93a60a57-a4c8-11da-a746-0800200c9a66',
+            'm2*a': '93a60a57-a3c8-20da-a746-0800200c9a66',
+            'm2': '93a60a57-a3c8-18da-a746-0800200c9a66',
+            'kBq': '93a60a57-a3c8-16da-a746-0800200c9a66',
+            'm3': '93a60a57-a3c8-12da-a746-0800200c9a66',
+            'MJ': '93a60a57-a3c8-11da-a746-0800200c9a66'
+        }
+        flow_properties = {
+            'm3': '93a60a56-a3c8-22da-a746-0800200c9a66',
+            'm2*a': '93a60a56-a3c8-21da-a746-0800200c9a66',
+            'm2': '93a60a56-a3c8-19da-a746-0800200c9a66',
+            'kBq': '93a60a56-a3c8-17da-a746-0800200c9a66',
+            'kg': '93a60a56-a3c8-11da-a746-0800200b9a66',
+            'MJ': 'f6811440-ee37-11de-8a39-0800200c9a66'
+        }
+
+
+        cf_dict = {}
+        for cat in category_names:
+            cf_values = {
+                "@context": "http://greendelta.github.io/olca-schema/context.jsonld",
+                "@type": "ImpactCategory",
+                "@id": category_names[cat],
+                "name": cat[0],
+                "version": "02.00.000",
+                "referenceUnitName": cat[1],
+                "impactFactors": []
+            }
+
+            dff = self.olca_iw.loc[cat].copy()
+
+            for flow_id in dff.index:
+                cf_values["impactFactors"].append({
+                    "@type": "ImpactFactor",
+                    "value": dff.loc[flow_id, 'CF value'],
+                    "flow": {
+                        "@type": "Flow",
+                        "@id":flow_id,
+                        "name": dff.loc[flow_id, 'flow_name'],
+                        "categoryPath": ["Elementary flows",
+                                         eval(dff.loc[flow_id, 'comp'])[0],
+                                         eval(dff.loc[flow_id, 'comp'])[1]],
+                        "flowType": "ELEMENTARY_FLOW",
+                        "refUnit": dff.loc[flow_id, 'unit']
+                    },
+                    "unit": {
+                        "@type": "Unit",
+                        "@id": unit_groups[dff.loc[flow_id, 'unit']],
+                        "name": dff.loc[flow_id, 'unit']
+                    },
+                    "flowProperty": {
+                        "@type": "FlowProperty",
+                        "@id": flow_properties[dff.loc[flow_id, 'unit']],
+                        "name": dff.loc[flow_id, 'unit'],
+                        "categoryPath": ["Technical flow properties"]
+                    }
+                })
+
+            cf_dict[cat] = cf_values
+
+        self.olca_data = {'category_metadata': category_metadata, 'metadata_iw': metadata_iw, 'cf_dict': cf_dict}
+
+    def produce_files(self):
+        """
+        Function producing the different IW+ files for the different versions.
+        :return: the IW+ files
+        """
+
+        print("Creating all the files...")
+
+        path = pkg_resources.resource_filename(__name__, '/Databases/Impact_world_' + self.version)
+
+        # if the folders are not there yet, create them
+        if not os.path.exists(path + '/Excel/'):
+            os.makedirs(path + '/Excel/')
+        if not os.path.exists(path + '/DataFrame/'):
+            os.makedirs(path + '/DataFrame/')
+        if not os.path.exists(path + '/bw2/'):
+            os.makedirs(path + '/bw2/')
+        if not os.path.exists(path + '/SimaPro/'):
+            os.makedirs(path + '/SimaPro/')
+        if not os.path.exists(path + '/openLCA/'):
+            os.makedirs(path + '/openLCA/')
+
+        # Dev version
+        self.master_db.to_excel(path + '/Excel/impact_world_plus_' + self.version + '_dev.xlsx')
+
+        # ecoinvent versions in Excel format
+        self.ei35_iw.to_excel(path + '/Excel/impact_world_plus_' + self.version + '_ecoinvent_v35.xlsx')
+        self.ei36_iw.to_excel(path + '/Excel/impact_world_plus_' + self.version + '_ecoinvent_v36.xlsx')
+        self.ei371_iw.to_excel(path + '/Excel/impact_world_plus_' + self.version + '_ecoinvent_v371.xlsx')
+        self.ei38_iw.to_excel(path + '/Excel/impact_world_plus_' + self.version + '_ecoinvent_v38.xlsx')
+
+        # ecoinvent version in DataFrame format
+        self.ei35_iw_as_matrix.to_excel(path + '/DataFrame/impact_world_plus_' + self.version + '_ecoinvent_v35.xlsx')
+        self.ei36_iw_as_matrix.to_excel(path + '/DataFrame/impact_world_plus_' + self.version + '_ecoinvent_v36.xlsx')
+        self.ei371_iw_as_matrix.to_excel(path + '/DataFrame/impact_world_plus_' + self.version + '_ecoinvent_v371.xlsx')
+        self.ei38_iw_as_matrix.to_excel(path + '/DataFrame/impact_world_plus_' + self.version + '_ecoinvent_v38.xlsx')
+
+        # brightway2 versions in bw2package format
+        IW_ic = [bw2.Method(ic) for ic in list(bw2.methods) if ('IMPACT World+' in ic[0] and 'Combined' not in ic[0])]
+        bw2io.package.BW2Package.export_objs(IW_ic, filename='IMPACT_World+_'+self.version, folder=path+'/bw2/')
+        # bw2 combined version
+        IW_ic = [bw2.Method(ic) for ic in list(bw2.methods) if ('IMPACT World+' in ic[0] and 'Combined' in ic[0])]
+        bw2io.package.BW2Package.export_objs(IW_ic, filename='IMPACT_World+_'+self.version+'_combined_version',
+                                             folder=path+'/bw2/')
+
+        # SimaPro version in csv format
+        with open(path+'/SimaPro/IMPACT_World+_'+self.version+'_Midpoint.csv', 'w', newline='') as f:
+            writer = csv.writer(f, delimiter=";")
+            writer.writerows(
+                self.sp_data['metadata'] + [['', '', '', '', '', '']] + self.sp_data['midpoint_method_metadata'] +
+                self.sp_data['midpoint_values'] + [['', '', '', '', '', '']])
+            writer.writerows([['End', '', '', '', '', '']])
+        with open(path+'/SimaPro/IMPACT_World+_'+self.version+'_Damage.csv', 'w', newline='') as f:
+            writer = csv.writer(f, delimiter=";")
+            writer.writerows(
+                self.sp_data['metadata'] + [['', '', '', '', '', '']] + self.sp_data['damage_method_metadata'] +
+                self.sp_data['damage_values'] + [['', '', '', '', '', '']])
+            writer.writerows(self.sp_data['weighting_info_damage'] + [['', '', '', '', '', '']])
+            writer.writerows([['End', '', '', '', '', '']])
+        with open(path+'/SimaPro/IMPACT_World+_'+self.version+'.csv', 'w', newline='') as f:
+            writer = csv.writer(f, delimiter=";")
+            writer.writerows(
+                self.sp_data['metadata'] + [['', '', '', '', '', '']] + self.sp_data['combined_method_metadata'] +
+                self.sp_data['combined_values'] + [['', '', '', '', '', '']])
+            writer.writerows(self.sp_data['weighting_info_combined'] + [['', '', '', '', '', '']])
+            writer.writerows([['End', '', '', '', '', '']])
+        with open(path+'/SimaPro/IMPACT_World+_'+self.version+'_combined_midpoint-damage.csv', 'w', newline='') as f:
+            writer = csv.writer(f, delimiter=";")
+            writer.writerows(
+                self.sp_data['metadata'] + [['', '', '', '', '', '']] + self.sp_data['simplified_method_metadata'] +
+                self.sp_data['simplified_values'] + [['', '', '', '', '', '']])
+            writer.writerows([['End', '', '', '', '', '']])
+
+        # create the openLCA version (zip file)
+        zipObj = zipfile.ZipFile(path + '/openLCA/CIRAIG_methods.zip', 'w')
+        if not os.path.exists(path + '/openLCA/oLCA_folders/categories/'):
+            os.makedirs(path + '/openLCA/oLCA_folders/categories/')
+        with open(path + '/openLCA/oLCA_folders/categories/' + self.olca_data['category_metadata']['@id'] + '.json',
+                  'w') as f:
+            json.dump(self.olca_data['category_metadata'], f)
+        zipObj.write(path + '/openLCA/oLCA_folders/categories/' + self.olca_data['category_metadata']['@id'] + '.json')
+        if not os.path.exists(path + '/openLCA/oLCA_folders/lcia_methods/'):
+            os.makedirs(path + '/openLCA/oLCA_folders/lcia_methods/')
+        with open(path + '/openLCA/oLCA_folders/lcia_methods/' + self.olca_data['metadata_iw']['@id'] + '.json', 'w') as f:
+            json.dump(self.olca_data['metadata_iw'], f)
+        zipObj.write(path + '/openLCA/oLCA_folders/lcia_methods/' + self.olca_data['metadata_iw']['@id'] + '.json')
+        if not os.path.exists(path + '/openLCA/oLCA_folders/lcia_categories/'):
+            os.makedirs(path + '/openLCA/oLCA_folders/lcia_categories/')
+        for cat in self.olca_data['cf_dict'].keys():
+            with open(path + '/openLCA/oLCA_folders/lcia_categories/' + self.olca_data['cf_dict'][cat]['@id'] + '.json',
+                      'w') as f:
+                json.dump(self.olca_data['cf_dict'][cat], f)
+            zipObj.write(path + '/openLCA/oLCA_folders/lcia_categories/' + self.olca_data['cf_dict'][cat]['@id'] + '.json')
+        zipObj.close()
+        # use shutil to simplify the folder structure within the zip file
+        shutil.make_archive(path + '/openLCA/CIRAIG_methods', 'zip', path + '/openLCA/oLCA_folders/')
+
+    def produce_files_hybrid_ecoinvent(self):
+        """Specific method to create the files matching with hybrid-ecoinvent (pylcaio)."""
+
+        path = pkg_resources.resource_filename(__name__, '/Databases/Impact_world_' + self.version)
+
+        if not os.path.exists(path + '/for_hybrid_ecoinvent/ei35/'):
+            os.makedirs(path + '/for_hybrid_ecoinvent/ei35/')
+        if not os.path.exists(path + '/for_hybrid_ecoinvent/ei36/'):
+            os.makedirs(path + '/for_hybrid_ecoinvent/ei36/')
+        if not os.path.exists(path + '/for_hybrid_ecoinvent/ei371/'):
+            os.makedirs(path + '/for_hybrid_ecoinvent/ei371/')
+        if not os.path.exists(path + '/for_hybrid_ecoinvent/ei38/'):
+            os.makedirs(path + '/for_hybrid_ecoinvent/ei38/')
+
+        scipy.sparse.save_npz(path+'/for_hybrid_ecoinvent/ei35/Ecoinvent_not_regionalized.npz',
+                              scipy.sparse.csr_matrix(self.ei35_iw_as_matrix))
+        scipy.sparse.save_npz(path+'/for_hybrid_ecoinvent/ei36/Ecoinvent_not_regionalized.npz',
+                              scipy.sparse.csr_matrix(self.ei36_iw_as_matrix))
+        scipy.sparse.save_npz(path+'/for_hybrid_ecoinvent/ei371/Ecoinvent_not_regionalized.npz',
+                              scipy.sparse.csr_matrix(self.ei371_iw_as_matrix))
+        scipy.sparse.save_npz(path+'/for_hybrid_ecoinvent/ei38/Ecoinvent_not_regionalized.npz',
+                              scipy.sparse.csr_matrix(self.ei38_iw_as_matrix))
+
+# ----------------------------------------- Secondary methods ----------------------------------------------------------
 
     def load_basic_cfs(self):
         """
@@ -1353,14 +1904,14 @@ class Parse:
         self.iw_sp.loc[self.iw_sp['Elem flow name'] == 'Water, non-agri', 'Elem flow name'] = 'Water/m3, non-agri'
 
         # now apply the mapping with the different SP flow names
-        sp = pd.read_excel('C:/Users/11max/PycharmProjects/IW_Reborn/Data/mappings/SP/sp_mapping.xlsx').dropna()
+        sp = pd.read_excel(pkg_resources.resource_filename(__name__, '/Data/mappings/SP/sp_mapping.xlsxv')).dropna()
         differences = sp.loc[[i for i in sp.index if sp.loc[i, 'SimaPro flows'] != sp.loc[i, 'IW+ flows']]]
         for diff in differences.index:
             if '%' not in sp.loc[diff, 'SimaPro flows']:
                 df = self.iw_sp.loc[self.iw_sp.loc[:, 'Elem flow name'] == sp.loc[diff, 'IW+ flows']].copy()
                 df.loc[:, 'Elem flow name'] = sp.loc[diff, 'SimaPro flows']
                 self.iw_sp = pd.concat([self.iw_sp, df])
-            # special case for minerals in ground, need to only apply their CFs to the Mineral resours use category
+            # special case for minerals in ground, need to only apply their CFs to the Mineral resources use category
             else:
                 df = self.iw_sp.loc[self.iw_sp.loc[:, 'Elem flow name'] == sp.loc[diff, 'IW+ flows']].copy()
                 df = df[df['Impact category'] == 'Mineral resources use']
@@ -1441,6 +1992,112 @@ class Parse:
         for problem_child in problems:
             self.iw_sp.loc[self.iw_sp['Elem flow name'] == problem_child, 'Elem flow unit'] = 'kg'
 
+    def link_to_olca(self):
+        """
+        This method creates an openLCA method with the IW+ characterization factors.
+        :return:
+        """
+
+        self.olca_iw = self.master_db.copy()
+
+        olca_mapping = pd.read_excel(pkg_resources.resource_filename(__name__, '/Data/mappings/oLCA/oLCA_mapping.xlsx'))
+        olca_flows = pd.read_excel(pkg_resources.resource_filename(__name__, '/Data/mappings/oLCA/all_stressors.xlsx'))
+
+        # before removing flows that are not matched, keep those related to energy that are treated later
+        energy_flows = olca_mapping.loc[[i for i in olca_mapping.index if 'MJ' in olca_mapping.loc[i, 'oLCA name']],
+                                        'oLCA name'].values.tolist()
+        energy_flows = olca_flows.loc[[i for i in olca_flows.index if olca_flows.loc[i, 'flow_name'] in energy_flows]]
+
+        # before removing flows that are not matched, keep those related to different units used
+        flows_to_convert = {
+            'Gas, natural/kg': 'Gas, natural/m3',
+            'Gas, mine, off-gas, process, coal mining/kg': 'Gas, mine, off-gas, process, coal mining/m3',
+            'Water, cooling, unspecified natural origin/kg': 'Water, cooling, unspecified natural origin',
+            'Water, process, unspecified natural origin/kg': 'Water, cooling, unspecified natural origin',
+            'Water, unspecified natural origin/kg': 'Water, unspecified natural origin',
+            'Wood, unspecified, standing/kg': 'Wood, unspecified, standing/m3'
+        }
+        converting = olca_flows.loc[
+            [i for i in olca_flows.index if olca_flows.loc[i, 'flow_name'] in flows_to_convert.keys()]]
+        converting['reference'] = [flows_to_convert[i] for i in converting['flow_name']]
+        assert converting.loc[31546, 'flow_name'] == 'Gas, mine, off-gas, process, coal mining/kg'
+        converting.loc[31546, 'reference'] = 'Gas, mine, off-gas, process, coal mining'
+        assert converting.loc[31563, 'flow_name'] == 'Gas, natural/kg'
+        converting.loc[31563, 'reference'] = 'Gas, natural, in ground'
+        assert converting.loc[60453, 'flow_name'] == 'Water, unspecified natural origin/kg'
+        converting.loc[60453, 'reference'] = 'Water, unspecified natural origin/m3'
+
+        # map oLCA and IW flow names + drop oLCA flows not linked to IW
+        olca_flows = olca_flows.merge(olca_mapping, left_on=['flow_name'],
+                                      right_on=['oLCA name'], how='left').dropna(subset='iw name')
+        # split comp and subcomp
+        olca_flows['Sub-compartment'] = [eval(i)[1] for i in olca_flows['comp']]
+        olca_flows['Compartment'] = [eval(i)[0] for i in olca_flows['comp']]
+
+        # map compartments between oLCA and IW
+        with open(pkg_resources.resource_filename(__name__, '/Data/mappings/oLCA/comps.json'), 'r') as f:
+            comps = json.load(f)
+        olca_flows['Compartment'] = [comps[i] for i in olca_flows['Compartment']]
+
+        # map sub-compartments between oLCA and IW
+        with open(pkg_resources.resource_filename(__name__, '/Data/mappings/oLCA/subcomps.json'), 'r') as f:
+            subcomps = json.load(f)
+
+        # remove weird LT subcomps that only exist in openLCA flows
+        olca_flows = olca_flows.drop([i for i in olca_flows.index if eval(olca_flows.loc[i, 'comp'])[1] in [
+            'river, long-term', 'fresh water, long-term']])
+        olca_flows['Sub-compartment'] = [subcomps[i] for i in olca_flows['Sub-compartment']]
+
+        # switch iw names for olca names
+        self.olca_iw = olca_flows.merge(self.olca_iw, how='inner',
+                                        left_on=['iw name', 'Sub-compartment', 'Compartment'],
+                                        right_on=['Elem flow name', 'Sub-compartment', 'Compartment'])
+
+        # remove information from IW+ / only keep information relevant for oLCA
+        self.olca_iw = self.olca_iw.drop(
+            ['oLCA name', 'iw name', 'Sub-compartment', 'Compartment', 'Elem flow name', 'CAS number', 'Elem flow unit',
+             'Native geographical resolution scale'], axis=1)
+        # define unique index
+        self.olca_iw = self.olca_iw.set_index(['Impact category', 'CF unit', 'flow_id'])
+        # sort the multi-index
+        self.olca_iw = self.olca_iw.sort_index()
+
+        # oLCA flows are in kBq and iw+ flows in Bq. We convert CF values accordingly.
+        self.olca_iw.loc[['Ionizing radiations',
+                          'Ionizing radiation, ecosystem quality',
+                          'Ionizing radiation, human health'], 'CF value'] /= 1000
+
+        # flows which CF values change depending on their names, e.g., "Coal, 18MJ/kg"
+        for id_ in energy_flows.index:
+            if 'Wood' not in energy_flows.loc[id_, 'flow_name']:
+                to_add = pd.DataFrame(['Fossil and nuclear energy use',
+                                       'MJ deprived',
+                                       energy_flows.loc[id_, 'flow_id'],
+                                       energy_flows.loc[id_, 'flow_name'],
+                                       energy_flows.loc[id_, 'comp'],
+                                       energy_flows.loc[id_, 'cas'],
+                                       energy_flows.loc[id_, 'unit'],
+                                       energy_flows.loc[id_, 'flow_name'].split(' MJ')[0].split(', ')[-1],
+                                       'Midpoint'],
+                                      index=['Impact category', 'CF unit', 'flow_id', 'flow_name', 'comp', 'cas',
+                                             'unit', 'CF value', 'MP or Damage'])
+                to_add = to_add.T
+                to_add.index = pd.MultiIndex.from_product([['Fossil and nuclear energy use'], ['MJ deprived'],
+                                                           [energy_flows.loc[id_, 'flow_id']]])
+                to_add.drop(['Impact category', 'CF unit', 'flow_id'], axis=1, inplace=True)
+
+                self.olca_iw = pd.concat([self.olca_iw, to_add], axis=0)
+
+        # flows which require conversions because of their unit, e.g., "Gas, natural/kg"
+        for i in converting.index:
+            df = self.olca_iw.loc[self.olca_iw['flow_name'] == converting.loc[i, 'reference']].copy()
+            df = df.loc[df['comp'] == converting.loc[i, 'comp']]
+            df = df.reset_index()
+            df['flow_id'] = converting.loc[i, 'flow_id']
+            df['flow_name'] = converting.loc[i, 'flow_name']
+            df = df.set_index(['Impact category', 'CF unit', 'flow_id'])
+            self.olca_iw = pd.concat([self.olca_iw, df])
+
     def get_simplified_versions(self, ei_flows_version=None):
 
         self.simplified_version_sp = clean_up_dataframe(produce_simplified_version(self.iw_sp).reindex(
@@ -1461,406 +2118,6 @@ class Parse:
         else:
             self.simplified_version_bw = clean_up_dataframe(produce_simplified_version(self.ei38_iw).reindex(
                 self.ei38_iw.columns, axis=1))
-
-    def export_to_bw2(self, ei_flows_version=None):
-        """
-        This method creates a brightway2 method with the IW+ characterization factors.
-        :param ei_flows_version: [str] Provide a specific ei version (e.g., 3.6) to be used to determine the elementary flows
-                                 to be linked to iw+. Default values = eiv3.8 (in 2022)
-
-        :return:
-        """
-
-        print("Exporting to brightway2...")
-
-        bw2.projects.set_current(self.bw2_project)
-
-        bio = bw2.Database('biosphere3')
-
-        # extract the uuid codes for biosphere flows
-        bw_flows_with_codes = (
-            pd.DataFrame(
-                [(i.as_dict()['name'], i.as_dict()['categories'][0], i.as_dict()['categories'][1], i.as_dict()['code'])
-                 if len(i.as_dict()['categories']) == 2
-                 else (i.as_dict()['name'], i.as_dict()['categories'][0], 'unspecified', i.as_dict()['code'])
-                 for i in bio],
-                columns=['Elem flow name', 'Compartment', 'Sub-compartment', 'code'])
-        )
-
-        # merge with CF df to have the uuid codes and the corresponding CFs
-        if ei_flows_version == '3.5':
-            ei_in_bw = self.ei35_iw.merge(bw_flows_with_codes)
-        elif ei_flows_version == '3.6':
-            ei_in_bw = self.ei36_iw.merge(bw_flows_with_codes)
-        elif ei_flows_version == '3.7.1':
-            ei_in_bw = self.ei371_iw.merge(bw_flows_with_codes)
-        elif ei_flows_version == '3.8':
-            ei_in_bw = self.ei38_iw.merge(bw_flows_with_codes)
-        else:
-            ei_in_bw = self.ei38_iw.merge(bw_flows_with_codes)
-        ei_in_bw_simple = self.simplified_version_bw.merge(bw_flows_with_codes)
-
-        ei_in_bw.set_index(['Impact category', 'CF unit'], inplace=True)
-        ei_in_bw_simple.set_index(['Impact category', 'CF unit'], inplace=True)
-        impact_categories = ei_in_bw.index.drop_duplicates()
-        impact_categories_simple = ei_in_bw_simple.index.drop_duplicates()
-
-        # -------------- For complete version of IW+ ----------------
-        for ic in impact_categories:
-
-            if ei_in_bw.loc[[ic], 'MP or Damage'].iloc[0] == 'Midpoint':
-                mid_end = 'Midpoint'
-                # create the name of the method
-                name = ('IMPACT World+ ' + mid_end + ' ' + self.version, 'Midpoint', ic[0])
-            else:
-                mid_end = 'Damage'
-                # create the name of the method
-                if ic[1] == 'DALY':
-                    name = ('IMPACT World+ ' + mid_end + ' ' + self.version, 'Human health', ic[0])
-                else:
-                    name = ('IMPACT World+ ' + mid_end + ' ' + self.version, 'Ecosystem quality', ic[0])
-
-            # initialize the "Method" method
-            new_method = bw2.Method(name)
-            # register the new method
-            new_method.register()
-            # set its unit
-            new_method.metadata["unit"] = ic[1]
-
-            df = ei_in_bw.loc[[ic], ['code', 'CF value']].copy()
-            df.set_index('code', inplace=True)
-
-            data = []
-            for stressor in df.index:
-                data.append((('biosphere3', stressor), df.loc[stressor, 'CF value']))
-            new_method.write(data)
-
-        # -------------- For simplified version of IW+ ----------------
-        for ic in impact_categories_simple:
-
-            if ei_in_bw_simple.loc[[ic], 'MP or Damage'].iloc[0] == 'Midpoint':
-                # create the name of the method
-                name = ('IMPACT World+ ' + self.version + ' - Combined midpoint-damage profile', ic[0])
-            else:
-                # create the name of the method
-                if ic[1] == 'DALY':
-                    name = ('IMPACT World+ ' + self.version + ' - Combined midpoint-damage profile', ic[0])
-                else:
-                    name = ('IMPACT World+ ' + self.version + ' - Combined midpoint-damage profile', ic[0])
-
-            # initialize the "Method" method
-            new_method = bw2.Method(name)
-            # register the new method
-            new_method.register()
-            # set its unit
-            new_method.metadata["unit"] = ic[1]
-
-            df = ei_in_bw_simple.loc[[ic], ['code', 'CF value']].copy()
-            df.set_index('code', inplace=True)
-
-            data = []
-            for stressor in df.index:
-                data.append((('biosphere3', stressor), df.loc[stressor, 'CF value']))
-            new_method.write(data)
-
-    def export_to_sp(self):
-        """
-        This method creates the necessary information for the csv creation in SimaPro.
-        :return:
-        """
-
-        print("Exporting to SimaPro...")
-
-        # csv accepts strings only
-        self.iw_sp.loc[:, 'CF value'] = self.iw_sp.loc[:, 'CF value'].astype(str)
-        self.simplified_version_sp.loc[:, 'CF value'] = self.simplified_version_sp.loc[:, 'CF value'].astype(str)
-
-        # Metadata
-        l = ['SimaPro 9.3.0.3', 'methods', 'Date: ' + datetime.now().strftime("%D"),
-             'Time: ' + datetime.now().strftime("%H:%M:%S"),
-             'Project: Methods', 'CSV Format version: 8.0.5', 'CSV separator: Semicolon',
-             'Decimal separator: .', 'Date separator: -', 'Short date format: yyyy-MM-dd', 'Selection: Selection (1)',
-             'Related objects (system descriptions, substances, units, etc.): Yes',
-             'Include sub product stages and processes: No', "Open library: 'Methods'"]
-        metadata = []
-        for i in l:
-            s = '{' + i + '}'
-            metadata.append([s, '', '', '', '', ''])
-
-        # metadata on the midpoint method
-        midpoint_method_metadata = [['Method', '', '', '', '', ''], ['', '', '', '', '', ''],
-                                    ['Name', '', '', '', '', ''],
-                                    ['IMPACTWorld+ Midpoint ' + self.version, '', '', '', '', ''],
-                                    ['', '', '', '', '', ''], ['Version', '', '', '', '', ''],
-                                    [self.version.split('.')[0],self.version.split('.')[1], '', '', '', ''],
-                                    ['', '', '', '', '', ''], ['Comment', '', '', '', '', ''],
-                                    ['', '', '', '', '', ''], ['', '', '', '', '', ''],
-                                    ['Category', '', '', '', '', ''], ['Others', '', '', '', '', ''],
-                                    ['', '', '', '', '', ''],
-                                    ['Use Damage Assessment', '', '', '', '', ''], ['No', '', '', '', '', ''],
-                                    ['', '', '', '', '', ''],
-                                    ['Use Normalization', '', '', '', '', ''], ['No', '', '', '', '', ''],
-                                    ['', '', '', '', '', ''],
-                                    ['Use Weighting', '', '', '', '', ''], ['No', '', '', '', '', ''],
-                                    ['', '', '', '', '', ''],
-                                    ['Use Addition', '', '', '', '', ''], ['No', '', '', '', '', '']]
-        # metadata on the damage method
-        damage_method_metadata = [['Method', '', '', '', '', ''], ['', '', '', '', '', ''],
-                                  ['Name', '', '', '', '', ''],
-                                  ['IMPACTWorld+ Damage ' + self.version, '', '', '', '', ''],
-                                  ['', '', '', '', '', ''], ['Version', '', '', '', '', ''],
-                                  [self.version.split('.')[0],self.version.split('.')[1], '', '', '', ''],
-                                  ['', '', '', '', '', ''], ['Comment', '', '', '', '', ''],
-                                  ['', '', '', '', '', ''], ['', '', '', '', '', ''],
-                                  ['Category', '', '', '', '', ''], ['Others', '', '', '', '', ''],
-                                  ['', '', '', '', '', ''],
-                                  ['Use Damage Assessment', '', '', '', '', ''], ['Yes', '', '', '', '', ''],
-                                  ['', '', '', '', '', ''],
-                                  ['Use Normalization', '', '', '', '', ''], ['Yes', '', '', '', '', ''],
-                                  ['', '', '', '', '', ''],
-                                  ['Use Weighting', '', '', '', '', ''], ['Yes', '', '', '', '', ''],
-                                  ['', '', '', '', '', ''],
-                                  ['Use Addition', '', '', '', '', ''], ['Yes', '', '', '', '', '']]
-        # metadata on the combined method
-        combined_method_metadata = [['Method', '', '', '', '', ''], ['', '', '', '', '', ''],
-                                    ['Name', '', '', '', '', ''],
-                                    ['IMPACTWorld+ ' + self.version, '', '', '', '', ''],
-                                    ['', '', '', '', '', ''], ['Version', '', '', '', '', ''],
-                                    [self.version.split('.')[0], self.version.split('.')[1], '', '', '', ''],
-                                    ['', '', '', '', '', ''], ['Comment', '', '', '', '', ''],
-                                    ['', '', '', '', '', ''], ['', '', '', '', '', ''],
-                                    ['Category', '', '', '', '', ''], ['Others', '', '', '', '', ''],
-                                    ['', '', '', '', '', ''],
-                                    ['Use Damage Assessment', '', '', '', '', ''], ['Yes', '', '', '', '', ''],
-                                    ['', '', '', '', '', ''],
-                                    ['Use Normalization', '', '', '', '', ''], ['Yes', '', '', '', '', ''],
-                                    ['', '', '', '', '', ''],
-                                    ['Use Weighting', '', '', '', '', ''], ['Yes', '', '', '', '', ''],
-                                    ['', '', '', '', '', ''],
-                                    ['Use Addition', '', '', '', '', ''], ['Yes', '', '', '', '', '']]
-        # metadata on the simplified method
-        simplified_method_metadata = [['Method', '', '', '', '', ''], ['', '', '', '', '', ''],
-                                    ['Name', '', '', '', '', ''],
-                                    ['IMPACTWorld+ ' + self.version + ' combined midpoint-damage', '', '', '', '', ''],
-                                    ['', '', '', '', '', ''], ['Version', '', '', '', '', ''],
-                                    [self.version.split('.')[0],self.version.split('.')[1], '', '', '', ''],
-                                    ['', '', '', '', '', ''], ['Comment', '', '', '', '', ''],
-                                    ['', '', '', '', '', ''], ['', '', '', '', '', ''],
-                                    ['Category', '', '', '', '', ''], ['Others', '', '', '', '', ''],
-                                    ['', '', '', '', '', ''],
-                                    ['Use Damage Assessment', '', '', '', '', ''], ['No', '', '', '', '', ''],
-                                    ['', '', '', '', '', ''],
-                                    ['Use Normalization', '', '', '', '', ''], ['No', '', '', '', '', ''],
-                                    ['', '', '', '', '', ''],
-                                    ['Use Weighting', '', '', '', '', ''], ['No', '', '', '', '', ''],
-                                    ['', '', '', '', '', ''],
-                                    ['Use Addition', '', '', '', '', ''], ['No', '', '', '', '', '']]
-
-        # data for weighting and normalizing
-        df = pd.read_csv(pkg_resources.resource_filename(
-            __name__, '/Data/weighting_normalizing/weighting_and_normalization.csv'),
-            header=None, delimiter=';').fillna('')
-        weighting_info_damage = [[df.loc[i].tolist()[0], df.loc[i].tolist()[1], '', '', '', ''] for i in df.index]
-
-        weighting_info_combined = weighting_info_damage.copy()
-        weighting_info_combined[11] = ['Ozone layer depletion (damage)', '1.00E+00', '', '', '', '']
-        weighting_info_combined[12] = ['Particulate matter formation (damage)', '1.00E+00', '', '', '', '']
-        weighting_info_combined[13] = ['Photochemical oxidant formation (damage)', '1.00E+00', '', '', '', '']
-        weighting_info_combined[22] = ['Freshwater acidification (damage)', '1.00E+00', '', '', '', '']
-        weighting_info_combined[25] = ['Freshwater eutrophication (damage)', '1.00E+00', '', '', '', '']
-        weighting_info_combined[27] = ['Land occupation, biodiversity (damage)', '1.00E+00', '', '', '', '']
-        weighting_info_combined[28] = ['Land transformation, biodiversity (damage)', '1.00E+00', '', '', '', '']
-        weighting_info_combined[31] = ['Marine eutrophication (damage)', '1.00E+00', '', '', '', '']
-        weighting_info_combined[32] = ['Terrestrial acidification (damage)', '1.00E+00', '', '', '', '']
-
-        # extracting midpoint CFs
-        d_ic_unit = self.iw_sp.loc[self.iw_sp['MP or Damage'] == 'Midpoint',
-                              ['Impact category', 'CF unit']].drop_duplicates().set_index('Impact category').iloc[:,
-                    0].to_dict()
-        midpoint_values = []
-        for j in d_ic_unit.keys():
-            midpoint_values.append(['', '', '', '', '', ''])
-            midpoint_values.append(['Impact category', '', '', '', '', ''])
-            midpoint_values.append([j, d_ic_unit[j], '', '', '', ''])
-            midpoint_values.append(['', '', '', '', '', ''])
-            midpoint_values.append(['Substances', '', '', '', '', ''])
-            df = self.iw_sp[self.iw_sp['Impact category'] == j]
-            df = df[df['CF unit'] == d_ic_unit[j]]
-            df = df[['Compartment', 'Sub-compartment', 'Elem flow name', 'CAS number', 'CF value', 'Elem flow unit']]
-            for i in df.index:
-                if type(df.loc[i, 'CAS number']) == float:
-                    df.loc[i, 'CAS number'] = ''
-                midpoint_values.append(df.loc[i].tolist())
-
-        # extracting damage CFs
-        d_ic_unit = self.iw_sp.loc[self.iw_sp['MP or Damage'] == 'Damage',
-                              ['Impact category', 'CF unit']].drop_duplicates().set_index('Impact category').iloc[:,
-                    0].to_dict()
-        damage_values = []
-        for j in d_ic_unit.keys():
-            damage_values.append(['', '', '', '', '', ''])
-            damage_values.append(['Impact category', '', '', '', '', ''])
-            damage_values.append([j, d_ic_unit[j], '', '', '', ''])
-            damage_values.append(['', '', '', '', '', ''])
-            damage_values.append(['Substances', '', '', '', '', ''])
-            df = self.iw_sp[self.iw_sp['Impact category'] == j]
-            df = df[df['CF unit'] == d_ic_unit[j]]
-            df = df[['Compartment', 'Sub-compartment', 'Elem flow name', 'CAS number', 'CF value', 'Elem flow unit']]
-            for i in df.index:
-                if type(df.loc[i, 'CAS number']) == float:
-                    df.loc[i, 'CAS number'] = ''
-                damage_values.append(df.loc[i].tolist())
-
-        # extracting combined CFs
-        ic_unit = self.iw_sp.loc[:, ['Impact category', 'CF unit']].drop_duplicates()
-        same_names = ['Freshwater acidification','Freshwater eutrophication','Land occupation, biodiversity',
-                      'Land transformation, biodiversity','Marine eutrophication','Ozone layer depletion',
-                      'Particulate matter formation','Photochemical oxidant formation','Terrestrial acidification']
-        combined_values = []
-        for j in ic_unit.index:
-            combined_values.append(['', '', '', '', '', ''])
-            combined_values.append(['Impact category', '', '', '', '', ''])
-            if ic_unit.loc[j,'Impact category'] in same_names:
-                if ic_unit.loc[j,'CF unit'] in ['DALY','PDF.m2.yr']:
-                    combined_values.append([ic_unit.loc[j,'Impact category']+' (damage)',
-                                            ic_unit.loc[j,'CF unit'], '', '', '', ''])
-                else:
-                    combined_values.append([ic_unit.loc[j,'Impact category']+' (midpoint)',
-                                            ic_unit.loc[j,'CF unit'], '', '', '', ''])
-            else:
-                combined_values.append([ic_unit.loc[j, 'Impact category'],
-                                        ic_unit.loc[j, 'CF unit'], '', '', '', ''])
-            combined_values.append(['', '', '', '', '', ''])
-            combined_values.append(['Substances', '', '', '', '', ''])
-            df = self.iw_sp.loc[[i for i in self.iw_sp.index if (
-                    self.iw_sp.loc[i,'Impact category'] == ic_unit.loc[j,'Impact category'] and
-                    self.iw_sp.loc[i, 'CF unit'] == ic_unit.loc[j, 'CF unit'])]]
-            df = df[['Compartment', 'Sub-compartment', 'Elem flow name', 'CAS number', 'CF value', 'Elem flow unit']]
-            for i in df.index:
-                if type(df.loc[i, 'CAS number']) == float:
-                    df.loc[i, 'CAS number'] = ''
-                combined_values.append(df.loc[i].tolist())
-
-        # extracting simplified values
-        ic_unit = self.simplified_version_sp.loc[:, ['Impact category', 'CF unit']].drop_duplicates()
-        simplified_values = []
-        for j in ic_unit.index:
-            simplified_values.append(['', '', '', '', '', ''])
-            simplified_values.append(['Impact category', '', '', '', '', ''])
-            simplified_values.append([ic_unit.loc[j, 'Impact category'],
-                                      ic_unit.loc[j, 'CF unit'], '', '', '', ''])
-            simplified_values.append(['', '', '', '', '', ''])
-            simplified_values.append(['Substances', '', '', '', '', ''])
-            df = self.simplified_version_sp.loc[[i for i in self.simplified_version_sp.index if (
-                    self.simplified_version_sp.loc[i, 'Impact category'] == ic_unit.loc[j, 'Impact category'] and
-                    self.simplified_version_sp.loc[i, 'CF unit'] == ic_unit.loc[j, 'CF unit'])]]
-            df = df[['Compartment', 'Sub-compartment', 'Elem flow name', 'CAS number', 'CF value', 'Elem flow unit']]
-            for i in df.index:
-                simplified_values.append(df.loc[i].tolist())
-
-        # dump everything in an attribute
-        self.sp_data = {'metadata': metadata, 'midpoint_method_metadata': midpoint_method_metadata,
-                        'damage_method_metadata': damage_method_metadata,
-                        'combined_method_metadata': combined_method_metadata,
-                        'simplified_method_metadata': simplified_method_metadata,
-                        'weighting_info_damage': weighting_info_damage,
-                        'weighting_info_combined': weighting_info_combined,
-                        'midpoint_values': midpoint_values, 'damage_values': damage_values,
-                        'combined_values':combined_values, 'simplified_values':simplified_values}
-
-    def produce_files(self):
-        """
-        Function producing the different IW+ files for the different versions.
-        :return: the IW+ files
-        """
-
-        print("Creating all the files...")
-
-        path = pkg_resources.resource_filename(__name__, '/Databases/Impact_world_' + self.version)
-
-        # if the folders are not there yet, create them
-        if not os.path.exists(path + '/Excel/'):
-            os.makedirs(path + '/Excel/')
-        if not os.path.exists(path + '/DataFrame/'):
-            os.makedirs(path + '/DataFrame/')
-        if not os.path.exists(path + '/bw2/'):
-            os.makedirs(path + '/bw2/')
-        if not os.path.exists(path + '/SimaPro/'):
-            os.makedirs(path + '/SimaPro/')
-
-        # Dev version
-        self.master_db.to_excel(path + '/Excel/impact_world_plus_' + self.version + '_dev.xlsx')
-
-        # ecoinvent versions in Excel format
-        self.ei35_iw.to_excel(path + '/Excel/impact_world_plus_' + self.version + '_ecoinvent_v35.xlsx')
-        self.ei36_iw.to_excel(path + '/Excel/impact_world_plus_' + self.version + '_ecoinvent_v36.xlsx')
-        self.ei371_iw.to_excel(path + '/Excel/impact_world_plus_' + self.version + '_ecoinvent_v371.xlsx')
-        self.ei38_iw.to_excel(path + '/Excel/impact_world_plus_' + self.version + '_ecoinvent_v38.xlsx')
-
-        # ecoinvent version in DataFrame format
-        self.ei35_iw_as_matrix.to_excel(path + '/DataFrame/impact_world_plus_' + self.version + '_ecoinvent_v35.xlsx')
-        self.ei36_iw_as_matrix.to_excel(path + '/DataFrame/impact_world_plus_' + self.version + '_ecoinvent_v36.xlsx')
-        self.ei371_iw_as_matrix.to_excel(path + '/DataFrame/impact_world_plus_' + self.version + '_ecoinvent_v371.xlsx')
-        self.ei38_iw_as_matrix.to_excel(path + '/DataFrame/impact_world_plus_' + self.version + '_ecoinvent_v38.xlsx')
-
-        # brightway2 versions in bw2package format
-        IW_ic = [bw2.Method(ic) for ic in list(bw2.methods) if ('IMPACT World+' in ic[0] and 'Combined' not in ic[0])]
-        bw2io.package.BW2Package.export_objs(IW_ic, filename='IMPACT_World+_'+self.version, folder=path+'/bw2/')
-        # bw2 combined version
-        IW_ic = [bw2.Method(ic) for ic in list(bw2.methods) if ('IMPACT World+' in ic[0] and 'Combined' in ic[0])]
-        bw2io.package.BW2Package.export_objs(IW_ic, filename='IMPACT_World+_'+self.version+'_combined_version',
-                                             folder=path+'/bw2/')
-
-        # SimaPro version in csv format
-        with open(path+'/SimaPro/IMPACT_World+_'+self.version+'_Midpoint.csv', 'w', newline='') as f:
-            writer = csv.writer(f, delimiter=";")
-            writer.writerows(
-                self.sp_data['metadata'] + [['', '', '', '', '', '']] + self.sp_data['midpoint_method_metadata'] +
-                self.sp_data['midpoint_values'] + [['', '', '', '', '', '']])
-            writer.writerows([['End', '', '', '', '', '']])
-        with open(path+'/SimaPro/IMPACT_World+_'+self.version+'_Damage.csv', 'w', newline='') as f:
-            writer = csv.writer(f, delimiter=";")
-            writer.writerows(
-                self.sp_data['metadata'] + [['', '', '', '', '', '']] + self.sp_data['damage_method_metadata'] +
-                self.sp_data['damage_values'] + [['', '', '', '', '', '']])
-            writer.writerows(self.sp_data['weighting_info_damage'] + [['', '', '', '', '', '']])
-            writer.writerows([['End', '', '', '', '', '']])
-        with open(path+'/SimaPro/IMPACT_World+_'+self.version+'.csv', 'w', newline='') as f:
-            writer = csv.writer(f, delimiter=";")
-            writer.writerows(
-                self.sp_data['metadata'] + [['', '', '', '', '', '']] + self.sp_data['combined_method_metadata'] +
-                self.sp_data['combined_values'] + [['', '', '', '', '', '']])
-            writer.writerows(self.sp_data['weighting_info_combined'] + [['', '', '', '', '', '']])
-            writer.writerows([['End', '', '', '', '', '']])
-        with open(path+'/SimaPro/IMPACT_World+_'+self.version+'_combined_midpoint-damage.csv', 'w', newline='') as f:
-            writer = csv.writer(f, delimiter=";")
-            writer.writerows(
-                self.sp_data['metadata'] + [['', '', '', '', '', '']] + self.sp_data['simplified_method_metadata'] +
-                self.sp_data['simplified_values'] + [['', '', '', '', '', '']])
-            writer.writerows([['End', '', '', '', '', '']])
-
-    def produce_files_hybrid_ecoinvent(self):
-        """Specific method to create the files matching with hybrid-ecoinvent (pylcaio)."""
-
-        path = pkg_resources.resource_filename(__name__, '/Databases/Impact_world_' + self.version)
-
-        if not os.path.exists(path + '/for_hybrid_ecoinvent/ei35/'):
-            os.makedirs(path + '/for_hybrid_ecoinvent/ei35/')
-        if not os.path.exists(path + '/for_hybrid_ecoinvent/ei36/'):
-            os.makedirs(path + '/for_hybrid_ecoinvent/ei36/')
-        if not os.path.exists(path + '/for_hybrid_ecoinvent/ei371/'):
-            os.makedirs(path + '/for_hybrid_ecoinvent/ei371/')
-        if not os.path.exists(path + '/for_hybrid_ecoinvent/ei38/'):
-            os.makedirs(path + '/for_hybrid_ecoinvent/ei38/')
-
-        scipy.sparse.save_npz(path+'/for_hybrid_ecoinvent/ei35/Ecoinvent_not_regionalized.npz',
-                              scipy.sparse.csr_matrix(self.ei35_iw_as_matrix))
-        scipy.sparse.save_npz(path+'/for_hybrid_ecoinvent/ei36/Ecoinvent_not_regionalized.npz',
-                              scipy.sparse.csr_matrix(self.ei36_iw_as_matrix))
-        scipy.sparse.save_npz(path+'/for_hybrid_ecoinvent/ei371/Ecoinvent_not_regionalized.npz',
-                              scipy.sparse.csr_matrix(self.ei371_iw_as_matrix))
-        scipy.sparse.save_npz(path+'/for_hybrid_ecoinvent/ei38/Ecoinvent_not_regionalized.npz',
-                              scipy.sparse.csr_matrix(self.ei38_iw_as_matrix))
 
 # -------------- Support modules -------------------
 
