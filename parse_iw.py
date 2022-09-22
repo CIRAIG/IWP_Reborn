@@ -143,16 +143,16 @@ class Parse:
         self.order_things_around()
         self.separate_regio_cfs()
 
-        # print("Linking to ecoinvent elementary flows...")
-        # self.link_to_ecoinvent()
-        #
-        # print("Linking to SimaPro elementary flows...")
-        # self.link_to_sp()
+        print("Linking to ecoinvent elementary flows...")
+        self.link_to_ecoinvent()
+
+        print("Linking to SimaPro elementary flows...")
+        self.link_to_sp()
 
         print("Linking to openLCA elementary flows...")
         self.link_to_olca()
 
-        # self.get_simplified_versions()
+        self.get_simplified_versions()
 
     def export_to_bw2(self, ei_flows_version=None):
         """
@@ -467,7 +467,6 @@ class Parse:
         """
 
         # metadata method (category folder in oLCA app)
-
         id_category = str(uuid.uuid4())
 
         category_metadata = {"@context": "http://greendelta.github.io/olca-schema/context.jsonld",
@@ -478,7 +477,6 @@ class Parse:
                              "modelType": "IMPACT_METHOD"}
 
         # metadata json for lcia methods
-
         dict_ = self.olca_iw.reset_index().loc[:, ['Impact category', 'CF unit']].drop_duplicates().to_dict('list')
         category_names = list(zip(dict_['Impact category'], dict_['CF unit']))
         category_names = [(i[0], i[1], str(uuid.uuid4())) for i in category_names]
@@ -570,7 +568,40 @@ class Parse:
 
             cf_dict[cat] = cf_values
 
-        self.olca_data = {'category_metadata': category_metadata, 'metadata_iw': metadata_iw, 'cf_dict': cf_dict}
+        # normalization/weighting files
+        norm = {}
+        for i in category_names:
+            if i[1] == 'DALY':
+                norm[(i[0], i[1], category_names[i])] = {"normalisationFactor": 13.7, "weightingFactor": 5401.459854}
+            elif i[1] == 'PDF.m2.yr':
+                norm[(i[0], i[1], category_names[i])] = {"normalisationFactor": 1.01E-4, "weightingFactor": 1386.138614}
+
+        normalization = {
+            "@context": "http://greendelta.github.io/olca-schema/context.jsonld",
+            "@type": "NwSet",
+            "@id": str(uuid.uuid4()),
+            "name": "IMPACT World+ (Stepwise 2006 values)",
+            "version": "00.00.000",
+            "weightedScoreUnit": "EUR2003",
+            "factors": []}
+
+        for x in norm:
+            normalization['factors'].append(
+                {
+                    "@type": "NwFactor",
+                    "impactCategory": {
+                        "@type": "ImpactCategory",
+                        "@id": x[2],
+                        "name": x[0],
+                        "refUnit": x[1]
+                    },
+                    "normalisationFactor": norm[x]['normalisationFactor'],
+                    "weightingFactor": norm[x]['weightingFactor']
+                }
+            )
+
+        self.olca_data = {'category_metadata': category_metadata, 'metadata_iw': metadata_iw, 'cf_dict': cf_dict,
+                          'normalization':normalization}
 
     def produce_files(self):
         """
@@ -665,6 +696,12 @@ class Parse:
                       'w') as f:
                 json.dump(self.olca_data['cf_dict'][cat], f)
             zipObj.write(path + '/openLCA/oLCA_folders/lcia_categories/' + self.olca_data['cf_dict'][cat]['@id'] + '.json')
+        if not os.path.exists(path + '/openLCA/oLCA_folders/nw_sets/'):
+            os.makedirs(path + '/openLCA/oLCA_folders/nw_sets/')
+        with open(path + '/openLCA/oLCA_folders/nw_sets/' + self.olca_data['normalization']['@id'] + '.json',
+                  'w') as f:
+            json.dump(self.olca_data['normalization'], f)
+        zipObj.write(path + '/openLCA/oLCA_folders/nw_sets/' + self.olca_data['normalization']['@id'] + '.json')
         zipObj.close()
         # use shutil to simplify the folder structure within the zip file
         shutil.make_archive(path + '/openLCA/CIRAIG_methods', 'zip', path + '/openLCA/oLCA_folders/')
@@ -1904,7 +1941,7 @@ class Parse:
         self.iw_sp.loc[self.iw_sp['Elem flow name'] == 'Water, non-agri', 'Elem flow name'] = 'Water/m3, non-agri'
 
         # now apply the mapping with the different SP flow names
-        sp = pd.read_excel(pkg_resources.resource_filename(__name__, '/Data/mappings/SP/sp_mapping.xlsxv')).dropna()
+        sp = pd.read_excel(pkg_resources.resource_filename(__name__, '/Data/mappings/SP/sp_mapping.xlsx')).dropna()
         differences = sp.loc[[i for i in sp.index if sp.loc[i, 'SimaPro flows'] != sp.loc[i, 'IW+ flows']]]
         for diff in differences.index:
             if '%' not in sp.loc[diff, 'SimaPro flows']:
