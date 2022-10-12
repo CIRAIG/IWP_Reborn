@@ -466,6 +466,8 @@ class Parse:
         :return:
         """
 
+        print("Exporting to openLCA...")
+
         # metadata method (category folder in oLCA app)
         id_category = str(uuid.uuid4())
 
@@ -679,6 +681,8 @@ class Parse:
         # create the openLCA version (zip file)
         if os.path.exists(path + '/openLCA/CIRAIG_methods.zip'):
             os.remove(path + '/openLCA/CIRAIG_methods.zip')
+        if os.path.exists(path + '/openLCA/oLCA_folders'):
+            shutil.rmtree(path + '/openLCA/oLCA_folders')
         zipObj = zipfile.ZipFile(path + '/openLCA/CIRAIG_methods.zip', 'w')
         if not os.path.exists(path + '/openLCA/oLCA_folders/categories/'):
             os.makedirs(path + '/openLCA/oLCA_folders/categories/')
