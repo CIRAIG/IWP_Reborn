@@ -677,6 +677,8 @@ class Parse:
             writer.writerows([['End', '', '', '', '', '']])
 
         # create the openLCA version (zip file)
+        if os.path.exists(path + '/openLCA/CIRAIG_methods.zip'):
+            os.remove(path + '/openLCA/CIRAIG_methods.zip')
         zipObj = zipfile.ZipFile(path + '/openLCA/CIRAIG_methods.zip', 'w')
         if not os.path.exists(path + '/openLCA/oLCA_folders/categories/'):
             os.makedirs(path + '/openLCA/oLCA_folders/categories/')
@@ -2090,6 +2092,12 @@ class Parse:
                                         left_on=['iw name', 'Sub-compartment', 'Compartment'],
                                         right_on=['Elem flow name', 'Sub-compartment', 'Compartment'])
 
+        # CFs for water flows in kilograms to be converted
+        self.olca_iw.loc[[i for i in self.olca_iw.index if (self.olca_iw.loc[i, 'unit'] == 'kg' and
+                                                            'Water' in self.olca_iw.loc[i, 'flow_name'] and
+                                                            '/kg' not in self.olca_iw.loc[
+                                                                i, 'flow_name'])], 'CF value'] /= 1000
+
         # remove information from IW+ / only keep information relevant for oLCA
         self.olca_iw = self.olca_iw.drop(
             ['oLCA name', 'iw name', 'Sub-compartment', 'Compartment', 'Elem flow name', 'CAS number', 'Elem flow unit',
@@ -2102,7 +2110,7 @@ class Parse:
         # oLCA flows are in kBq and iw+ flows in Bq. We convert CF values accordingly.
         self.olca_iw.loc[['Ionizing radiations',
                           'Ionizing radiation, ecosystem quality',
-                          'Ionizing radiation, human health'], 'CF value'] /= 1000
+                          'Ionizing radiation, human health'], 'CF value'] *= 1000
 
         # flows which CF values change depending on their names, e.g., "Coal, 18MJ/kg"
         for id_ in energy_flows.index:
@@ -2133,7 +2141,11 @@ class Parse:
             df['flow_id'] = converting.loc[i, 'flow_id']
             df['flow_name'] = converting.loc[i, 'flow_name']
             df = df.set_index(['Impact category', 'CF unit', 'flow_id'])
-            self.olca_iw = pd.concat([self.olca_iw, df])
+            if 'Gas' in converting.loc[i, 'flow_name']:
+                df.loc[:, 'CF value'] /= 0.8  # kg/m3 (https://www.engineeringtoolbox.com/gas-density-d_158.html)
+            elif 'Water' in converting.loc[i, 'flow_name']:
+                df.loc[:, 'CF value'] /= 1000  # kg/m3
+            self.olca_iw.update(df)
 
     def get_simplified_versions(self, ei_flows_version=None):
 
