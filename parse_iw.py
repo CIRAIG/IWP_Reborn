@@ -100,6 +100,7 @@ class Parse:
         self.ei38_iw_as_matrix = pd.DataFrame()
         self.iw_sp = pd.DataFrame()
         self.simplified_version_sp = pd.DataFrame()
+        self.simplified_version_olca = pd.DataFrame()
         self.simplified_version_bw = pd.DataFrame()
         self.sp_data = {}
         self.olca_iw = pd.DataFrame()
@@ -508,6 +509,36 @@ class Parse:
                  "refUnit": cat[1]}
             )
 
+        simplified_cats = list(set([(i[0], i[1]) for i in self.simplified_version_olca.index]))
+        simplified_cats = {(simplified_cats[i][0], simplified_cats[i][1]):
+                               [category_names[i] if i in category_names else str(uuid.uuid4()) for i in
+                                simplified_cats][i]
+                           for i in range(len(simplified_cats))}
+
+        id_iw_combined = str(uuid.uuid4())
+
+        metadata_iw_combined = {
+            "@context": "http://greendelta.github.io/olca-schema/context.jsonld",
+            "@type": "ImpactMethod",
+            "@id": id_iw_combined,
+            "name": "IMPACT World+ v2.0 (combined)",
+            "lastChange": "2022-09-15T17:25:43.725-05:00",
+            "category": {
+                "@type": "Category",
+                "@id": id_category,
+                "name": "CIRAIG methods",
+                "categoryType": "ImpactMethod"},
+            'impactCategories': []
+        }
+
+        for cat in simplified_cats:
+            metadata_iw_combined['impactCategories'].append(
+                {"@type": "ImpactCategory",
+                 "@id": simplified_cats[cat],
+                 "name": cat[0],
+                 "refUnit": cat[1]}
+            )
+
         # hardcoded, obtained from going inside the json files of an exported oLCA method
         unit_groups = {
             'kg': '93a60a57-a4c8-11da-a746-0800200c9a66',
@@ -526,7 +557,7 @@ class Parse:
             'MJ': 'f6811440-ee37-11de-8a39-0800200c9a66'
         }
 
-
+        # Normal version
         cf_dict = {}
         for cat in category_names:
             cf_values = {
@@ -602,7 +633,57 @@ class Parse:
                 }
             )
 
-        self.olca_data = {'category_metadata': category_metadata, 'metadata_iw': metadata_iw, 'cf_dict': cf_dict,
+        # Combined version (removing CC and WA from AoPs)
+        cf_dict_combined = {}
+
+        for cat in simplified_cats:
+            cf_values = {
+                "@context": "http://greendelta.github.io/olca-schema/context.jsonld",
+                "@type": "ImpactCategory",
+                "@id": simplified_cats[cat],
+                "name": cat[0],
+                "version": "02.00.000",
+                "referenceUnitName": cat[1],
+                "impactFactors": []
+            }
+
+            dff = self.simplified_version_olca.loc[cat].copy()
+
+            for flow_id in dff.index:
+                unit = dff.loc[flow_id, 'unit']
+                cf_values["impactFactors"].append({
+                    "@type": "ImpactFactor",
+                    "value": dff.loc[flow_id, 'CF value'],
+                    "flow": {
+                        "@type": "Flow",
+                        "@id": flow_id,
+                        "name": dff.loc[flow_id, 'flow_name'],
+                        "categoryPath": ["Elementary flows",
+                                         eval(dff.loc[flow_id, 'comp'])[0],
+                                         eval(dff.loc[flow_id, 'comp'])[1]],
+                        "flowType": "ELEMENTARY_FLOW",
+                        "refUnit": unit
+                    },
+                    "unit": {
+                        "@type": "Unit",
+                        "@id": unit_groups[unit],
+                        "name": unit
+                    },
+                    "flowProperty": {
+                        "@type": "FlowProperty",
+                        "@id": flow_properties[unit],
+                        "name": unit,
+                        "categoryPath": ["Technical flow properties"]
+                    }
+                })
+
+            cf_dict_combined[cat] = cf_values
+
+        self.olca_data = {'category_metadata': category_metadata,
+                          'metadata_iw': metadata_iw,
+                          'metadata_iw_combined': metadata_iw_combined,
+                          'cf_dict': cf_dict,
+                          'cf_dict_combined': cf_dict_combined,
                           'normalization':normalization}
 
     def produce_files(self):
@@ -695,6 +776,11 @@ class Parse:
         with open(path + '/openLCA/oLCA_folders/lcia_methods/' + self.olca_data['metadata_iw']['@id'] + '.json', 'w') as f:
             json.dump(self.olca_data['metadata_iw'], f)
         zipObj.write(path + '/openLCA/oLCA_folders/lcia_methods/' + self.olca_data['metadata_iw']['@id'] + '.json')
+        with open(path + '/openLCA/oLCA_folders/lcia_methods/' + self.olca_data['metadata_iw_combined']['@id'] + '.json',
+                'w') as f:
+            json.dump(self.olca_data['metadata_iw_combined'], f)
+        zipObj.write(
+            path + '/openLCA/oLCA_folders/lcia_methods/' + self.olca_data['metadata_iw_combined']['@id'] + '.json')
         if not os.path.exists(path + '/openLCA/oLCA_folders/lcia_categories/'):
             os.makedirs(path + '/openLCA/oLCA_folders/lcia_categories/')
         for cat in self.olca_data['cf_dict'].keys():
@@ -702,6 +788,12 @@ class Parse:
                       'w') as f:
                 json.dump(self.olca_data['cf_dict'][cat], f)
             zipObj.write(path + '/openLCA/oLCA_folders/lcia_categories/' + self.olca_data['cf_dict'][cat]['@id'] + '.json')
+        for cat in self.olca_data['cf_dict_combined'].keys():
+            with open(path + '/openLCA/oLCA_folders/lcia_categories/' + self.olca_data['cf_dict_combined'][cat][
+                '@id'] + '.json', 'w') as f:
+                json.dump(self.olca_data['cf_dict_combined'][cat], f)
+            zipObj.write(path + '/openLCA/oLCA_folders/lcia_categories/' + self.olca_data['cf_dict_combined'][cat][
+                '@id'] + '.json')
         if not os.path.exists(path + '/openLCA/oLCA_folders/nw_sets/'):
             os.makedirs(path + '/openLCA/oLCA_folders/nw_sets/')
         with open(path + '/openLCA/oLCA_folders/nw_sets/' + self.olca_data['normalization']['@id'] + '.json',
@@ -2156,6 +2248,8 @@ class Parse:
         self.simplified_version_sp = clean_up_dataframe(produce_simplified_version(self.iw_sp).reindex(
             self.iw_sp.columns, axis=1))
 
+        self.simplified_version_olca = produce_simplified_version_olca(self.olca_iw).drop_duplicates()
+
         if ei_flows_version == '3.5':
             self.simplified_version_bw = clean_up_dataframe(produce_simplified_version(self.ei35_iw).reindex(
                 self.ei35_iw.columns, axis=1))
@@ -2253,6 +2347,56 @@ def produce_simplified_version(complete_dataframe):
     simplified_version['CAS number'] = [cas[i] for i in simplified_version['Elem flow name']]
 
     return simplified_version
+
+
+def produce_simplified_version_olca(complete_dataframe):
+    simplified = complete_dataframe.copy()
+
+    PDF_total = complete_dataframe.loc(axis=0)[:, 'PDF.m2.yr'].loc[:, 'CF value'].groupby(axis=0, level=2).sum()
+    PDF_total = PDF_total[PDF_total != 0]
+    PDF_total = PDF_total.reset_index().merge(complete_dataframe.reset_index().loc[
+                                              :, ['flow_id', 'flow_name', 'comp', 'unit']].drop_duplicates(), 'left')
+    PDF_total = PDF_total.set_index('flow_id')
+
+    DALY_total = complete_dataframe.loc(axis=0)[:, 'DALY'].loc[:, 'CF value'].groupby(axis=0, level=2).sum()
+    DALY_total = DALY_total[DALY_total != 0]
+    DALY_total = DALY_total.reset_index().merge(complete_dataframe.reset_index().loc[
+                                                :, ['flow_id', 'flow_name', 'comp', 'unit']].drop_duplicates(), 'left')
+    DALY_total = DALY_total.set_index('flow_id')
+
+    PDF_combined = complete_dataframe.loc(axis=0)[
+                       list(set([i[0] for i in complete_dataframe.index if ('PDF.m2.yr' == i[1] and
+                                                                            'Climate change' not in i[0] and
+                                                                            'Water' not in i[0])])),
+                       'PDF.m2.yr'].loc[:, 'CF value'].groupby(axis=0, level=2).sum()
+    PDF_combined = PDF_combined[PDF_combined != 0]
+    PDF_combined = PDF_combined.reset_index().merge(complete_dataframe.reset_index().loc[
+                                                    :, ['flow_id', 'flow_name', 'comp', 'unit']].drop_duplicates(),
+                                                    'left')
+    PDF_combined = PDF_combined.set_index('flow_id')
+
+    DALY_combined = complete_dataframe.loc(axis=0)[
+                        list(set([i[0] for i in complete_dataframe.index if ('DALY' == i[1] and
+                                                                             'Climate change' not in i[0] and
+                                                                             'Water' not in i[0])])),
+                        'DALY'].loc[:, 'CF value'].groupby(axis=0, level=2).sum()
+    DALY_combined = DALY_combined[DALY_combined != 0]
+    DALY_combined = DALY_combined.reset_index().merge(complete_dataframe.reset_index().loc[
+                                                      :, ['flow_id', 'flow_name', 'comp', 'unit']].drop_duplicates(),
+                                                      'left')
+    DALY_combined = DALY_combined.set_index('flow_id')
+
+    PDF_total.index = pd.MultiIndex.from_product([['Ecosystem quality (total)'], ['PDF.m2.yr'], PDF_total.index])
+    DALY_total.index = pd.MultiIndex.from_product([['Human health (total)'], ['DALY'], DALY_total.index])
+    PDF_combined.index = pd.MultiIndex.from_product([['Ecosystem quality'], ['PDF.m2.yr'], PDF_combined.index])
+    DALY_combined.index = pd.MultiIndex.from_product([['Human health'], ['DALY'], DALY_combined.index])
+
+    # remove damages
+    simplified = simplified.loc(axis=0)[:,[i for i in simplified.index.levels[1] if i not in ['DALY','PDF.m2.yr']]]
+
+    simplified = pd.concat([simplified, PDF_total, DALY_total, PDF_combined, DALY_combined])
+
+    return simplified
 
 
 def clean_up_dataframe(df):
