@@ -22,6 +22,7 @@ python version= 3.9
 
 import pyodbc
 import pandas as pd
+import numpy as np
 import os
 import pkg_resources
 import json
@@ -36,6 +37,7 @@ import warnings
 import uuid
 import shutil
 import zipfile
+import logging
 
 class Parse:
     def __init__(self, path_access_db, version, bw2_project=None):
@@ -79,13 +81,26 @@ class Parse:
 
         """
 
+        # ignoring some warnings
+        warnings.filterwarnings(action='ignore', category=FutureWarning)
+        warnings.filterwarnings(action='ignore', category=np.VisibleDeprecationWarning)
+        warnings.filterwarnings(action='ignore', category=pd.errors.PerformanceWarning)
+        warnings.filterwarnings(action='ignore', category=UserWarning)
+
+        # set up logging tool
+        self.logger = logging.getLogger('IW_Reborn')
+        self.logger.setLevel(logging.INFO)
+        self.logger.handlers = []
+        formatter = logging.Formatter("%(asctime)s - %(name)s - %(levelname)s - %(message)s")
+        ch = logging.StreamHandler()
+        ch.setLevel(logging.DEBUG)
+        ch.setFormatter(formatter)
+        self.logger.addHandler(ch)
+        self.logger.propagate = False
+
         self.path_access_db = path_access_db
         self.version = str(version)
         self.bw2_project = bw2_project
-
-        # SQL Alchemy warnings are annoying. Let's remove them from sight!
-        warnings.catch_warnings()
-        warnings.simplefilter("ignore")
 
         # OUTPUTs
         self.master_db = pd.DataFrame()
@@ -118,39 +133,39 @@ class Parse:
         :return: updated master_db
         """
 
-        print("Loading basic characterization factors...")
+        self.logger.info("Loading basic characterization factors...")
         self.load_basic_cfs()
-        print("Loading acidification and eutrophication characterization factors...")
+        self.logger.info("Loading acidification and eutrophication characterization factors...")
         self.load_acid_eutro_cfs()
-        print("Loading land use characterization factors...")
+        self.logger.info("Loading land use characterization factors...")
         self.load_land_use_cfs()
-        print("Loading particulate matter characterization factors...")
+        self.logger.info("Loading particulate matter characterization factors...")
         self.load_particulates_cfs()
-        print("Loading water scarcity characterization factors...")
+        self.logger.info("Loading water scarcity characterization factors...")
         self.load_water_scarcity_cfs()
-        print("Loading water availability characterization factors...")
+        self.logger.info("Loading water availability characterization factors...")
         self.load_water_availability_eq_cfs()
         self.load_water_availability_hh_cfs()
         self.load_water_availability_terr_cfs()
-        print("Loading thermally polluted water characterization factors...")
+        self.logger.info("Loading thermally polluted water characterization factors...")
         self.load_thermally_polluted_water_cfs()
 
-        print("Applying rules...")
+        self.logger.info("Applying rules...")
         self.apply_rules()
 
-        print("Treating regionalized factors...")
+        self.logger.info("Treating regionalized factors...")
         self.create_not_regio_flows()
         self.create_regio_flows_for_not_regio_ic()
         self.order_things_around()
         self.separate_regio_cfs()
 
-        print("Linking to ecoinvent elementary flows...")
+        self.logger.info("Linking to ecoinvent elementary flows...")
         self.link_to_ecoinvent()
 
-        print("Linking to SimaPro elementary flows...")
+        self.logger.info("Linking to SimaPro elementary flows...")
         self.link_to_sp()
 
-        print("Linking to openLCA elementary flows...")
+        self.logger.info("Linking to openLCA elementary flows...")
         self.link_to_olca()
 
         self.get_simplified_versions()
@@ -164,7 +179,7 @@ class Parse:
         :return:
         """
 
-        print("Exporting to brightway2...")
+        self.logger.info("Exporting to brightway2...")
 
         bw2.projects.set_current(self.bw2_project)
 
@@ -262,7 +277,7 @@ class Parse:
         :return:
         """
 
-        print("Exporting to SimaPro...")
+        self.logger.info("Exporting to SimaPro...")
 
         # csv accepts strings only
         self.iw_sp.loc[:, 'CF value'] = self.iw_sp.loc[:, 'CF value'].astype(str)
@@ -467,7 +482,7 @@ class Parse:
         :return:
         """
 
-        print("Exporting to openLCA...")
+        self.logger.info("Exporting to openLCA...")
 
         # metadata method (category folder in oLCA app)
         id_category = str(uuid.uuid4())
@@ -692,7 +707,7 @@ class Parse:
         :return: the IW+ files
         """
 
-        print("Creating all the files...")
+        self.logger.info("Creating all the files...")
 
         path = pkg_resources.resource_filename(__name__, '/Databases/Impact_world_' + self.version)
 
@@ -1855,7 +1870,7 @@ class Parse:
         versions_ei = ['3.5', '3.6', '3.7.1', '3.8']
 
         for version_ei in versions_ei:
-            print("Linking to ecoinvent"+str(version_ei)+" elementary flows ...")
+            self.logger.info("Linking to ecoinvent"+str(version_ei)+" elementary flows ...")
             ei_iw_db = self.master_db_not_regio.copy()
 
             # -------------- Mapping substances --------------
@@ -2164,7 +2179,7 @@ class Parse:
 
         # map oLCA and IW flow names + drop oLCA flows not linked to IW
         olca_flows = olca_flows.merge(olca_mapping, left_on=['flow_name'],
-                                      right_on=['oLCA name'], how='left').dropna(subset='iw name')
+                                      right_on=['oLCA name'], how='left').dropna(subset=['iw name'])
         # split comp and subcomp
         olca_flows['Sub-compartment'] = [eval(i)[1] for i in olca_flows['comp']]
         olca_flows['Compartment'] = [eval(i)[0] for i in olca_flows['comp']]
@@ -2248,7 +2263,9 @@ class Parse:
         self.simplified_version_sp = clean_up_dataframe(produce_simplified_version(self.iw_sp).reindex(
             self.iw_sp.columns, axis=1))
 
-        self.simplified_version_olca = produce_simplified_version_olca(self.olca_iw).drop_duplicates()
+        self.simplified_version_olca = produce_simplified_version_olca(self.olca_iw)
+        # check that they are no duplicates
+        assert not self.simplified_version_olca.index.duplicated().any()
 
         if ei_flows_version == '3.5':
             self.simplified_version_bw = clean_up_dataframe(produce_simplified_version(self.ei35_iw).reindex(
