@@ -18,11 +18,11 @@ make the links to the different LCA databases/software.
 
 #### User files
 After running the code (follow the Tutorial.ipynb file) you will find different versions of IW+ in the Databases folder:
-- a brightway2 version (in the form of a .bw2package file), linking IW+ to the flows from biosphere3 of a selected 
+- a **brightway2** version (in the form of a .bw2package file), linking IW+ to the flows from biosphere3 of a selected 
 brightway package
-- "pure" ecoinvent versions, linking different versions of ecoinvent (currently 3.5 to 3.8) to IW+. These files are 
+- **"pure" ecoinvent** versions, linking different versions of ecoinvent (currently 3.5 to 3.8) to IW+. These files are 
 available in Excel format and as a pandas.dataframe version to easily link IW+ and ecoinvent in Python.
-- a SimaPro version (.csv file), linking IW+ to **_multiple database_**. The databases covered are:
+- a **SimaPro** version (.csv file), linking IW+ to **_multiple database_**. The databases covered are:
   - Agribalyse
   - Agrifootprint
   - Ecoinvent
@@ -31,7 +31,8 @@ available in Excel format and as a pandas.dataframe version to easily link IW+ a
   - US-ei2.2
   - USLCI
   - WFLDB
-- an openLCA version is in the making and will be available later
+- an **openLCA** version in a .zip format
+- an **exiobase** version, linking the environmental extensions of the exiobase GMRIO database to IW+
 
 #### Developer file
 For entities wishing to implement IW+ in their own software/code/... a dev version is also automatically generated.

@@ -109,10 +109,12 @@ class Parse:
         self.ei36_iw = pd.DataFrame()
         self.ei371_iw = pd.DataFrame()
         self.ei38_iw = pd.DataFrame()
+        self.ei39_iw = pd.DataFrame()
         self.ei35_iw_as_matrix = pd.DataFrame()
         self.ei36_iw_as_matrix = pd.DataFrame()
         self.ei371_iw_as_matrix = pd.DataFrame()
         self.ei38_iw_as_matrix = pd.DataFrame()
+        self.ei39_iw_as_matrix = pd.DataFrame()
         self.iw_sp = pd.DataFrame()
         self.simplified_version_sp = pd.DataFrame()
         self.simplified_version_olca = pd.DataFrame()
@@ -120,8 +122,9 @@ class Parse:
         self.sp_data = {}
         self.olca_iw = pd.DataFrame()
         self.olca_data = {}
+        self.exio_iw = pd.DataFrame()
 
-        # connect to the access database
+        # connect to the Microsoft access database
         self.conn = pyodbc.connect(r'Driver={Microsoft Access Driver (*.mdb, *.accdb)};'
                                    r'DBQ='+self.path_access_db+';')
 
@@ -167,6 +170,9 @@ class Parse:
 
         self.logger.info("Linking to openLCA elementary flows...")
         self.link_to_olca()
+
+        self.logger.info("Linking to exiobase environmental extensions...")
+        self.link_to_exiobase()
 
         self.get_simplified_versions()
 
@@ -712,10 +718,12 @@ class Parse:
         path = pkg_resources.resource_filename(__name__, '/Databases/Impact_world_' + self.version)
 
         # if the folders are not there yet, create them
-        if not os.path.exists(path + '/Excel/'):
-            os.makedirs(path + '/Excel/')
-        if not os.path.exists(path + '/DataFrame/'):
-            os.makedirs(path + '/DataFrame/')
+        if not os.path.exists(path + '/Dev/'):
+            os.makedirs(path + '/Dev/')
+        if not os.path.exists(path + '/ecoinvent/'):
+            os.makedirs(path + '/ecoinvent/')
+        if not os.path.exists(path + '/exiobase/'):
+            os.makedirs(path + '/exiobase/')
         if not os.path.exists(path + '/bw2/'):
             os.makedirs(path + '/bw2/')
         if not os.path.exists(path + '/SimaPro/'):
@@ -724,19 +732,22 @@ class Parse:
             os.makedirs(path + '/openLCA/')
 
         # Dev version
-        self.master_db.to_excel(path + '/Excel/impact_world_plus_' + self.version + '_dev.xlsx')
+        self.master_db.to_excel(path + '/Dev/impact_world_plus_' + self.version + '_dev.xlsx')
 
         # ecoinvent versions in Excel format
-        self.ei35_iw.to_excel(path + '/Excel/impact_world_plus_' + self.version + '_ecoinvent_v35.xlsx')
-        self.ei36_iw.to_excel(path + '/Excel/impact_world_plus_' + self.version + '_ecoinvent_v36.xlsx')
-        self.ei371_iw.to_excel(path + '/Excel/impact_world_plus_' + self.version + '_ecoinvent_v371.xlsx')
-        self.ei38_iw.to_excel(path + '/Excel/impact_world_plus_' + self.version + '_ecoinvent_v38.xlsx')
+        self.ei35_iw.to_excel(path + '/ecoinvent/impact_world_plus_' + self.version + '_ecoinvent_v35.xlsx')
+        self.ei36_iw.to_excel(path + '/ecoinvent/impact_world_plus_' + self.version + '_ecoinvent_v36.xlsx')
+        self.ei371_iw.to_excel(path + '/ecoinvent/impact_world_plus_' + self.version + '_ecoinvent_v371.xlsx')
+        self.ei38_iw.to_excel(path + '/ecoinvent/impact_world_plus_' + self.version + '_ecoinvent_v38.xlsx')
 
         # ecoinvent version in DataFrame format
-        self.ei35_iw_as_matrix.to_excel(path + '/DataFrame/impact_world_plus_' + self.version + '_ecoinvent_v35.xlsx')
-        self.ei36_iw_as_matrix.to_excel(path + '/DataFrame/impact_world_plus_' + self.version + '_ecoinvent_v36.xlsx')
-        self.ei371_iw_as_matrix.to_excel(path + '/DataFrame/impact_world_plus_' + self.version + '_ecoinvent_v371.xlsx')
-        self.ei38_iw_as_matrix.to_excel(path + '/DataFrame/impact_world_plus_' + self.version + '_ecoinvent_v38.xlsx')
+        self.ei35_iw_as_matrix.to_excel(path + '/ecoinvent/impact_world_plus_' + self.version + '_ecoinvent_v35_as_df.xlsx')
+        self.ei36_iw_as_matrix.to_excel(path + '/ecoinvent/impact_world_plus_' + self.version + '_ecoinvent_v36_as_df.xlsx')
+        self.ei371_iw_as_matrix.to_excel(path + '/ecoinvent/impact_world_plus_' + self.version + '_ecoinvent_v371_as_df.xlsx')
+        self.ei38_iw_as_matrix.to_excel(path + '/ecoinvent/impact_world_plus_' + self.version + '_ecoinvent_v38_as_df.xlsx')
+
+        # exiobase version in DataFrame format
+        self.exio_iw.to_excel(path + '/exiobase/impact_world_plus_' + self.version + '_exiobase.xlsx')
 
         # brightway2 versions in bw2package format
         IW_ic = [bw2.Method(ic) for ic in list(bw2.methods) if ('IMPACT World+' in ic[0] and 'Combined' not in ic[0])]
@@ -2007,6 +2018,8 @@ class Parse:
                 self.ei371_iw = ei_iw_db
             elif version_ei == '3.8':
                 self.ei38_iw = ei_iw_db
+            elif version_ei == '3.9':
+                self.ei39_iw = ei_iw_db
 
             # introducing UUID for stressors of ecoinvent
             stressors_ei = pd.read_excel(pkg_resources.resource_stream(__name__, '/Data/metadata/ei'+
@@ -2032,6 +2045,8 @@ class Parse:
                 self.ei371_iw_as_matrix = ei_iw_db.T
             elif version_ei == '3.8':
                 self.ei38_iw_as_matrix = ei_iw_db.T
+            elif version_ei == '3.9':
+                self.ei39_iw_as_matrix = ei_iw_db.T
 
     def link_to_sp(self):
         """
@@ -2257,6 +2272,262 @@ class Parse:
             elif 'Water' in converting.loc[i, 'flow_name']:
                 df.loc[:, 'CF value'] /= 1000  # kg/m3
             self.olca_iw.update(df)
+
+    def link_to_exiobase(self):
+        """
+        This method creates an openLCA method with the IW+ characterization factors.
+        :return:
+        """
+
+        EXIO_IW_concordance = pd.read_excel(pkg_resources.resource_filename(
+            __name__, 'Data/mappings/exiobase/EXIO_IW_concordance.xlsx'))
+        EXIO_IW_concordance.set_index('EXIOBASE', inplace=True)
+
+        self.exio_iw = pd.DataFrame(0, EXIO_IW_concordance.index, list(set(list(zip(self.master_db.loc[:, 'Impact category'],
+                                                                         self.master_db.loc[:, 'CF unit'])))))
+        self.exio_iw.columns = pd.MultiIndex.from_tuples(self.exio_iw.columns, names=['Impact category', 'CF unit'])
+        self.exio_iw = self.exio_iw.T.sort_index().T
+
+        for flow in EXIO_IW_concordance.index:
+            if not EXIO_IW_concordance.loc[flow].isna().iloc[0]:
+                # identify all entries (any impact category, compartment, etc.) for given flow
+                CF_flow = self.master_db.loc[self.master_db['Elem flow name'] == EXIO_IW_concordance.loc[flow, 'IW']].loc[:,
+                          ['Impact category', 'CF unit', 'CF value', 'Compartment', 'Sub-compartment']]
+                # name of the comp in lower case to match exiobase easily
+                CF_flow.Compartment = [i.lower() for i in CF_flow.Compartment]
+                # only keeping right compartments, always selecting unspecified sub-compartment
+                if flow.split('- ')[-1] == 'soil':
+                    # P - soil is not characterized in IW+
+                    pass
+                elif flow.split('- ')[-1] in ['air', 'water']:
+                    CFs = pd.pivot(CF_flow, values='CF value', index=['Compartment', 'Sub-compartment'],
+                                   columns=['Impact category', 'CF unit']).loc[
+                        (flow.split('- ')[-1], '(unspecified)')].fillna(0)
+                elif 'Occupation' in EXIO_IW_concordance.loc[flow, 'IW']:
+                    CFs = pd.pivot(CF_flow, values='CF value', index=['Compartment', 'Sub-compartment'],
+                                   columns=['Impact category', 'CF unit']).loc[('raw', 'land')].fillna(0)
+                else:
+                    try:
+                        CFs = pd.pivot(CF_flow, values='CF value', index=['Compartment', 'Sub-compartment'],
+                                       columns=['Impact category', 'CF unit']).loc[('raw', '(unspecified)')].fillna(0)
+                    except KeyError:
+                        CFs = pd.pivot(CF_flow, values='CF value', index=['Compartment', 'Sub-compartment'],
+                                       columns=['Impact category', 'CF unit']).loc[('raw', 'in ground')].fillna(0)
+                CFs.name = flow
+                # dumping the CF values in the C matrix
+                self.exio_iw.update(pd.DataFrame(CFs).T)
+
+        # EXIOBASE land occupation in km2 while IW in m2, so we convert
+        self.exio_iw.loc[:, [i for i in self.exio_iw.columns if 'Land' in i[0]]] *= 1000000
+        # EXIOBASE energy flows in TJ while IW in MJ, so we convert
+        self.exio_iw.loc[:, 'Fossil and nuclear energy use'] = self.exio_iw.loc[:, 'Fossil and nuclear energy use'].values * 1000000
+        # EXIOBASE mineral flows in kt while IW in kg, so we convert
+        self.exio_iw.loc[:, 'Mineral resources use'] = self.exio_iw.loc[:, 'Mineral resources use'].values * 1000000
+        # EXIOBASE water flows in Mm3 while IW in m3, so we convert
+        self.exio_iw.loc[:, [i for i in self.exio_iw.columns if 'Water' in i[0]]] *= 1000000
+        # more common to have impact categories as index
+        self.exio_iw = self.exio_iw.T
+        # keep same index format as previously
+        self.exio_iw.index = [(i[0] + ' (' + i[1] + ')') for i in self.exio_iw.index]
+        # HFC and PFC linked to "carbon dioxide" but should not impact marine acidification
+        self.exio_iw.loc[['Marine acidification, long term (PDF.m2.yr)', 'Marine acidification, short term (PDF.m2.yr)'], [
+            'HFC - air', 'PFC - air']] = 0
+
+        self.special_case_minerals_exiobase()
+
+    def special_case_minerals_exiobase(self):
+        """
+        Minerals in exiobase are accounted for as kilograms of ore, while IW+ operates with kilograms of metal. This
+        function is here to take extra information from exiobase, such as average ore content, to create corresponding
+        CFs for ores of exiobase.
+        :return:
+        """
+
+        # loading the file with metal content information (obtained from the EXIOBASE team)
+        metal_concentration_exiobase = pd.read_csv(pkg_resources.resource_filename(
+            __name__, 'Data/metadata/exiobase/All_factors_applied_to_Exiobase_metals_minerals.csv'), sep=';')
+
+        # extracting the average amount of metal per ore from this file
+        average_gold_per_ore = metal_concentration_exiobase.loc[
+            [i for i in metal_concentration_exiobase.index if
+             'Gold' in metal_concentration_exiobase.CommodityName[i] and
+             'Global average\r' in metal_concentration_exiobase.UsedComment[i]]].Concentration.mean()
+        average_lead_per_ore = metal_concentration_exiobase.loc[
+            [i for i in metal_concentration_exiobase.index if
+             'Lead' in metal_concentration_exiobase.CommodityName[i]]].Concentration.mean()
+        average_copper_per_ore = metal_concentration_exiobase.loc[
+            [i for i in metal_concentration_exiobase.index if
+             'opper' in metal_concentration_exiobase.CommodityName[i]]].Concentration.mean()
+        average_silver_per_ore = metal_concentration_exiobase.loc[
+            [i for i in metal_concentration_exiobase.index if
+             'Silver' in metal_concentration_exiobase.CommodityName[i] and
+             'Global average\r' in metal_concentration_exiobase.UsedComment[i]]].Concentration.mean()
+        average_iron_per_ore = metal_concentration_exiobase.loc[
+            [i for i in metal_concentration_exiobase.index if
+             'Iron' in metal_concentration_exiobase.CommodityName[i] and
+             'Global average\r' in metal_concentration_exiobase.UsedComment[i]]].Concentration.mean()
+        average_nickel_per_ore = metal_concentration_exiobase.loc[
+            [i for i in metal_concentration_exiobase.index if
+             'Nickel' in metal_concentration_exiobase.CommodityName[i] and
+             'Global average\r' in metal_concentration_exiobase.UsedComment[i]]].Concentration.mean()
+        average_zinc_per_ore = metal_concentration_exiobase.loc[
+            [i for i in metal_concentration_exiobase.index if
+             'Zinc' in metal_concentration_exiobase.CommodityName[i]]].Concentration.mean()
+        average_pgm_per_ore = metal_concentration_exiobase.loc[
+            [i for i in metal_concentration_exiobase.index if
+             'Platinum-group (PGM)' in metal_concentration_exiobase.CommodityName[i] and
+             'By-products of other ore' in metal_concentration_exiobase.UsedComment[i]]].UsedFactor.mean()
+
+        df = self.master_db.copy()
+        df = df.set_index(['Elem flow name', 'Compartment', 'Sub-compartment'])
+
+        self.exio_iw.loc['Mineral resources use (kg deprived)', 'Domestic Extraction Used - Metal Ores - Gold ores'] = (
+                average_gold_per_ore *  df.loc[('Gold','Raw','in ground'), 'CF value'].iloc[0] * 1000000)
+        self.exio_iw.loc['Mineral resources use (kg deprived)', 'Unused Domestic Extraction - Metal Ores - Gold ores'] = (
+                average_gold_per_ore *  df.loc[('Gold','Raw','in ground'), 'CF value'].iloc[0] * 1000000)
+        self.exio_iw.loc['Mineral resources use (kg deprived)', 'Domestic Extraction Used - Metal Ores - Lead ores'] = (
+                average_lead_per_ore * df.loc[('Lead','Raw','in ground'), 'CF value'].iloc[0] * 1000000)
+        self.exio_iw.loc['Mineral resources use (kg deprived)', 'Unused Domestic Extraction - Metal Ores - Lead ores'] = (
+                average_lead_per_ore * df.loc[('Lead','Raw','in ground'), 'CF value'].iloc[0] * 1000000)
+        self.exio_iw.loc['Mineral resources use (kg deprived)', 'Domestic Extraction Used - Metal Ores - Copper ores'] = (
+                average_copper_per_ore * df.loc[('Copper','Raw','in ground'), 'CF value'].iloc[0] * 1000000)
+        self.exio_iw.loc[ 'Mineral resources use (kg deprived)', 'Unused Domestic Extraction - Metal Ores - Copper ores'] = (
+                average_copper_per_ore * df.loc[('Copper','Raw','in ground'), 'CF value'].iloc[0] * 1000000)
+        self.exio_iw.loc['Mineral resources use (kg deprived)', 'Domestic Extraction Used - Metal Ores - Silver ores'] = (
+                average_silver_per_ore * df.loc[('Silver','Raw','in ground'), 'CF value'].iloc[0] * 1000000)
+        self.exio_iw.loc['Mineral resources use (kg deprived)', 'Unused Domestic Extraction - Metal Ores - Silver ores'] = (
+                average_silver_per_ore * df.loc[('Silver','Raw','in ground'), 'CF value'].iloc[0] * 1000000)
+        self.exio_iw.loc['Mineral resources use (kg deprived)', 'Domestic Extraction Used - Metal Ores - Iron ores'] = (
+                average_iron_per_ore * df.loc[('Iron','Raw','in ground'), 'CF value'].iloc[0] * 1000000)
+        self.exio_iw.loc['Mineral resources use (kg deprived)', 'Unused Domestic Extraction - Metal Ores - Iron ores'] = (
+                average_iron_per_ore * df.loc[('Iron','Raw','in ground'), 'CF value'].iloc[0] * 1000000)
+        self.exio_iw.loc['Mineral resources use (kg deprived)', 'Domestic Extraction Used - Metal Ores - Nickel ores'] = (
+                average_nickel_per_ore * df.loc[('Nickel','Raw','in ground'), 'CF value'].iloc[0] * 1000000)
+        self.exio_iw.loc['Mineral resources use (kg deprived)', 'Unused Domestic Extraction - Metal Ores - Nickel ores'] = (
+                average_nickel_per_ore * df.loc[('Nickel','Raw','in ground'), 'CF value'].iloc[0] * 1000000)
+        self.exio_iw.loc['Mineral resources use (kg deprived)', 'Domestic Extraction Used - Metal Ores - Zinc ores'] = (
+                average_zinc_per_ore * df.loc[('Zinc','Raw','in ground'), 'CF value'].iloc[0] * 1000000)
+        self.exio_iw.loc['Mineral resources use (kg deprived)', 'Unused Domestic Extraction - Metal Ores - Zinc ores'] = (
+                average_zinc_per_ore * df.loc[('Zinc','Raw','in ground'), 'CF value'].iloc[0] * 1000000)
+        self.exio_iw.loc['Mineral resources use (kg deprived)', 'Domestic Extraction Used - Metal Ores - PGM ores'] = (
+                average_pgm_per_ore * df.loc[('Platinum','Raw','in ground'), 'CF value'].iloc[0] * 1000000)
+        self.exio_iw.loc['Mineral resources use (kg deprived)', 'Unused Domestic Extraction - Metal Ores - PGM ores'] = (
+                average_pgm_per_ore * df.loc[('Platinum','Raw','in ground'), 'CF value'].iloc[0] * 1000000)
+
+        # loading the file describing which metals EXIOBASE includes in their other non-ferrous metals flow
+        other_categories_composition = pd.read_excel(pkg_resources.resource_filename(
+            __name__, 'Data/mappings/exiobase/Mineral_extension_exio_detailed_2016.xlsx'))
+
+        # identify non ferrous metals among the list of mineral resources
+        other_non_ferrous_metals_index = [i for i in other_categories_composition.index if
+                                          'Other non-ferrous metal ores' in
+                                          other_categories_composition.PhysicalTypeName[i]]
+        # delete duplicated other non ferrous metals identified
+        other_non_ferrous_metals = other_categories_composition.loc[other_non_ferrous_metals_index].groupby(
+            other_categories_composition.CommodityName).head(1)
+        # make a dataframe of it
+        other_non_ferrous_metals = pd.DataFrame(0, other_non_ferrous_metals.CommodityName,
+                                                ['Metal content', 'Ore abundance'])
+
+        # iterate through the non-ferrous metals
+        for metal in other_non_ferrous_metals.index:
+            # if we can find a global average value pick it
+            try:
+                average_metal_content = metal_concentration_exiobase.loc[
+                    [i for i in metal_concentration_exiobase.index if
+                     metal in metal_concentration_exiobase.CommodityName[i] and
+                     'Global average' in metal_concentration_exiobase.UsedComment[i]]].Concentration.mean()
+            except TypeError:
+                pass
+            # if we didn't have a match
+            if np.isnan(average_metal_content):
+                # try with By-product of other ores
+                try:
+                    average_metal_content = metal_concentration_exiobase.loc[
+                        [i for i in metal_concentration_exiobase.index if
+                         metal in metal_concentration_exiobase.CommodityName[i] and
+                         'By-product of other ores' in metal_concentration_exiobase.UsedComment[i]]].UsedFactor.mean()
+                except TypeError:
+                    pass
+            # if for whatever reason we have a completely ridiculous concentration drop it
+            if average_metal_content > 0.5:
+                average_metal_content = None
+            other_non_ferrous_metals.loc[metal, 'Metal content'] = average_metal_content
+
+        # use 0.001 as default value
+        other_non_ferrous_metals = other_non_ferrous_metals.fillna(0.001)
+
+        abundance = pd.read_excel(pkg_resources.resource_filename(
+            __name__, 'Data/metadata/exiobase/USGS_extraction_volumes.xlsx'), 'metals')
+        abundance.set_index('Unnamed: 0', inplace=True)
+        abundance /= abundance.sum()
+        assert (other_non_ferrous_metals.index == abundance.index).all()
+        other_non_ferrous_metals.loc[:, 'Ore abundance'] = abundance.values
+
+        other_metal_concordance = pd.read_excel(pkg_resources.resource_filename(
+            __name__, 'Data/mappings/exiobase/other_metals_matching.xlsx')).drop('comments', axis=1)
+        other_metal_concordance.set_index('Unnamed: 0', inplace=True)
+        other_metal_concordance.dropna(inplace=True)
+
+        for flow in other_metal_concordance.index:
+            CF_flow = self.master_db.loc[self.master_db['Elem flow name'] == other_metal_concordance.loc[flow].iloc[0]].loc[:,
+                      ['Impact category', 'CF unit', 'CF value', 'Compartment', 'Sub-compartment']]
+            CFs = pd.pivot(CF_flow, values='CF value', index=['Compartment', 'Sub-compartment'],
+                           columns=['Impact category', 'CF unit']).loc[('Raw', 'in ground')].fillna(0)
+            other_non_ferrous_metals.loc[flow, 'CF'] = CFs.loc['Mineral resources use'].iloc[0]
+
+        CF = (other_non_ferrous_metals.loc[:, 'Metal content'] * other_non_ferrous_metals.loc[:,
+                                                                 'Ore abundance'] * other_non_ferrous_metals.loc[:,
+                                                                                    'CF']).sum()
+
+        self.exio_iw.loc['Mineral resources use (kg deprived)',
+                         'Domestic Extraction Used - Metal Ores - Other non-ferrous metal ores'] = CF * 1000000
+        self.exio_iw.loc['Mineral resources use (kg deprived)',
+                         'Unused Domestic Extraction - Metal Ores - Other non-ferrous metal ores'] = CF * 1000000
+
+        # first we identify which mineral are part of "other minerals"
+        other_minerals = other_categories_composition.loc[
+            [i for i in other_categories_composition.index if
+             'Other minerals' in other_categories_composition.PhysicalTypeName[i]]].groupby(
+            other_categories_composition.CommodityName).head(1).drop(
+            ['PhysicalTypeName', 'ProductTypeCode', 'CountryCode', 'ISOAlpha2', 'AccountingYear'], axis=1)
+        other_minerals.index = other_minerals.CommodityName
+
+        other_minerals.loc['Sillica sand (quartzsand)', 'CF'] = \
+        df.loc[('Sand, quartz', 'Raw', 'in ground'), 'CF value'].iloc[0]
+        other_minerals.loc['Feldspar', 'CF'] = df.loc[('Feldspar', 'Raw', 'in ground'), 'CF value'].iloc[0]
+        other_minerals.loc['Graphite, natural', 'CF'] = \
+        df.loc[('Metamorphous rock, graphite containing', 'Raw', 'in ground'), 'CF value'].iloc[0]
+        other_minerals.loc['Magnesite', 'CF'] = df.loc[('Magnesite', 'Raw', 'in ground'), 'CF value'].iloc[0]
+        other_minerals.loc['Talc (steatite, soapstone, pyrophyllite)', 'CF'] = \
+        df.loc[('Talc', 'Raw', 'in ground'), 'CF value'].iloc[0]
+        other_minerals.loc['Diatomite', 'CF'] = df.loc[('Diatomite', 'Raw', 'in ground'), 'CF value'].iloc[0]
+        other_minerals.loc['Vermiculite', 'CF'] = df.loc[('Vermiculite', 'Raw', 'in ground'), 'CF value'].iloc[0]
+        other_minerals.loc['Perlite', 'CF'] = df.loc[('Perlite', 'Raw', 'in ground'), 'CF value'].iloc[0]
+        # arithmetic average because it does not matter (both are at 0)
+        other_minerals.loc['Igneous rock (basalt, basaltic lava, diabase, granite, porphyry, etc.)',
+                           'CF'] = (df.loc[('Basalt','Raw','in ground'), 'CF value'].iloc[0] +
+                                    df.loc[('Granite','Raw','in ground'), 'CF value'].iloc[0]) / 2
+        other_minerals.loc['Peat for agricultural use', 'CF'] = df.loc[('Peat', 'Raw', 'in ground'), 'CF value'].iloc[0]
+        other_minerals.loc['Strontium minerals', 'CF'] = df.loc[('Strontium', 'Raw', 'in ground'), 'CF value'].iloc[0]
+        other_minerals.loc['Abrasives, natural (puzzolan, pumice, volcanic cinder etc.)', 'CF'] = \
+        df.loc[('Pumice', 'Raw', 'in ground'), 'CF value'].iloc[0]
+        other_minerals.loc['Calcite', 'CF'] = df.loc[('Calcite', 'Raw', 'in ground'), 'CF value'].iloc[0]
+
+        abundance_minerals = pd.read_excel(pkg_resources.resource_filename(
+            __name__, 'Data/metadata/exiobase/USGS_extraction_volumes.xlsx'), 'minerals')
+
+        # Include those in the dataframe containing all intel on other minerals
+        other_minerals = pd.concat([other_minerals, abundance_minerals.set_index('CommodityName')], axis=1)
+        # weighted average
+        other_minerals.loc[:, 'Mineral extracted (kg)'] /= other_minerals.loc[:, 'Mineral extracted (kg)'].sum()
+        # the CF for the aggregated mineral flow is thus:
+        new_CF = (other_minerals.loc[:, 'CF'] * other_minerals.loc[:, 'Mineral extracted (kg)']).sum()
+
+        self.exio_iw.loc['Mineral resources use (kg deprived)',
+                         'Domestic Extraction Used - Non-Metallic Minerals - Other minerals'] = new_CF * 1000000
+        self.exio_iw.loc[ 'Mineral resources use (kg deprived)',
+                          'Unused Domestic Extraction - Non-Metallic Minerals - Other minerals'] = new_CF * 1000000
 
     def get_simplified_versions(self, ei_flows_version=None):
 
