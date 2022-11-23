@@ -496,7 +496,7 @@ class Parse:
         category_metadata = {"@context": "http://greendelta.github.io/olca-schema/context.jsonld",
                              "@type": "Category",
                              "@id": id_category,
-                             "name": "CIRAIG methods",
+                             "name": "IMPACT World+",
                              "version": "0.00.000",
                              "modelType": "IMPACT_METHOD"}
 
@@ -739,58 +739,60 @@ class Parse:
         self.ei36_iw.to_excel(path + '/ecoinvent/impact_world_plus_' + self.version + '_ecoinvent_v36.xlsx')
         self.ei371_iw.to_excel(path + '/ecoinvent/impact_world_plus_' + self.version + '_ecoinvent_v371.xlsx')
         self.ei38_iw.to_excel(path + '/ecoinvent/impact_world_plus_' + self.version + '_ecoinvent_v38.xlsx')
+        self.ei39_iw.to_excel(path + '/ecoinvent/impact_world_plus_' + self.version + '_ecoinvent_v39.xlsx')
 
         # ecoinvent version in DataFrame format
         self.ei35_iw_as_matrix.to_excel(path + '/ecoinvent/impact_world_plus_' + self.version + '_ecoinvent_v35_as_df.xlsx')
         self.ei36_iw_as_matrix.to_excel(path + '/ecoinvent/impact_world_plus_' + self.version + '_ecoinvent_v36_as_df.xlsx')
         self.ei371_iw_as_matrix.to_excel(path + '/ecoinvent/impact_world_plus_' + self.version + '_ecoinvent_v371_as_df.xlsx')
         self.ei38_iw_as_matrix.to_excel(path + '/ecoinvent/impact_world_plus_' + self.version + '_ecoinvent_v38_as_df.xlsx')
+        self.ei39_iw_as_matrix.to_excel(path + '/ecoinvent/impact_world_plus_' + self.version + '_ecoinvent_v39_as_df.xlsx')
 
         # exiobase version in DataFrame format
         self.exio_iw.to_excel(path + '/exiobase/impact_world_plus_' + self.version + '_exiobase.xlsx')
 
         # brightway2 versions in bw2package format
         IW_ic = [bw2.Method(ic) for ic in list(bw2.methods) if ('IMPACT World+' in ic[0] and 'Combined' not in ic[0])]
-        bw2io.package.BW2Package.export_objs(IW_ic, filename='IMPACT_World+_'+self.version, folder=path+'/bw2/')
+        bw2io.package.BW2Package.export_objs(IW_ic, filename='impact_world_plus_'+self.version+'_brightway2', folder=path+'/bw2/')
         # bw2 combined version
-        IW_ic = [bw2.Method(ic) for ic in list(bw2.methods) if ('IMPACT World+' in ic[0] and 'Combined' in ic[0])]
-        bw2io.package.BW2Package.export_objs(IW_ic, filename='IMPACT_World+_'+self.version+'_combined_version',
-                                             folder=path+'/bw2/')
+        # IW_ic = [bw2.Method(ic) for ic in list(bw2.methods) if ('IMPACT World+' in ic[0] and 'Combined' in ic[0])]
+        # bw2io.package.BW2Package.export_objs(IW_ic, filename='impact_world_plus_'+self.version+'_brightway2_combined_version',
+        #                                      folder=path+'/bw2/')
 
         # SimaPro version in csv format
-        with open(path+'/SimaPro/IMPACT_World+_'+self.version+'_Midpoint.csv', 'w', newline='') as f:
+        with open(path+'/SimaPro/impact_world_plus_'+self.version+'_simapro_midpoint.csv', 'w', newline='') as f:
             writer = csv.writer(f, delimiter=";")
             writer.writerows(
                 self.sp_data['metadata'] + [['', '', '', '', '', '']] + self.sp_data['midpoint_method_metadata'] +
                 self.sp_data['midpoint_values'] + [['', '', '', '', '', '']])
             writer.writerows([['End', '', '', '', '', '']])
-        with open(path+'/SimaPro/IMPACT_World+_'+self.version+'_Damage.csv', 'w', newline='') as f:
+        with open(path+'/SimaPro/impact_world_plus_'+self.version+'_simapro_damage.csv', 'w', newline='') as f:
             writer = csv.writer(f, delimiter=";")
             writer.writerows(
                 self.sp_data['metadata'] + [['', '', '', '', '', '']] + self.sp_data['damage_method_metadata'] +
                 self.sp_data['damage_values'] + [['', '', '', '', '', '']])
             writer.writerows(self.sp_data['weighting_info_damage'] + [['', '', '', '', '', '']])
             writer.writerows([['End', '', '', '', '', '']])
-        with open(path+'/SimaPro/IMPACT_World+_'+self.version+'.csv', 'w', newline='') as f:
+        with open(path+'/SimaPro/impact_world_plus_'+self.version+'_simapro.csv', 'w', newline='') as f:
             writer = csv.writer(f, delimiter=";")
             writer.writerows(
                 self.sp_data['metadata'] + [['', '', '', '', '', '']] + self.sp_data['combined_method_metadata'] +
                 self.sp_data['combined_values'] + [['', '', '', '', '', '']])
             writer.writerows(self.sp_data['weighting_info_combined'] + [['', '', '', '', '', '']])
             writer.writerows([['End', '', '', '', '', '']])
-        with open(path+'/SimaPro/IMPACT_World+_'+self.version+'_combined_midpoint-damage.csv', 'w', newline='') as f:
-            writer = csv.writer(f, delimiter=";")
-            writer.writerows(
-                self.sp_data['metadata'] + [['', '', '', '', '', '']] + self.sp_data['simplified_method_metadata'] +
-                self.sp_data['simplified_values'] + [['', '', '', '', '', '']])
-            writer.writerows([['End', '', '', '', '', '']])
+        # with open(path+'/SimaPro/impact_world_plus_'+self.version+'_combined_midpoint-damage.csv', 'w', newline='') as f:
+        #     writer = csv.writer(f, delimiter=";")
+        #     writer.writerows(
+        #         self.sp_data['metadata'] + [['', '', '', '', '', '']] + self.sp_data['simplified_method_metadata'] +
+        #         self.sp_data['simplified_values'] + [['', '', '', '', '', '']])
+        #     writer.writerows([['End', '', '', '', '', '']])
 
         # create the openLCA version (zip file)
-        if os.path.exists(path + '/openLCA/CIRAIG_methods.zip'):
-            os.remove(path + '/openLCA/CIRAIG_methods.zip')
+        if os.path.exists(path + '/openLCA/impact_world_plus'+self.version+'_openLCA.zip'):
+            os.remove(path + '/openLCA/impact_world_plus'+self.version+'_openLCA.zip')
         if os.path.exists(path + '/openLCA/oLCA_folders'):
             shutil.rmtree(path + '/openLCA/oLCA_folders')
-        zipObj = zipfile.ZipFile(path + '/openLCA/CIRAIG_methods.zip', 'w')
+        zipObj = zipfile.ZipFile(path + '/openLCA/impact_world_plus'+self.version+'_openLCA.zip', 'w')
         if not os.path.exists(path + '/openLCA/oLCA_folders/categories/'):
             os.makedirs(path + '/openLCA/oLCA_folders/categories/')
         with open(path + '/openLCA/oLCA_folders/categories/' + self.olca_data['category_metadata']['@id'] + '.json',
@@ -802,11 +804,11 @@ class Parse:
         with open(path + '/openLCA/oLCA_folders/lcia_methods/' + self.olca_data['metadata_iw']['@id'] + '.json', 'w') as f:
             json.dump(self.olca_data['metadata_iw'], f)
         zipObj.write(path + '/openLCA/oLCA_folders/lcia_methods/' + self.olca_data['metadata_iw']['@id'] + '.json')
-        with open(path + '/openLCA/oLCA_folders/lcia_methods/' + self.olca_data['metadata_iw_combined']['@id'] + '.json',
-                'w') as f:
-            json.dump(self.olca_data['metadata_iw_combined'], f)
-        zipObj.write(
-            path + '/openLCA/oLCA_folders/lcia_methods/' + self.olca_data['metadata_iw_combined']['@id'] + '.json')
+        # with open(path + '/openLCA/oLCA_folders/lcia_methods/' + self.olca_data['metadata_iw_combined']['@id'] + '.json',
+        #         'w') as f:
+        #     json.dump(self.olca_data['metadata_iw_combined'], f)
+        # zipObj.write(
+        #     path + '/openLCA/oLCA_folders/lcia_methods/' + self.olca_data['metadata_iw_combined']['@id'] + '.json')
         if not os.path.exists(path + '/openLCA/oLCA_folders/lcia_categories/'):
             os.makedirs(path + '/openLCA/oLCA_folders/lcia_categories/')
         for cat in self.olca_data['cf_dict'].keys():
@@ -814,12 +816,12 @@ class Parse:
                       'w') as f:
                 json.dump(self.olca_data['cf_dict'][cat], f)
             zipObj.write(path + '/openLCA/oLCA_folders/lcia_categories/' + self.olca_data['cf_dict'][cat]['@id'] + '.json')
-        for cat in self.olca_data['cf_dict_combined'].keys():
-            with open(path + '/openLCA/oLCA_folders/lcia_categories/' + self.olca_data['cf_dict_combined'][cat][
-                '@id'] + '.json', 'w') as f:
-                json.dump(self.olca_data['cf_dict_combined'][cat], f)
-            zipObj.write(path + '/openLCA/oLCA_folders/lcia_categories/' + self.olca_data['cf_dict_combined'][cat][
-                '@id'] + '.json')
+        # for cat in self.olca_data['cf_dict_combined'].keys():
+        #     with open(path + '/openLCA/oLCA_folders/lcia_categories/' + self.olca_data['cf_dict_combined'][cat][
+        #         '@id'] + '.json', 'w') as f:
+        #         json.dump(self.olca_data['cf_dict_combined'][cat], f)
+        #     zipObj.write(path + '/openLCA/oLCA_folders/lcia_categories/' + self.olca_data['cf_dict_combined'][cat][
+        #         '@id'] + '.json')
         if not os.path.exists(path + '/openLCA/oLCA_folders/nw_sets/'):
             os.makedirs(path + '/openLCA/oLCA_folders/nw_sets/')
         with open(path + '/openLCA/oLCA_folders/nw_sets/' + self.olca_data['normalization']['@id'] + '.json',
@@ -828,7 +830,8 @@ class Parse:
         zipObj.write(path + '/openLCA/oLCA_folders/nw_sets/' + self.olca_data['normalization']['@id'] + '.json')
         zipObj.close()
         # use shutil to simplify the folder structure within the zip file
-        shutil.make_archive(path + '/openLCA/CIRAIG_methods', 'zip', path + '/openLCA/oLCA_folders/')
+        shutil.make_archive(path + '/openLCA/impact_world_plus_'+self.version+'_openLCA', 'zip', path +
+                            '/openLCA/oLCA_folders/')
 
     def produce_files_hybrid_ecoinvent(self):
         """Specific method to create the files matching with hybrid-ecoinvent (pylcaio)."""
@@ -1878,7 +1881,7 @@ class Parse:
         :return: self.ei35_iw, self.ei36_iw, self.ei371_iw, self.ei38_iw
         """
 
-        versions_ei = ['3.5', '3.6', '3.7.1', '3.8']
+        versions_ei = ['3.5', '3.6', '3.7.1', '3.8', '3.9']
 
         for version_ei in versions_ei:
             self.logger.info("Linking to ecoinvent"+str(version_ei)+" elementary flows ...")
