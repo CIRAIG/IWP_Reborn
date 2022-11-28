@@ -507,6 +507,7 @@ class Parse:
         category_names = {(i[0], i[1]): i[2] for i in category_names}
 
         id_iw = str(uuid.uuid4())
+        nw_id = str(uuid.uuid4())
 
         metadata_iw = {
             "@context": "http://greendelta.github.io/olca-schema/context.jsonld",
@@ -517,9 +518,14 @@ class Parse:
             "category": {
                 "@type": "Category",
                 "@id": id_category,
-                "name": "CIRAIG methods",
+                "name": "IMPACT World+",
                 "categoryType": "ImpactMethod"},
-            'impactCategories': []
+            'impactCategories': [],
+            'nwSets': [{
+                "@type": "NwSet",
+                "@id": nw_id,
+                "name": "IMPACT World+ (Stepwise 2006 values)"
+            }]
         }
 
         for cat in category_names:
@@ -633,7 +639,7 @@ class Parse:
         normalization = {
             "@context": "http://greendelta.github.io/olca-schema/context.jsonld",
             "@type": "NwSet",
-            "@id": str(uuid.uuid4()),
+            "@id": nw_id,
             "name": "IMPACT World+ (Stepwise 2006 values)",
             "version": "00.00.000",
             "weightedScoreUnit": "EUR2003",
@@ -792,7 +798,7 @@ class Parse:
             os.remove(path + '/openLCA/impact_world_plus'+self.version+'_openLCA.zip')
         if os.path.exists(path + '/openLCA/oLCA_folders'):
             shutil.rmtree(path + '/openLCA/oLCA_folders')
-        zipObj = zipfile.ZipFile(path + '/openLCA/impact_world_plus'+self.version+'_openLCA.zip', 'w')
+        zipObj = zipfile.ZipFile(path + '/openLCA/impact_world_plus_'+self.version+'_openLCA.zip', 'w')
         if not os.path.exists(path + '/openLCA/oLCA_folders/categories/'):
             os.makedirs(path + '/openLCA/oLCA_folders/categories/')
         with open(path + '/openLCA/oLCA_folders/categories/' + self.olca_data['category_metadata']['@id'] + '.json',
