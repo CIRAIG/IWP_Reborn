@@ -122,6 +122,7 @@ class Parse:
         self.sp_data = {}
         self.olca_iw = pd.DataFrame()
         self.olca_data = {}
+        self.olca_data_with_total = {}
         self.exio_iw = pd.DataFrame()
 
         # connect to the Microsoft access database
@@ -861,6 +862,218 @@ class Parse:
                               scipy.sparse.csr_matrix(self.ei371_iw_as_matrix))
         scipy.sparse.save_npz(path+'/for_hybrid_ecoinvent/ei38/Ecoinvent_not_regionalized.npz',
                               scipy.sparse.csr_matrix(self.ei38_iw_as_matrix))
+
+    def produce_olca_version_with_total_damage(self):
+        """
+        Specific method to create a version of openLCA-IW where total damage on HH and on EQ are available directly.
+        :return:
+        """
+
+        self.logger.info("Producing oLCA version with total damage available...")
+
+        # metadata method (category folder in oLCA app)
+        id_category = str(uuid.uuid4())
+
+        category_metadata = {"@context": "http://greendelta.github.io/olca-schema/context.jsonld",
+                             "@type": "Category",
+                             "@id": id_category,
+                             "name": "IMPACT World+",
+                             "version": "0.00.000",
+                             "modelType": "IMPACT_METHOD"}
+
+        # metadata json for lcia methods
+        dict_ = self.olca_iw.reset_index().loc[:, ['Impact category', 'CF unit']].drop_duplicates().to_dict('list')
+        category_names = list(zip(dict_['Impact category'], dict_['CF unit']))
+        category_names = [(i[0], i[1], str(uuid.uuid4())) for i in category_names]
+        category_names = {(i[0], i[1]): i[2] for i in category_names}
+        # add total damage categories
+        category_names[('Human Health (total)', 'DALY')] = str(uuid.uuid4())
+        category_names[('Ecosystem Quality (total)', 'PDF.m2.yr')] = str(uuid.uuid4())
+
+        id_iw = str(uuid.uuid4())
+        nw_id = str(uuid.uuid4())
+
+        metadata_iw = {
+            "@context": "http://greendelta.github.io/olca-schema/context.jsonld",
+            "@type": "ImpactMethod",
+            "@id": id_iw,
+            "name": "IMPACT World+ v2.0",
+            "lastChange": "2022-09-15T17:25:43.725-05:00",
+            "category": {
+                "@type": "Category",
+                "@id": id_category,
+                "name": "IMPACT World+",
+                "categoryType": "ImpactMethod"},
+            'impactCategories': [],
+            'nwSets': [{
+                "@type": "NwSet",
+                "@id": nw_id,
+                "name": "IMPACT World+ (Stepwise 2006 values)"
+            }]
+        }
+
+        for cat in category_names:
+            metadata_iw['impactCategories'].append(
+                {"@type": "ImpactCategory",
+                 "@id": category_names[cat],
+                 "name": cat[0],
+                 "refUnit": cat[1]}
+            )
+
+        # hardcoded, obtained from going inside the json files of an exported oLCA method
+        unit_groups = {
+            'kg': '93a60a57-a4c8-11da-a746-0800200c9a66',
+            'm2*a': '93a60a57-a3c8-20da-a746-0800200c9a66',
+            'm2': '93a60a57-a3c8-18da-a746-0800200c9a66',
+            'kBq': '93a60a57-a3c8-16da-a746-0800200c9a66',
+            'm3': '93a60a57-a3c8-12da-a746-0800200c9a66',
+            'MJ': '93a60a57-a3c8-11da-a746-0800200c9a66'
+        }
+        flow_properties = {
+            'm3': '93a60a56-a3c8-22da-a746-0800200c9a66',
+            'm2*a': '93a60a56-a3c8-21da-a746-0800200c9a66',
+            'm2': '93a60a56-a3c8-19da-a746-0800200c9a66',
+            'kBq': '93a60a56-a3c8-17da-a746-0800200c9a66',
+            'kg': '93a60a56-a3c8-11da-a746-0800200b9a66',
+            'MJ': 'f6811440-ee37-11de-8a39-0800200c9a66'
+        }
+
+        # calculate the total damage categories
+        olca_iw_total = self.olca_iw.copy()
+
+        pdf = olca_iw_total.loc(axis=0)[:, 'PDF.m2.yr'].loc[:, 'CF value'].groupby(axis=0, level=2).sum()
+        pdf = pdf.reset_index().merge(
+            olca_iw_total.reset_index().loc[:, ['flow_id', 'flow_name', 'comp', 'unit']].drop_duplicates(), 'left')
+        pdf = pdf.set_index('flow_id')
+
+        daly = olca_iw_total.loc(axis=0)[:, 'DALY'].loc[:, 'CF value'].groupby(axis=0, level=2).sum()
+        daly = daly.reset_index().merge(
+            olca_iw_total.reset_index().loc[:, ['flow_id', 'flow_name', 'comp', 'unit']].drop_duplicates(), 'left')
+        daly = daly.set_index('flow_id')
+
+        pdf.index = [('Ecosystem Quality (total)', 'PDF.m2.yr', i) for i in pdf.index]
+        daly.index = [('Human Health (total)', 'DALY', i) for i in daly.index]
+
+        olca_iw_total = pd.concat([olca_iw_total, daly, pdf])
+
+        cf_dict = {}
+        for cat in category_names:
+            cf_values = {
+                "@context": "http://greendelta.github.io/olca-schema/context.jsonld",
+                "@type": "ImpactCategory",
+                "@id": category_names[cat],
+                "name": cat[0],
+                "version": "02.00.000",
+                "referenceUnitName": cat[1],
+                "impactFactors": []
+            }
+
+            dff = olca_iw_total.loc[cat].copy()
+
+            for flow_id in dff.index:
+                cf_values["impactFactors"].append({
+                    "@type": "ImpactFactor",
+                    "value": dff.loc[flow_id, 'CF value'],
+                    "flow": {
+                        "@type": "Flow",
+                        "@id": flow_id,
+                        "name": dff.loc[flow_id, 'flow_name'],
+                        "categoryPath": ["Elementary flows",
+                                         eval(dff.loc[flow_id, 'comp'])[0],
+                                         eval(dff.loc[flow_id, 'comp'])[1]],
+                        "flowType": "ELEMENTARY_FLOW",
+                        "refUnit": dff.loc[flow_id, 'unit']
+                    },
+                    "unit": {
+                        "@type": "Unit",
+                        "@id": unit_groups[dff.loc[flow_id, 'unit']],
+                        "name": dff.loc[flow_id, 'unit']
+                    },
+                    "flowProperty": {
+                        "@type": "FlowProperty",
+                        "@id": flow_properties[dff.loc[flow_id, 'unit']],
+                        "name": dff.loc[flow_id, 'unit'],
+                        "categoryPath": ["Technical flow properties"]
+                    }
+                })
+
+            cf_dict[cat] = cf_values
+
+        # normalization/weighting files
+        norm = {}
+        for i in category_names:
+            if i[1] == 'DALY':
+                norm[(i[0], i[1], category_names[i])] = {"normalisationFactor": 13.7, "weightingFactor": 5401.459854}
+            elif i[1] == 'PDF.m2.yr':
+                norm[(i[0], i[1], category_names[i])] = {"normalisationFactor": 1.01E-4, "weightingFactor": 1386.138614}
+
+        normalization = {
+            "@context": "http://greendelta.github.io/olca-schema/context.jsonld",
+            "@type": "NwSet",
+            "@id": nw_id,
+            "name": "IMPACT World+ (Stepwise 2006 values)",
+            "version": "00.00.000",
+            "weightedScoreUnit": "EUR2003",
+            "factors": []}
+
+        for x in norm:
+            normalization['factors'].append(
+                {
+                    "@type": "NwFactor",
+                    "impactCategory": {
+                        "@type": "ImpactCategory",
+                        "@id": x[2],
+                        "name": x[0],
+                        "refUnit": x[1]
+                    },
+                    "normalisationFactor": norm[x]['normalisationFactor'],
+                    "weightingFactor": norm[x]['weightingFactor']
+                }
+            )
+
+        self.olca_data_with_total = {'category_metadata': category_metadata,
+                                     'metadata_iw': metadata_iw,
+                                     'cf_dict': cf_dict,
+                                     'normalization': normalization}
+
+        path = pkg_resources.resource_filename(__name__, '/Databases/Impact_world_' + self.version)
+
+        if not os.path.exists(path + '/openLCA/'):
+            os.makedirs(path + '/openLCA/')
+        if os.path.exists(path + '/openLCA/impact_world_plus'+self.version+'_openLCA_with_total_damage.zip'):
+            os.remove(path + '/openLCA/impact_world_plus'+self.version+'_openLCA_with_total_damage.zip')
+        if os.path.exists(path + '/openLCA/oLCA_folders_with_total_damage'):
+            shutil.rmtree(path + '/openLCA/oLCA_folders_with_total_damage')
+
+        zipObj = zipfile.ZipFile(path + '/openLCA/impact_world_plus_'+self.version+'_openLCA_with_total_damage.zip', 'w')
+        if not os.path.exists(path + '/openLCA/oLCA_folders_with_total_damage/categories/'):
+            os.makedirs(path + '/openLCA/oLCA_folders_with_total_damage/categories/')
+        with open(path + '/openLCA/oLCA_folders_with_total_damage/categories/' + self.olca_data_with_total['category_metadata']['@id'] + '.json',
+                  'w') as f:
+            json.dump(self.olca_data_with_total['category_metadata'], f)
+        zipObj.write(path + '/openLCA/oLCA_folders_with_total_damage/categories/' + self.olca_data_with_total['category_metadata']['@id'] + '.json')
+        if not os.path.exists(path + '/openLCA/oLCA_folders_with_total_damage/lcia_methods/'):
+            os.makedirs(path + '/openLCA/oLCA_folders_with_total_damage/lcia_methods/')
+        with open(path + '/openLCA/oLCA_folders_with_total_damage/lcia_methods/' + self.olca_data_with_total['metadata_iw']['@id'] + '.json', 'w') as f:
+            json.dump(self.olca_data_with_total['metadata_iw'], f)
+        zipObj.write(path + '/openLCA/oLCA_folders_with_total_damage/lcia_methods/' + self.olca_data_with_total['metadata_iw']['@id'] + '.json')
+        if not os.path.exists(path + '/openLCA/oLCA_folders_with_total_damage/lcia_categories/'):
+            os.makedirs(path + '/openLCA/oLCA_folders_with_total_damage/lcia_categories/')
+        for cat in self.olca_data_with_total['cf_dict'].keys():
+            with open(path + '/openLCA/oLCA_folders_with_total_damage/lcia_categories/' + self.olca_data_with_total['cf_dict'][cat]['@id'] + '.json',
+                      'w') as f:
+                json.dump(self.olca_data_with_total['cf_dict'][cat], f)
+            zipObj.write(path + '/openLCA/oLCA_folders_with_total_damage/lcia_categories/' + self.olca_data_with_total['cf_dict'][cat]['@id'] + '.json')
+        if not os.path.exists(path + '/openLCA/oLCA_folders_with_total_damage/nw_sets/'):
+            os.makedirs(path + '/openLCA/oLCA_folders_with_total_damage/nw_sets/')
+        with open(path + '/openLCA/oLCA_folders_with_total_damage/nw_sets/' + self.olca_data_with_total['normalization']['@id'] + '.json',
+                  'w') as f:
+            json.dump(self.olca_data_with_total['normalization'], f)
+        zipObj.write(path + '/openLCA/oLCA_folders_with_total_damage/nw_sets/' + self.olca_data_with_total['normalization']['@id'] + '.json')
+        zipObj.close()
+        # use shutil to simplify the folder structure within the zip file
+        shutil.make_archive(path + '/openLCA/impact_world_plus_'+self.version+'_openLCA_with_total_damage', 'zip', path +
+                            '/openLCA/oLCA_folders_with_total_damage/')
 
 # ----------------------------------------- Secondary methods ----------------------------------------------------------
 
