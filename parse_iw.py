@@ -853,6 +853,8 @@ class Parse:
             os.makedirs(path + '/for_hybrid_ecoinvent/ei371/')
         if not os.path.exists(path + '/for_hybrid_ecoinvent/ei38/'):
             os.makedirs(path + '/for_hybrid_ecoinvent/ei38/')
+        if not os.path.exists(path + '/for_hybrid_ecoinvent/ei39/'):
+            os.makedirs(path + '/for_hybrid_ecoinvent/ei39/')
 
         scipy.sparse.save_npz(path+'/for_hybrid_ecoinvent/ei35/Ecoinvent_not_regionalized.npz',
                               scipy.sparse.csr_matrix(self.ei35_iw_as_matrix))
@@ -862,6 +864,8 @@ class Parse:
                               scipy.sparse.csr_matrix(self.ei371_iw_as_matrix))
         scipy.sparse.save_npz(path+'/for_hybrid_ecoinvent/ei38/Ecoinvent_not_regionalized.npz',
                               scipy.sparse.csr_matrix(self.ei38_iw_as_matrix))
+        scipy.sparse.save_npz(path+'/for_hybrid_ecoinvent/ei39/Ecoinvent_not_regionalized.npz',
+                              scipy.sparse.csr_matrix(self.ei39_iw_as_matrix))
 
     def produce_olca_version_with_total_damage(self):
         """
