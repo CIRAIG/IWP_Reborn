@@ -1,4 +1,4 @@
-![image](Report_changes/2.0/images/ImpactWorld_LogoFinal.jpg)
+![image](Report_changes/2.0/images/IW+-logo.png)
 
 Python package creating the IMPACT World+ files directly downloadable into various software.
 
