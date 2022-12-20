@@ -9,7 +9,7 @@ spreadsheets to a fully coded and transparent approach.
 ## The different files of IW+
 #### Source file
 IW+ relies on a Microsoft Access database to store all of its characterization factors. The database can be downloaded
-here (_link to come_). This database acts as the source for all IW+ but is not linked to any LCA database/software
+here (https://doi.org/10.5281/zenodo.7348580). This database acts as the source for all IW+ but is not linked to any LCA database/software
 combinations and also does not include all relevant factors, as many are extrapolated from the few covered in the 
 Access version.
 
