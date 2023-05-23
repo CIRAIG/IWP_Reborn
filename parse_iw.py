@@ -39,6 +39,7 @@ import shutil
 import zipfile
 import logging
 
+
 class Parse:
     def __init__(self, path_access_db, version, bw2_project=None):
         """
@@ -122,7 +123,7 @@ class Parse:
         self.sp_data = {}
         self.olca_iw = pd.DataFrame()
         self.olca_data = {}
-        self.olca_data_with_total = {}
+        self.olca_data_custom = {}
         self.exio_iw = pd.DataFrame()
 
         # connect to the Microsoft access database
@@ -867,13 +868,13 @@ class Parse:
         scipy.sparse.save_npz(path+'/for_hybrid_ecoinvent/ei39/Ecoinvent_not_regionalized.npz',
                               scipy.sparse.csr_matrix(self.ei39_iw_as_matrix))
 
-    def produce_olca_version_with_total_damage(self):
+    def produce_custom_olca_versions(self):
         """
         Specific method to create a version of openLCA-IW where total damage on HH and on EQ are available directly.
         :return:
         """
 
-        self.logger.info("Producing oLCA version with total damage available...")
+        self.logger.info("Producing a custom oLCA version...")
 
         # metadata method (category folder in oLCA app)
         id_category = str(uuid.uuid4())
@@ -893,6 +894,9 @@ class Parse:
         # add total damage categories
         category_names[('Human Health (total)', 'DALY')] = str(uuid.uuid4())
         category_names[('Ecosystem Quality (total)', 'PDF.m2.yr')] = str(uuid.uuid4())
+        category_names[('Human Health (subtotal - no CC, no water)', 'DALY')] = str(uuid.uuid4())
+        category_names[('Ecosystem Quality (subtotal - no CC, no water)', 'PDF.m2.yr')] = str(uuid.uuid4())
+        category_names[('Ecosystem Quality (subtotal - no CC, no water, no ecotox LT)', 'PDF.m2.yr')] = str(uuid.uuid4())
 
         id_iw = str(uuid.uuid4())
         nw_id = str(uuid.uuid4())
@@ -942,23 +946,55 @@ class Parse:
             'MJ': 'f6811440-ee37-11de-8a39-0800200c9a66'
         }
 
-        # calculate the total damage categories
+        # calculate the custom categories CFs
         olca_iw_total = self.olca_iw.copy()
 
-        pdf = olca_iw_total.loc(axis=0)[:, 'PDF.m2.yr'].loc[:, 'CF value'].groupby(axis=0, level=2).sum()
-        pdf = pdf.reset_index().merge(
+        pdf_tot = olca_iw_total.loc(axis=0)[:, 'PDF.m2.yr'].loc[:, 'CF value'].groupby(axis=0, level=2).sum()
+        pdf_tot = pdf_tot.reset_index().merge(
             olca_iw_total.reset_index().loc[:, ['flow_id', 'flow_name', 'comp', 'unit']].drop_duplicates(), 'left')
-        pdf = pdf.set_index('flow_id')
+        pdf_tot = pdf_tot.set_index('flow_id')
 
-        daly = olca_iw_total.loc(axis=0)[:, 'DALY'].loc[:, 'CF value'].groupby(axis=0, level=2).sum()
-        daly = daly.reset_index().merge(
+        daly_tot = olca_iw_total.loc(axis=0)[:, 'DALY'].loc[:, 'CF value'].groupby(axis=0, level=2).sum()
+        daly_tot = daly_tot.reset_index().merge(
             olca_iw_total.reset_index().loc[:, ['flow_id', 'flow_name', 'comp', 'unit']].drop_duplicates(), 'left')
-        daly = daly.set_index('flow_id')
+        daly_tot = daly_tot.set_index('flow_id')
 
-        pdf.index = [('Ecosystem Quality (total)', 'PDF.m2.yr', i) for i in pdf.index]
-        daly.index = [('Human Health (total)', 'DALY', i) for i in daly.index]
+        daly_sub_tot = olca_iw_total.loc[[i for i in olca_iw_total.index
+                                          if i[1] == 'DALY' and 'Climate change' not in i[0] and
+                                          'Water availability' not in i[0]]].loc[:, 'CF value'].groupby(axis=0,
+                                                                                                        level=2).sum()
+        daly_sub_tot = daly_sub_tot.reset_index().merge(
+            olca_iw_total.reset_index().loc[:, ['flow_id', 'flow_name', 'comp', 'unit']].drop_duplicates(), 'left')
+        daly_sub_tot = daly_sub_tot.set_index('flow_id')
 
-        olca_iw_total = pd.concat([olca_iw_total, daly, pdf])
+        pdf_sub_tot = olca_iw_total.loc[[i for i in olca_iw_total.index
+                                         if i[1] == 'PDF.m2.yr' and
+                                         'Climate change' not in i[0] and
+                                         'Water availability' not in i[0]]].loc[:, 'CF value'].groupby(axis=0,
+                                                                                                       level=2).sum()
+        pdf_sub_tot = pdf_sub_tot.reset_index().merge(
+            olca_iw_total.reset_index().loc[:, ['flow_id', 'flow_name', 'comp', 'unit']].drop_duplicates(), 'left')
+        pdf_sub_tot = pdf_sub_tot.set_index('flow_id')
+
+        pdf_sub_tot_no_ecotox = olca_iw_total.loc[[i for i in olca_iw_total.index
+                                                   if i[1] == 'PDF.m2.yr' and
+                                                   'Climate change' not in i[0] and
+                                                   'Water availability' not in i[0] and
+                                                   i[0] != 'Freshwater ecotoxicity, long term']].loc[:,
+                                'CF value'].groupby(axis=0, level=2).sum()
+        pdf_sub_tot_no_ecotox = pdf_sub_tot_no_ecotox.reset_index().merge(
+            olca_iw_total.reset_index().loc[:, ['flow_id', 'flow_name', 'comp', 'unit']].drop_duplicates(), 'left')
+        pdf_sub_tot_no_ecotox = pdf_sub_tot_no_ecotox.set_index('flow_id')
+
+        pdf_tot.index = [('Ecosystem Quality (total)', 'PDF.m2.yr', i) for i in pdf_tot.index]
+        daly_tot.index = [('Human Health (total)', 'DALY', i) for i in daly_tot.index]
+        pdf_sub_tot.index = [('Ecosystem Quality (subtotal - no CC, no water)', 'PDF.m2.yr', i) for i in
+                             pdf_sub_tot.index]
+        daly_sub_tot.index = [('Human Health (subtotal - no CC, no water)', 'DALY', i) for i in daly_sub_tot.index]
+        pdf_sub_tot_no_ecotox.index = [('Ecosystem Quality (subtotal - no CC, no water, no ecotox LT)', 'PDF.m2.yr', i)
+                                       for i in pdf_sub_tot_no_ecotox.index]
+
+        olca_iw_total = pd.concat([olca_iw_total, daly_tot, daly_sub_tot, pdf_tot, pdf_sub_tot, pdf_sub_tot_no_ecotox])
 
         cf_dict = {}
         for cat in category_names:
@@ -1035,49 +1071,49 @@ class Parse:
                 }
             )
 
-        self.olca_data_with_total = {'category_metadata': category_metadata,
-                                     'metadata_iw': metadata_iw,
-                                     'cf_dict': cf_dict,
-                                     'normalization': normalization}
+        self.olca_data_custom = {'category_metadata': category_metadata,
+                                 'metadata_iw': metadata_iw,
+                                 'cf_dict': cf_dict,
+                                 'normalization': normalization}
 
         path = pkg_resources.resource_filename(__name__, '/Databases/Impact_world_' + self.version)
 
         if not os.path.exists(path + '/openLCA/'):
             os.makedirs(path + '/openLCA/')
-        if os.path.exists(path + '/openLCA/impact_world_plus'+self.version+'_openLCA_with_total_damage.zip'):
-            os.remove(path + '/openLCA/impact_world_plus'+self.version+'_openLCA_with_total_damage.zip')
-        if os.path.exists(path + '/openLCA/oLCA_folders_with_total_damage'):
-            shutil.rmtree(path + '/openLCA/oLCA_folders_with_total_damage')
+        if os.path.exists(path + '/openLCA/impact_world_plus'+self.version+'_openLCA_custom.zip'):
+            os.remove(path + '/openLCA/impact_world_plus'+self.version+'_openLCA_custom.zip')
+        if os.path.exists(path + '/openLCA/oLCA_folders_custom'):
+            shutil.rmtree(path + '/openLCA/oLCA_folders_custom')
 
-        zipObj = zipfile.ZipFile(path + '/openLCA/impact_world_plus_'+self.version+'_openLCA_with_total_damage.zip', 'w')
-        if not os.path.exists(path + '/openLCA/oLCA_folders_with_total_damage/categories/'):
-            os.makedirs(path + '/openLCA/oLCA_folders_with_total_damage/categories/')
-        with open(path + '/openLCA/oLCA_folders_with_total_damage/categories/' + self.olca_data_with_total['category_metadata']['@id'] + '.json',
+        zipObj = zipfile.ZipFile(path + '/openLCA/impact_world_plus_'+self.version+'_openLCA_custom.zip', 'w')
+        if not os.path.exists(path + '/openLCA/oLCA_folders_custom/categories/'):
+            os.makedirs(path + '/openLCA/oLCA_folders_custom/categories/')
+        with open(path + '/openLCA/oLCA_folders_custom/categories/' + self.olca_data_custom['category_metadata']['@id'] + '.json',
                   'w') as f:
-            json.dump(self.olca_data_with_total['category_metadata'], f)
-        zipObj.write(path + '/openLCA/oLCA_folders_with_total_damage/categories/' + self.olca_data_with_total['category_metadata']['@id'] + '.json')
-        if not os.path.exists(path + '/openLCA/oLCA_folders_with_total_damage/lcia_methods/'):
-            os.makedirs(path + '/openLCA/oLCA_folders_with_total_damage/lcia_methods/')
-        with open(path + '/openLCA/oLCA_folders_with_total_damage/lcia_methods/' + self.olca_data_with_total['metadata_iw']['@id'] + '.json', 'w') as f:
-            json.dump(self.olca_data_with_total['metadata_iw'], f)
-        zipObj.write(path + '/openLCA/oLCA_folders_with_total_damage/lcia_methods/' + self.olca_data_with_total['metadata_iw']['@id'] + '.json')
-        if not os.path.exists(path + '/openLCA/oLCA_folders_with_total_damage/lcia_categories/'):
-            os.makedirs(path + '/openLCA/oLCA_folders_with_total_damage/lcia_categories/')
-        for cat in self.olca_data_with_total['cf_dict'].keys():
-            with open(path + '/openLCA/oLCA_folders_with_total_damage/lcia_categories/' + self.olca_data_with_total['cf_dict'][cat]['@id'] + '.json',
+            json.dump(self.olca_data_custom['category_metadata'], f)
+        zipObj.write(path + '/openLCA/oLCA_folders_custom/categories/' + self.olca_data_custom['category_metadata']['@id'] + '.json')
+        if not os.path.exists(path + '/openLCA/oLCA_folders_custom/lcia_methods/'):
+            os.makedirs(path + '/openLCA/oLCA_folders_custom/lcia_methods/')
+        with open(path + '/openLCA/oLCA_folders_custom/lcia_methods/' + self.olca_data_custom['metadata_iw']['@id'] + '.json', 'w') as f:
+            json.dump(self.olca_data_custom['metadata_iw'], f)
+        zipObj.write(path + '/openLCA/oLCA_folders_custom/lcia_methods/' + self.olca_data_custom['metadata_iw']['@id'] + '.json')
+        if not os.path.exists(path + '/openLCA/oLCA_folders_custom/lcia_categories/'):
+            os.makedirs(path + '/openLCA/oLCA_folders_custom/lcia_categories/')
+        for cat in self.olca_data_custom['cf_dict'].keys():
+            with open(path + '/openLCA/oLCA_folders_custom/lcia_categories/' + self.olca_data_custom['cf_dict'][cat]['@id'] + '.json',
                       'w') as f:
-                json.dump(self.olca_data_with_total['cf_dict'][cat], f)
-            zipObj.write(path + '/openLCA/oLCA_folders_with_total_damage/lcia_categories/' + self.olca_data_with_total['cf_dict'][cat]['@id'] + '.json')
-        if not os.path.exists(path + '/openLCA/oLCA_folders_with_total_damage/nw_sets/'):
-            os.makedirs(path + '/openLCA/oLCA_folders_with_total_damage/nw_sets/')
-        with open(path + '/openLCA/oLCA_folders_with_total_damage/nw_sets/' + self.olca_data_with_total['normalization']['@id'] + '.json',
+                json.dump(self.olca_data_custom['cf_dict'][cat], f)
+            zipObj.write(path + '/openLCA/oLCA_folders_custom/lcia_categories/' + self.olca_data_custom['cf_dict'][cat]['@id'] + '.json')
+        if not os.path.exists(path + '/openLCA/oLCA_folders_custom/nw_sets/'):
+            os.makedirs(path + '/openLCA/oLCA_folders_custom/nw_sets/')
+        with open(path + '/openLCA/oLCA_folders_custom/nw_sets/' + self.olca_data_custom['normalization']['@id'] + '.json',
                   'w') as f:
-            json.dump(self.olca_data_with_total['normalization'], f)
-        zipObj.write(path + '/openLCA/oLCA_folders_with_total_damage/nw_sets/' + self.olca_data_with_total['normalization']['@id'] + '.json')
+            json.dump(self.olca_data_custom['normalization'], f)
+        zipObj.write(path + '/openLCA/oLCA_folders_custom/nw_sets/' + self.olca_data_custom['normalization']['@id'] + '.json')
         zipObj.close()
         # use shutil to simplify the folder structure within the zip file
-        shutil.make_archive(path + '/openLCA/impact_world_plus_'+self.version+'_openLCA_with_total_damage', 'zip', path +
-                            '/openLCA/oLCA_folders_with_total_damage/')
+        shutil.make_archive(path + '/openLCA/impact_world_plus_'+self.version+'_openLCA_custom', 'zip', path +
+                            '/openLCA/oLCA_folders_custom/')
 
 # ----------------------------------------- Secondary methods ----------------------------------------------------------
 
