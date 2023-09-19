@@ -38,10 +38,11 @@ import uuid
 import shutil
 import zipfile
 import logging
+import sqlite3
 
 
 class Parse:
-    def __init__(self, path_access_db, version, bw2_project=None):
+    def __init__(self, path_access_db, version, new_path_access_db, bw2_project=None):
         """
         :param path_access_db: path to the Microsoft access database (source version)
         :param version: the version of IW+ to parse
@@ -100,6 +101,7 @@ class Parse:
         self.logger.propagate = False
 
         self.path_access_db = path_access_db
+        self.new_path_access_db = new_path_access_db
         self.version = str(version)
         self.bw2_project = bw2_project
 
@@ -135,6 +137,8 @@ class Parse:
         self.conn = pyodbc.connect(r'Driver={Microsoft Access Driver (*.mdb, *.accdb)};'
                                    r'DBQ='+self.path_access_db+';')
 
+        self.new_conn = sqlite3.connect(self.new_path_access_db)
+
 # -------------------------------------------- Main methods ------------------------------------------------------------
 
     def load_cfs(self):
@@ -145,8 +149,12 @@ class Parse:
 
         self.logger.info("Loading basic characterization factors...")
         self.load_basic_cfs()
-        self.logger.info("Loading acidification and eutrophication characterization factors...")
-        self.load_acid_eutro_cfs()
+        self.logger.info("Loading acidification characterization factors...")
+        self.load_freshwater_acidification_cfs()
+        self.load_terrestrial_acidification_cfs()
+        self.logger.info("Loading eutrophication characterization factors...")
+        self.load_marine_eutrophication_cfs()
+        self.load_freshwater_eutrophication_cfs()
         self.logger.info("Loading land use characterization factors...")
         self.load_land_use_cfs()
         self.logger.info("Loading particulate matter characterization factors...")
@@ -1205,69 +1213,592 @@ class Parse:
 
         :return: updated master_db
         """
-        self.master_db = pd.read_sql(sql='SELECT * FROM [CF - not regionalized - All other impact categories]',
-                                     con=self.conn).drop('ID', axis=1)
 
-        # for some reason, some queries are not happening correctly, e.g., "Perfluorooctane, PFC-7-1-18\r\n\r\nPerfluorooctane, PFC-7-1-18"
-        # we correct it by splitting at the right place and replacing the value
-        read_sql_issues = [i for i in self.master_db.index if '\n' in self.master_db.loc[i, 'Elem flow name']]
-        self.master_db.loc[read_sql_issues, 'Elem flow name'] = [i.split("\r")[0] for i in
-                                                               self.master_db.loc[read_sql_issues, 'Elem flow name']]
+        self.master_db = pd.concat([pd.read_sql(sql='SELECT * FROM [CF - not regionalized - ClimateChange]',
+                                                con=self.new_conn),
+                                    pd.read_sql(sql='SELECT * FROM [CF - not regionalized - OzoneDepletion]',
+                                                con=self.new_conn),
+                                    pd.read_sql(sql='SELECT * FROM [CF - not regionalized - PhotochemOxid]',
+                                                con=self.new_conn),
+                                    pd.read_sql(sql='SELECT * FROM [CF - not regionalized - IonizingRadiations]',
+                                                con=self.new_conn),
+                                    pd.read_sql(sql='SELECT * FROM [CF - not regionalized - MarAcid]',
+                                                con=self.new_conn),
+                                    pd.read_sql(sql='SELECT * FROM [CF - not regionalized - FossilResources]',
+                                                con=self.new_conn),
+                                    pd.read_sql(sql='SELECT * FROM [CF - not regionalized - MineralResources]',
+                                                con=self.new_conn),
+                                    pd.read_sql(sql='SELECT * FROM [CF - not regionalized - HumanTox]',
+                                                con=self.new_conn),
+                                    pd.read_sql(sql='SELECT * FROM [CF - not regionalized - EcotoxFW]',
+                                                con=self.new_conn)]).drop('index', axis=1)
 
-    def load_acid_eutro_cfs(self):
+        self.master_db = clean_up_dataframe(self.master_db)
+
+    def load_freshwater_acidification_cfs(self):
         """
-        Loading the CFs for the acidification and eutrophication impact categories. This includes CFs coming from the
+        Loading the CFs for the freshwater acidification impact category. This includes CFs coming from the
         original article of IW+, as well as other CFs extrapolated from stoechiometric ratios.
 
         Concerned impact categories:
             - Freshwater acidification
+
+        :return: updated master_db
+        """
+
+        # ------------------------------ LOADING DATA -----------------------------------
+        cell_emissions = {
+            'NH3': pd.read_sql('SELECT * FROM [CF - regionalized - AcidFW - native (NH3 emissions to air)]',
+                               self.new_conn).drop('index', axis=1).set_index('cell'),
+            'NOx': pd.read_sql('SELECT * FROM [CF - regionalized - AcidFW - native (NOx emissions to air)]',
+                               self.new_conn).drop('index', axis=1).set_index('cell'),
+            'SO2': pd.read_sql('SELECT * FROM [CF - regionalized - AcidFW - native (SO2 emissions to air)]',
+                               self.new_conn).drop('index', axis=1).set_index('cell')}
+
+        inter_country = pd.read_sql('SELECT * FROM [SI - Acidification/Eutrophication - Countries cell resolution]',
+                                    self.new_conn).set_index('index').T
+        inter_continent = pd.read_sql('SELECT * FROM [SI - Acidification/Eutrophication - Continents cell resolution]',
+                                      self.new_conn).set_index('index').T
+
+        # ------------------------- CALCULATING MIDPOINT AND DAMAGE CFS --------------------------------
+        country_emissions = {}
+        continent_emissions = {}
+        for substance in cell_emissions:
+            cell_emissions[substance].index.name = None
+            country_emissions[substance] = inter_country.dot(cell_emissions[substance].Emission)
+            continent_emissions[substance] = inter_continent.dot(cell_emissions[substance].Emission)
+
+        cfs_midpoint = pd.DataFrame(None, cell_emissions.keys(), country_emissions['SO2'].index)
+
+        for substance in cell_emissions:
+            # for countries
+            for country in country_emissions[substance].index:
+                try:
+                    aggregated_cf = (cell_emissions[substance].loc[:, 'midpoint'] *
+                                     cell_emissions[substance].loc[:, 'Emission'] /
+                                     country_emissions[substance].loc[country] *
+                                     inter_country.loc[country]).sum()
+                    cfs_midpoint.loc[substance, country] = aggregated_cf
+                except ZeroDivisionError:
+                    pass
+
+            # for continents
+            for continent in continent_emissions[substance].index:
+                try:
+                    aggregated_cf = (cell_emissions[substance].loc[:, 'midpoint'] *
+                                     cell_emissions[substance].loc[:, 'Emission'] /
+                                     continent_emissions[substance].loc[continent] *
+                                     inter_continent.loc[continent]).sum()
+                    cfs_midpoint.loc[substance, continent] = aggregated_cf
+                except ZeroDivisionError:
+                    pass
+
+            # global
+            GLO_value = (cell_emissions[substance].loc[:, 'midpoint'] *
+                         cell_emissions[substance].loc[:, 'Emission'] /
+                         cell_emissions[substance].Emission.sum()).sum()
+            cfs_midpoint.loc[substance, 'GLO'] = GLO_value
+
+        # divide by reference flow -> SO2
+        cfs_midpoint /= cfs_midpoint.loc['SO2', 'GLO']
+
+        cfs_damage = pd.DataFrame(None, cell_emissions.keys(), country_emissions['SO2'].index)
+
+        for substance in cell_emissions:
+            # for countries
+            for country in country_emissions[substance].index:
+                try:
+                    aggregated_cf = (cell_emissions[substance].loc[:, 'endpoint'] *
+                                     cell_emissions[substance].loc[:, 'Emission'] /
+                                     country_emissions[substance].loc[country] *
+                                     inter_country.loc[country]).sum()
+                    cfs_damage.loc[substance, country] = aggregated_cf
+                except ZeroDivisionError:
+                    pass
+
+            # for continents
+            for continent in continent_emissions[substance].index:
+                try:
+                    aggregated_cf = (cell_emissions[substance].loc[:, 'endpoint'] *
+                                     cell_emissions[substance].loc[:, 'Emission'] /
+                                     continent_emissions[substance].loc[continent] *
+                                     inter_continent.loc[continent]).sum()
+                    cfs_damage.loc[substance, continent] = aggregated_cf
+                except ZeroDivisionError:
+                    pass
+
+            # global
+            GLO_value = (cell_emissions[substance].loc[:, 'endpoint'] *
+                         cell_emissions[substance].loc[:, 'Emission'] /
+                         cell_emissions[substance].Emission.sum()).sum()
+            cfs_damage.loc[substance, 'GLO'] = GLO_value
+
+        # ------------------------------ DATA FORMATTING -----------------------------------
+        # convert country names to ISO 2-letter codes
+        # lines of logger to avoid having warnings showing up
+        coco_logger = coco.logging.getLogger()
+        coco_logger.setLevel(coco.logging.CRITICAL)
+        cfs_midpoint.columns = coco.convert(cfs_midpoint.iloc[:, :-7], to='ISO2') + ['RNA', 'RLA', 'RER', 'RAS', 'RAF',
+                                                                                     'OCE', 'GLO']
+        cfs_damage.columns = cfs_midpoint.columns
+        # countries that don't exist anymore or that are not part of the UN are dropped
+        cfs_midpoint.drop('not found', axis=1, inplace=True)
+        cfs_damage.drop('not found', axis=1, inplace=True)
+
+        cfs_midpoint = cfs_midpoint.stack().reset_index()
+        cfs_midpoint.columns = ['Elem flow', 'Region code', 'CF value']
+        cfs_damage = cfs_damage.stack().reset_index()
+        cfs_damage.columns = ['Elem flow', 'Region code', 'CF value']
+        cfs_midpoint.loc[:, 'CF unit'] = 'kg SO2 eq'
+        cfs_midpoint.loc[:, 'MP or Damage'] = 'Midpoint'
+        cfs_damage.loc[:, 'CF unit'] = 'PDF.m2.yr'
+        cfs_damage.loc[:, 'MP or Damage'] = 'Damage'
+        cfs = pd.concat([cfs_midpoint, cfs_damage])
+        cfs.loc[:, 'Impact category'] = 'Freshwater acidification'
+        cfs.loc[:, 'Compartment'] = 'Air'
+        cfs.loc[:, 'Sub-compartment'] = '(unspecified)'
+        cfs.loc[:, 'Elem flow unit'] = 'kg'
+        cfs.loc[:, 'Native geographical resolution scale'] = 'Country'
+        cfs.loc[cfs.loc[:, 'Elem flow'] == 'NH3', 'CAS number'] = '007664-41-7'
+        cfs.loc[cfs.loc[:, 'Elem flow'] == 'NOx', 'CAS number'] = '011104-93-1'
+        cfs.loc[cfs.loc[:, 'Elem flow'] == 'SO2', 'CAS number'] = '007446-09-5'
+        cfs = clean_up_dataframe(cfs)
+        cfs.loc[[i for i in cfs.index if cfs.loc[i, 'Region code'] in ['RNA', 'RLA', 'RER', 'RAS', 'RAF', 'OCE', 'GLO']],
+                'Native geographical resolution scale'] = 'Continent'
+        cfs.loc[cfs.loc[:, 'Region code'] == 'GLO', 'Native geographical resolution scale'] = 'Global'
+
+        # ------------------------------ APPLYING STOECHIOMETRIC RATIOS --------------------------
+        stoc = pd.read_sql('SELECT * FROM [SI - stoechiometry]', self.new_conn).drop('index', axis=1)
+        for i in stoc.index:
+            proxy = stoc.loc[i, 'Corresponding elem flow in IW']
+            df = cfs[cfs.loc[:, 'Elem flow'] == proxy].copy('deep')
+            if not df.empty:
+                df.loc[:, 'Elem flow'] = stoc.loc[i, 'Elem flow name in Simapro']
+                df.loc[:, 'CAS number'] = stoc.loc[i, 'CAS number']
+                df.loc[:, 'CF value'] *= stoc.loc[i, 'Stoechiometric ratio']
+
+                cfs = pd.concat([cfs, df])
+
+        # ------------------------------------ FINAL FORMATTING ---------------------------------
+        cfs.loc[cfs.loc[:, 'Elem flow'] == 'NH3', 'Elem flow'] = 'Ammonia'
+        cfs.loc[cfs.loc[:, 'Elem flow'] == 'NOx', 'Elem flow'] = 'Nitrogen oxides'
+        cfs.loc[cfs.loc[:, 'Elem flow'] == 'SO2', 'Elem flow'] = 'Sulfur dioxide'
+        # concat elem flow and region code in the same name
+        cfs.loc[:, 'Elem flow name'] = [', '.join(i) for i in list(zip(cfs.loc[:, 'Elem flow'], cfs.loc[:, 'Region code']))]
+        cfs = cfs.drop(['Elem flow', 'Region code'], axis=1)
+        cfs = clean_up_dataframe(cfs)
+
+        # concat with master_db
+        self.master_db = pd.concat([self.master_db, cfs])
+        self.master_db = clean_up_dataframe(self.master_db)
+
+    def load_terrestrial_acidification_cfs(self):
+        """
+        Loading the CFs for the terrestrial acidification impact category. This includes CFs coming from the
+        original article of IW+, as well as other CFs extrapolated from stoechiometric ratios.
+
+        Concerned impact categories:
             - Terrestrial acidification
-            - Freshwater eutrophication
+
+        :return: updated master_db
+        """
+
+        # ------------------------------ LOADING DATA -----------------------------------
+        cell_emissions = {
+            'NH3': pd.read_sql('SELECT * FROM [CF - regionalized - AcidTerr - native (NH3 emissions to air)]',
+                               self.new_conn).drop('index', axis=1).set_index('cell'),
+            'NOx': pd.read_sql('SELECT * FROM [CF - regionalized - AcidTerr - native (NOx emissions to air)]',
+                               self.new_conn).drop('index', axis=1).set_index('cell'),
+            'SO2': pd.read_sql('SELECT * FROM [CF - regionalized - AcidTerr - native (SO2 emissions to air)]',
+                               self.new_conn).drop('index', axis=1).set_index('cell')}
+
+        inter_country = pd.read_sql('SELECT * FROM [SI - Acidification/Eutrophication - Countries cell resolution]',
+                                    self.new_conn).set_index('index').T
+        inter_continent = pd.read_sql('SELECT * FROM [SI - Acidification/Eutrophication - Continents cell resolution]',
+                                      self.new_conn).set_index('index').T
+
+        # ------------------------- CALCULATING MIDPOINT AND DAMAGE CFS --------------------------------
+        country_emissions = {}
+        continent_emissions = {}
+        for substance in cell_emissions:
+            cell_emissions[substance].index.name = None
+            country_emissions[substance] = inter_country.dot(cell_emissions[substance].Emission)
+            continent_emissions[substance] = inter_continent.dot(cell_emissions[substance].Emission)
+
+        cfs_midpoint = pd.DataFrame(None, cell_emissions.keys(), country_emissions['SO2'].index)
+
+        for substance in cell_emissions:
+            # for countries
+            for country in country_emissions[substance].index:
+                try:
+                    aggregated_cf = (cell_emissions[substance].loc[:, 'midpoint'] *
+                                     cell_emissions[substance].loc[:, 'Emission'] /
+                                     country_emissions[substance].loc[country] *
+                                     inter_country.loc[country]).sum()
+                    cfs_midpoint.loc[substance, country] = aggregated_cf
+                except ZeroDivisionError:
+                    pass
+
+            # for continents
+            for continent in continent_emissions[substance].index:
+                try:
+                    aggregated_cf = (cell_emissions[substance].loc[:, 'midpoint'] *
+                                     cell_emissions[substance].loc[:, 'Emission'] /
+                                     continent_emissions[substance].loc[continent] *
+                                     inter_continent.loc[continent]).sum()
+                    cfs_midpoint.loc[substance, continent] = aggregated_cf
+                except ZeroDivisionError:
+                    pass
+
+            # global
+            GLO_value = (cell_emissions[substance].loc[:, 'midpoint'] *
+                         cell_emissions[substance].loc[:, 'Emission'] /
+                         cell_emissions[substance].Emission.sum()).sum()
+            cfs_midpoint.loc[substance, 'GLO'] = GLO_value
+
+        # divide by reference flow -> SO2
+        cfs_midpoint /= cfs_midpoint.loc['SO2', 'GLO']
+
+        cfs_damage = pd.DataFrame(None, cell_emissions.keys(), country_emissions['SO2'].index)
+
+        for substance in cell_emissions:
+            # for countries
+            for country in country_emissions[substance].index:
+                try:
+                    aggregated_cf = (cell_emissions[substance].loc[:, 'endpoint'] *
+                                     cell_emissions[substance].loc[:, 'Emission'] /
+                                     country_emissions[substance].loc[country] *
+                                     inter_country.loc[country]).sum()
+                    cfs_damage.loc[substance, country] = aggregated_cf
+                except ZeroDivisionError:
+                    pass
+
+            # for continents
+            for continent in continent_emissions[substance].index:
+                try:
+                    aggregated_cf = (cell_emissions[substance].loc[:, 'endpoint'] *
+                                     cell_emissions[substance].loc[:, 'Emission'] /
+                                     continent_emissions[substance].loc[continent] *
+                                     inter_continent.loc[continent]).sum()
+                    cfs_damage.loc[substance, continent] = aggregated_cf
+                except ZeroDivisionError:
+                    pass
+
+            # global
+            GLO_value = (cell_emissions[substance].loc[:, 'endpoint'] *
+                         cell_emissions[substance].loc[:, 'Emission'] /
+                         cell_emissions[substance].Emission.sum()).sum()
+            cfs_damage.loc[substance, 'GLO'] = GLO_value
+
+        # ------------------------------ DATA FORMATTING -----------------------------------
+        # convert country names to ISO 2 letter codes
+        # lines of logger to avoid having warnings showing up
+        coco_logger = coco.logging.getLogger()
+        coco_logger.setLevel(coco.logging.CRITICAL)
+        cfs_midpoint.columns = coco.convert(cfs_midpoint.iloc[:, :-7], to='ISO2') + ['RNA', 'RLA', 'RER', 'RAS', 'RAF',
+                                                                                     'OCE', 'GLO']
+        cfs_damage.columns = cfs_midpoint.columns
+        # countries that don't exist anymore or that are not part of the UN are dropped
+        cfs_midpoint.drop('not found', axis=1, inplace=True)
+        cfs_damage.drop('not found', axis=1, inplace=True)
+
+        cfs_midpoint = cfs_midpoint.stack().reset_index()
+        cfs_midpoint.columns = ['Elem flow', 'Region code', 'CF value']
+        cfs_damage = cfs_damage.stack().reset_index()
+        cfs_damage.columns = ['Elem flow', 'Region code', 'CF value']
+        cfs_midpoint.loc[:, 'CF unit'] = 'kg SO2 eq'
+        cfs_midpoint.loc[:, 'MP or Damage'] = 'Midpoint'
+        cfs_damage.loc[:, 'CF unit'] = 'PDF.m2.yr'
+        cfs_damage.loc[:, 'MP or Damage'] = 'Damage'
+        cfs = pd.concat([cfs_midpoint, cfs_damage])
+        cfs.loc[:, 'Impact category'] = 'Terrestrial acidification'
+        cfs.loc[:, 'Compartment'] = 'Air'
+        cfs.loc[:, 'Sub-compartment'] = '(unspecified)'
+        cfs.loc[:, 'Elem flow unit'] = 'kg'
+        cfs.loc[:, 'Native geographical resolution scale'] = 'Country'
+        cfs.loc[cfs.loc[:, 'Elem flow'] == 'NH3', 'CAS number'] = '007664-41-7'
+        cfs.loc[cfs.loc[:, 'Elem flow'] == 'NOx', 'CAS number'] = '011104-93-1'
+        cfs.loc[cfs.loc[:, 'Elem flow'] == 'SO2', 'CAS number'] = '007446-09-5'
+        cfs = clean_up_dataframe(cfs)
+        cfs.loc[[i for i in cfs.index if cfs.loc[i, 'Region code'] in ['RNA', 'RLA', 'RER', 'RAS', 'RAF', 'OCE', 'GLO']],
+                'Native geographical resolution scale'] = 'Continent'
+        cfs.loc[cfs.loc[:, 'Region code'] == 'GLO', 'Native geographical resolution scale'] = 'Global'
+
+        # ------------------------------ APPLYING STOECHIOMETRIC RATIOS --------------------------
+        stoc = pd.read_sql('SELECT * FROM [SI - stoechiometry]', self.new_conn).drop('index', axis=1)
+        for i in stoc.index:
+            proxy = stoc.loc[i, 'Corresponding elem flow in IW']
+            df = cfs[cfs.loc[:, 'Elem flow'] == proxy].copy('deep')
+            if not df.empty:
+                df.loc[:, 'Elem flow'] = stoc.loc[i, 'Elem flow name in Simapro']
+                df.loc[:, 'CAS number'] = stoc.loc[i, 'CAS number']
+                df.loc[:, 'CF value'] *= stoc.loc[i, 'Stoechiometric ratio']
+
+                cfs = pd.concat([cfs, df])
+
+        # ------------------------------------ FINAL FORMATTING ---------------------------------
+        cfs.loc[cfs.loc[:, 'Elem flow'] == 'NH3', 'Elem flow'] = 'Ammonia'
+        cfs.loc[cfs.loc[:, 'Elem flow'] == 'NOx', 'Elem flow'] = 'Nitrogen oxides'
+        cfs.loc[cfs.loc[:, 'Elem flow'] == 'SO2', 'Elem flow'] = 'Sulfur dioxide'
+        # concat elem flow and region code in the same name
+        cfs.loc[:, 'Elem flow name'] = [', '.join(i) for i in list(zip(cfs.loc[:, 'Elem flow'], cfs.loc[:, 'Region code']))]
+        cfs = cfs.drop(['Elem flow', 'Region code'], axis=1)
+        cfs = clean_up_dataframe(cfs)
+
+        # concat with master_db
+        self.master_db = pd.concat([self.master_db, cfs])
+        self.master_db = clean_up_dataframe(self.master_db)
+
+    def load_marine_eutrophication_cfs(self):
+        """
+        Loading the CFs for the marine eutrophication impact category. This includes CFs coming from the
+        original article of IW+, as well as other CFs extrapolated from stoechiometric ratios.
+
+        Concerned impact categories:
             - Marine eutrophication
 
         :return: updated master_db
         """
 
-        concerned_cat = [('CF - regionalized - AcidFW - aggregated', 'Freshwater acidification'),
-                         ('CF - regionalized - AcidTerr - aggregated', 'Terrestrial acidification'),
-                         ('CF - regionalized - EutroFW - aggregated', 'Freshwater eutrophication'),
-                         ('CF - regionalized - EutroMar - aggregated', 'Marine eutrophication')]
+        # ------------------------------ LOADING DATA -----------------------------------
+        cell_emissions = {
+            'NH3': pd.read_sql('SELECT * FROM [CF - regionalized - MarEutro - native (NH3 emissions to air)]',
+                               self.new_conn).drop('index', axis=1).set_index('cell'),
+            'NOx': pd.read_sql('SELECT * FROM [CF - regionalized - MarEutro - native (NOx emissions to air)]',
+                               self.new_conn).drop('index', axis=1).set_index('cell'),
+            'HNO3': pd.read_sql('SELECT * FROM [CF - regionalized - MarEutro - native (HNO3 emissions to air)]',
+                               self.new_conn).drop('index', axis=1).set_index('cell')}
 
-        stoec_ratios = pd.read_sql(sql='SELECT * FROM [SI - Acid*,Eutro* - Elem flow mapping IW Simapro]',
-                                   con=self.conn)
+        inter_country = pd.read_sql('SELECT * FROM [SI - Acidification/Eutrophication - Countries cell resolution]',
+                                    self.new_conn).set_index('index').T
+        inter_continent = pd.read_sql('SELECT * FROM [SI - Acidification/Eutrophication - Continents cell resolution]',
+                                      self.new_conn).set_index('index').T
 
-        for cat in concerned_cat:
-            # load the corresponding access table
-            db = pd.read_sql(sql='SELECT * FROM [' + cat[0] + ']', con=self.conn)
-            # converting 3-letters ISO codes to 2-letters ISO codes
-            db = convert_country_codes(db)
-            # select the impact category within the dataframe
-            stoec_ratios_cat = stoec_ratios.loc[
-                [i for i in stoec_ratios.index if stoec_ratios.loc[i, 'Impact category'] == cat[1]]]
-            # the dataframe where we will reconstruct the database
-            df = pd.DataFrame(None, columns=self.master_db.columns)
-            for i in stoec_ratios_cat.index:
-                # a simple counter to know which id we are at
-                id_count = len(self.master_db)
-                base_flow = stoec_ratios_cat.loc[i, 'Corresponding elem flow in IW']
-                base_values = db.loc[[i for i in db.index if db.loc[i, 'Elem flow'] == base_flow]]
-                new_values = base_values.loc[:, 'Weighted Average'] * stoec_ratios_cat.loc[i, 'Stoechiometric ratio']
-                for j in base_values.index:
-                    # populating the metadata and values for the added CFs
-                    df.loc[id_count, 'Impact category'] = cat[1]
-                    df.loc[id_count, 'CF unit'] = base_values.loc[j, 'Unit'].split('[')[1].split(']')[0].split('/')[0]
-                    df.loc[id_count, 'Elem flow unit'] = 'kg'
-                    df.loc[id_count, 'Compartment'] = base_values.loc[j, 'Compartment']
-                    df.loc[id_count, 'Sub-compartment'] = base_values.loc[j, 'Sub-compartment']
-                    df.loc[id_count, 'Elem flow name'] = stoec_ratios_cat.loc[i, 'Elem flow name in Simapro'] + ', ' + \
-                                                         base_values.loc[j, 'Region code']
-                    df.loc[id_count, 'CAS number'] = stoec_ratios_cat.loc[i, 'CAS number']
-                    df.loc[id_count, 'MP or Damage'] = base_values.loc[j, 'MP or Damage']
-                    df.loc[id_count, 'Native geographical resolution scale'] = base_values.loc[j, 'Resolution']
-                    df.loc[id_count, 'CF value'] = new_values.loc[j]
-                    id_count += 1
-                self.master_db = pd.concat([self.master_db, df])
+        # ------------------------- CALCULATING MIDPOINT AND DAMAGE CFS --------------------------------
+        country_emissions = {}
+        continent_emissions = {}
+        for substance in cell_emissions:
+            cell_emissions[substance].index.name = None
+            country_emissions[substance] = inter_country.dot(cell_emissions[substance].Emission)
+            continent_emissions[substance] = inter_continent.dot(cell_emissions[substance].Emission)
 
+        cfs_midpoint = pd.DataFrame(None, cell_emissions.keys(), country_emissions['NOx'].index)
+
+        for substance in cell_emissions:
+            # for countries
+            for country in country_emissions[substance].index:
+                try:
+                    aggregated_cf = (cell_emissions[substance].loc[:, 'midpoint'] *
+                                     cell_emissions[substance].loc[:, 'Emission'] /
+                                     country_emissions[substance].loc[country] *
+                                     inter_country.loc[country]).sum()
+                    cfs_midpoint.loc[substance, country] = aggregated_cf
+                except ZeroDivisionError:
+                    pass
+
+            # for continents
+            for continent in continent_emissions[substance].index:
+                try:
+                    aggregated_cf = (cell_emissions[substance].loc[:, 'midpoint'] *
+                                     cell_emissions[substance].loc[:, 'Emission'] /
+                                     continent_emissions[substance].loc[continent] *
+                                     inter_continent.loc[continent]).sum()
+                    cfs_midpoint.loc[substance, continent] = aggregated_cf
+                except ZeroDivisionError:
+                    pass
+
+            # global
+            GLO_value = (cell_emissions[substance].loc[:, 'midpoint'] *
+                         cell_emissions[substance].loc[:, 'Emission'] /
+                         cell_emissions[substance].Emission.sum()).sum()
+            cfs_midpoint.loc[substance, 'GLO'] = GLO_value
+
+        # factor 0.7 is the reference (it's nitrogen GLO in water)
+        cfs_midpoint /= 0.7
+
+        cfs_damage = pd.DataFrame(None, cell_emissions.keys(), country_emissions['NOx'].index)
+
+        for substance in cell_emissions:
+            # for countries
+            for country in country_emissions[substance].index:
+                try:
+                    aggregated_cf = (cell_emissions[substance].loc[:, 'endpoint'] *
+                                     cell_emissions[substance].loc[:, 'Emission'] /
+                                     country_emissions[substance].loc[country] *
+                                     inter_country.loc[country]).sum()
+                    cfs_damage.loc[substance, country] = aggregated_cf
+                except ZeroDivisionError:
+                    pass
+
+            # for continents
+            for continent in continent_emissions[substance].index:
+                try:
+                    aggregated_cf = (cell_emissions[substance].loc[:, 'endpoint'] *
+                                     cell_emissions[substance].loc[:, 'Emission'] /
+                                     continent_emissions[substance].loc[continent] *
+                                     inter_continent.loc[continent]).sum()
+                    cfs_damage.loc[substance, continent] = aggregated_cf
+                except ZeroDivisionError:
+                    pass
+
+            # global
+            GLO_value = (cell_emissions[substance].loc[:, 'endpoint'] *
+                         cell_emissions[substance].loc[:, 'Emission'] /
+                         cell_emissions[substance].Emission.sum()).sum()
+            cfs_damage.loc[substance, 'GLO'] = GLO_value
+
+        # ------------------------------ DATA FORMATTING -----------------------------------
+        # convert country names to ISO 2 letter codes
+        # lines of logger to avoid having warnings showing up
+        coco_logger = coco.logging.getLogger()
+        coco_logger.setLevel(coco.logging.CRITICAL)
+        cfs_midpoint.columns = coco.convert(cfs_midpoint.iloc[:, :-7], to='ISO2') + ['RNA', 'RLA', 'RER', 'RAS', 'RAF',
+                                                                                     'OCE', 'GLO']
+        cfs_damage.columns = cfs_midpoint.columns
+        # countries that don't exist anymore or that are not part of the UN are dropped
+        cfs_midpoint.drop('not found', axis=1, inplace=True)
+        cfs_damage.drop('not found', axis=1, inplace=True)
+
+        cfs_midpoint = cfs_midpoint.stack().reset_index()
+        cfs_midpoint.columns = ['Elem flow', 'Region code', 'CF value']
+        cfs_damage = cfs_damage.stack().reset_index()
+        cfs_damage.columns = ['Elem flow', 'Region code', 'CF value']
+        cfs_midpoint.loc[:, 'CF unit'] = 'kg N N-lim eq'
+        cfs_midpoint.loc[:, 'MP or Damage'] = 'Midpoint'
+        cfs_damage.loc[:, 'CF unit'] = 'PDF.m2.yr'
+        cfs_damage.loc[:, 'MP or Damage'] = 'Damage'
+        cfs = pd.concat([cfs_midpoint, cfs_damage])
+        cfs.loc[:, 'Impact category'] = 'Marine eutrophication'
+        cfs.loc[:, 'Compartment'] = 'Air'
+        cfs.loc[:, 'Sub-compartment'] = '(unspecified)'
+        cfs.loc[:, 'Elem flow unit'] = 'kg'
+        cfs.loc[:, 'Native geographical resolution scale'] = 'Country'
+        cfs.loc[cfs.loc[:, 'Elem flow'] == 'NH3', 'CAS number'] = '007664-41-7'
+        cfs.loc[cfs.loc[:, 'Elem flow'] == 'NOx', 'CAS number'] = '011104-93-1'
+        cfs.loc[cfs.loc[:, 'Elem flow'] == 'HNO3', 'CAS number'] = '007697-37-2'
+        cfs = clean_up_dataframe(cfs)
+        cfs.loc[[i for i in cfs.index if cfs.loc[i, 'Region code'] in ['RNA', 'RLA', 'RER', 'RAS', 'RAF', 'OCE', 'GLO']],
+                'Native geographical resolution scale'] = 'Continent'
+        cfs.loc[cfs.loc[:, 'Region code'] == 'GLO', 'Native geographical resolution scale'] = 'Global'
+
+        # add non-regionalized flows (water emissions)
+        cfs = pd.concat(
+            [cfs, pd.read_sql('SELECT * FROM [CF - not regionalized - MarEutro]', self.new_conn).drop('index', axis=1)])
+
+        # ------------------------------ APPLYING STOECHIOMETRIC RATIOS --------------------------
+        stoc = pd.read_sql('SELECT * FROM [SI - stoechiometry]', self.new_conn).drop('index', axis=1)
+        for i in stoc.index:
+            proxy = stoc.loc[i, 'Corresponding elem flow in IW']
+            df = cfs[cfs.loc[:, 'Elem flow'] == proxy].copy('deep')
+            if not df.empty:
+                df.loc[:, 'Elem flow'] = stoc.loc[i, 'Elem flow name in Simapro']
+                df.loc[:, 'CAS number'] = stoc.loc[i, 'CAS number']
+                df.loc[:, 'CF value'] *= stoc.loc[i, 'Stoechiometric ratio']
+
+                cfs = pd.concat([cfs, df])
+
+        # ------------------------------------ FINAL FORMATTING ---------------------------------
+        cfs.loc[cfs.loc[:, 'Elem flow'] == 'NH3', 'Elem flow'] = 'Ammonia'
+        cfs.loc[cfs.loc[:, 'Elem flow'] == 'NOx', 'Elem flow'] = 'Nitrogen oxides'
+        cfs.loc[cfs.loc[:, 'Elem flow'] == 'HNO3', 'Elem flow'] = 'Nitric acid'
+        # concat elem flow and region code in the same name
+        cfs.loc[:, 'Elem flow name'] = [', '.join(i) if type(i[1]) == str else i[0]
+                                        for i in list(zip(cfs.loc[:, 'Elem flow'], cfs.loc[:, 'Region code']))]
+        cfs = cfs.drop(['Elem flow', 'Region code'], axis=1)
+        cfs = clean_up_dataframe(cfs)
+
+        # concat with master_db
+        self.master_db = pd.concat([self.master_db, cfs])
+        self.master_db = clean_up_dataframe(self.master_db)
+
+    def load_freshwater_eutrophication_cfs(self):
+        """
+        Loading the CFs for the freshwater eutrophication impact category. This includes CFs coming from the
+        original article of IW+, as well as other CFs extrapolated from stoechiometric ratios.
+
+        Concerned impact categories:
+            - Freshwater eutrophication
+
+        :return: updated master_db
+        """
+
+        # ------------------------------ LOADING DATA -----------------------------------
+        cell_emissions = pd.read_sql(sql='SELECT * FROM [CF - regionalized - FWEutro - native]', con=self.new_conn)
+        inter_country = pd.read_sql(
+            sql='SELECT * FROM [SI - Freshwater Eutrophication - Countries/continents cell resolution]',
+            con=self.new_conn)
+
+        df = cell_emissions.merge(inter_country, left_on='cell', right_on='nindex').loc[
+             :, ['cell', 'FF_P_yr', 'Population_per_cell', 'ISO_2DIGIT', 'CNTRY_NAME', 'CONT_NAME']]
+
+        # 'NA' is converted to None by pandas. So we force it back to 'NA' ('NA' is for Namibia)
+        df.ISO_2DIGIT = df.ISO_2DIGIT.fillna('NA')
+
+        # ------------------------- CALCULATING MIDPOINT AND DAMAGE CFS --------------------------------
+        countries = set(df.ISO_2DIGIT)
+        cfs_midpoint = pd.DataFrame(None, countries, ['CF'])
+        for country in countries:
+            ponderation = df[df.ISO_2DIGIT == country].Population_per_cell / df[
+                df.ISO_2DIGIT == country].Population_per_cell.sum()
+            cfs_midpoint.loc[country, 'CF'] = (ponderation * df.loc[ponderation.index, 'FF_P_yr']).sum()
+
+        # global value
+        cfs_midpoint.loc['GLO', 'CF'] = (df.Population_per_cell / df.Population_per_cell.sum()).dot(
+            df.loc[:, 'FF_P_yr'])
+
+        continents = set(df.CONT_NAME)
+        for continent in continents:
+            ponderation = df[df.CONT_NAME == continent].Population_per_cell / df[
+                df.CONT_NAME == continent].Population_per_cell.sum()
+            cfs_midpoint.loc[continent, 'CF'] = (ponderation * df.loc[ponderation.index, 'FF_P_yr']).sum()
+
+        # Damage: just multiply the value by 11.4
+        cfs_damage = cfs_midpoint.copy('deep')
+        cfs_damage *= 11.4
+
+        # Ponderate by reference flow (Phosphate, GLO)
+        cfs_midpoint /= cfs_midpoint.loc['GLO', 'CF']
+
+        # ------------------------------ DATA FORMATTING -----------------------------------
+        cfs_midpoint.loc[:, 'CF unit'] = 'kg PO4 P-lim eq'
+        cfs_midpoint.loc[:, 'MP or Damage'] = 'Midpoint'
+        cfs_damage.loc[:, 'CF unit'] = 'PDF.m2.yr'
+        cfs_damage.loc[:, 'MP or Damage'] = 'Damage'
+        cfs = pd.concat([cfs_midpoint, cfs_damage])
+        cfs.loc[:, 'Impact category'] = 'Freshwater eutrophication'
+        cfs.loc[:, 'Compartment'] = 'Water'
+        cfs.loc[:, 'Sub-compartment'] = '(unspecified)'
+        cfs.loc[:, 'Elem flow unit'] = 'kg'
+        cfs.loc[:, 'Native geographical resolution scale'] = 'Country'
+        cfs.loc[['RNA', 'RLA', 'RER', 'RAS', 'RAF', 'OCE'], 'Native geographical resolution scale'] = 'Continent'
+        cfs.loc['GLO', 'Native geographical resolution scale'] = 'Global'
+        cfs.loc[:, 'Elem flow'] = 'Phosphate'
+        cfs.loc[:, 'CAS number'] = '014265-44-2'
+        cfs = cfs.reset_index()
+        cfs.columns = ['Region code', 'CF value', 'CF unit', 'MP or Damage', 'Impact category', 'Compartment',
+                       'Sub-compartment', 'Elem flow unit', 'Native geographical resolution scale',
+                       'Elem flow', 'CAS number']
+
+        # ------------------------------ APPLYING STOECHIOMETRIC RATIOS --------------------------
+        stoc = pd.read_sql('SELECT * FROM [SI - stoechiometry]', self.new_conn).drop('index', axis=1)
+        for i in stoc.index:
+            proxy = stoc.loc[i, 'Corresponding elem flow in IW']
+            df = cfs[cfs.loc[:, 'Elem flow'] == proxy].copy('deep')
+            if not df.empty:
+                df.loc[:, 'Elem flow'] = stoc.loc[i, 'Elem flow name in Simapro']
+                df.loc[:, 'CAS number'] = stoc.loc[i, 'CAS number']
+                df.loc[:, 'CF value'] *= stoc.loc[i, 'Stoechiometric ratio']
+
+                cfs = pd.concat([cfs, df])
+
+        # ------------------------------------ FINAL FORMATTING ---------------------------------
+        cfs.loc[:, 'Elem flow name'] = [', '.join(i) for i in
+                                        list(zip(cfs.loc[:, 'Elem flow'], cfs.loc[:, 'Region code']))]
+        cfs = cfs.drop(['Elem flow', 'Region code'], axis=1)
+        cfs = clean_up_dataframe(cfs)
+
+        # concat with master_db
+        self.master_db = pd.concat([self.master_db, cfs])
         self.master_db = clean_up_dataframe(self.master_db)
 
     def load_land_use_cfs(self):
@@ -1281,78 +1812,206 @@ class Parse:
         :return: updated master_db
         """
 
-        # --------- Land occupation -----------
+        # ------------------------------ LOADING DATA -----------------------------------
+        original_cf_occup = pd.read_sql(sql='SELECT * FROM [CF - regionalized - land occupation per biome]',
+                                        con=self.new_conn).drop('index', axis=1)
 
-        db = pd.read_sql(sql='SELECT * FROM [CF - regionalized - LandOcc - aggregated]', con=self.conn)
+        intersect_country = pd.read_sql(sql='SELECT * FROM [SI - Land occupation - countries cell resolution]',
+                                        con=self.new_conn).drop('index', axis=1)
 
-        # converting 3-letters ISO codes to 2-letters ISO codes
-        db = convert_country_codes(db)
+        land_use_type = pd.read_sql(sql='SELECT * FROM [SI - Land occupation - land use type per country/continent]',
+                                    con=self.new_conn).drop('index', axis=1)
 
-        # the dataframe where we will reconstruct the database
-        df = pd.DataFrame(None, columns=self.master_db.columns)
+        recovery_times = pd.read_sql(sql='SELECT * FROM [SI - recovery times - land transformation]',
+                                     con=self.new_conn).drop('index', axis=1)
 
-        id_count = len(self.master_db)
+        original_cf_occup = original_cf_occup.merge(intersect_country, left_on='Biome', right_on='WWF_MHTNUM',
+                                                    how='outer')
 
-        for i in db.index:
-            df.loc[id_count, 'Impact category'] = db.loc[i, 'Impact category']
-            df.loc[id_count, 'CF unit'] = db.loc[i, 'Unit'].split('[')[1].split(']')[0].split('/')[0]
-            df.loc[id_count, 'Elem flow unit'] = db.loc[i, 'Unit'].split('[')[1].split(']')[0].split('/')[1]
-            # hardcoded comp and subcomp
-            df.loc[id_count, 'Compartment'] = 'Raw'
-            df.loc[id_count, 'Sub-compartment'] = 'land'
-            df.loc[id_count, 'Elem flow name'] = 'Occupation, ' + db.loc[i, 'Elem flow'].lower() + ', ' + db.loc[i, 'Region code']
-            # careful, different name
-            df.loc[id_count, 'MP or Damage'] = db.loc[i, 'MP or Damage']
-            df.loc[id_count, 'Native geographical resolution scale'] = db.loc[i, 'Resolution']
-            df.loc[id_count, 'CF value'] = db.loc[i, 'Weighted Average']
-            id_count += 1
+        original_cf_occup = original_cf_occup.merge(land_use_type, on='ISO', how='outer')
 
-        self.master_db = pd.concat([self.master_db, df])
+        original_cf_occup = original_cf_occup.merge(recovery_times, left_on='WWF_MHTNUM', right_on='Biome_type')
 
-        self.master_db = clean_up_dataframe(self.master_db)
+        original_cf_occup = original_cf_occup.set_index(['ECO_CODE', 'ISO', 'Distribution'])
+        original_cf_occup.index.names = None, None, None
 
-        # --------- Land transformation -----------
+        original_cf_occup = original_cf_occup.loc[:,
+                            ['Forest/Grassland, not used', 'Secondary Vegetation', 'Forest, used',
+                             'Pasture/meadow', 'Annual crops', 'Permanent crops',
+                             'Agriculture, mosaic (Agroforestry)', 'Artificial areas', 'Proxy_area_AGRI',
+                             'Proxy_area_PAST', 'Proxy_area_URB', 'Proxy_area_MANAGED_FOR',
+                             'ID_CONT_1', 'Time']].dropna()
 
-        db = pd.read_sql(sql='SELECT * FROM [CF - regionalized - LandTrans - aggregated]', con=self.conn)
+        original_cf_transfo = original_cf_occup.copy()
 
-        # converting 3-letters ISO codes to 2-letters ISO codes
-        db = convert_country_codes(db)
+        for land_type in ['Forest/Grassland, not used', 'Secondary Vegetation', 'Forest, used', 'Pasture/meadow',
+                          'Annual crops', 'Permanent crops', 'Agriculture, mosaic (Agroforestry)', 'Artificial areas']:
+            original_cf_transfo.loc[:, land_type] *= original_cf_transfo.loc[:, 'Time'] * 0.5
 
-        # the dataframe where we will reconstruct the database
-        df = pd.DataFrame(None, columns=self.master_db.columns)
+        # ------------------------- CALCULATING MIDPOINT AND DAMAGE CFS --------------------------------
+        # the proxy used for ponderation
+        proxy = {'Forest/Grassland, not used': ('Proxy_area_MANAGED_FOR', 'surface_COUNT_FOR'),
+                 'Secondary Vegetation': ('Proxy_area_MANAGED_FOR', 'surface_COUNT_FOR'),
+                 'Forest, used': ('Proxy_area_MANAGED_FOR', 'surface_COUNT_FOR'),
+                 'Pasture/meadow': ('Proxy_area_PAST', 'surface_COUNT_PAST'),
+                 'Annual crops': ('Proxy_area_AGRI', 'surface_COUNT_AGRI'),
+                 'Permanent crops': ('Proxy_area_AGRI', 'surface_COUNT_AGRI'),
+                 'Agriculture, mosaic (Agroforestry)': ('Proxy_area_AGRI', 'surface_COUNT_AGRI'),
+                 'Artificial areas': ('Proxy_area_URB', 'surface_COUNT_URB')}
 
-        id_count = len(self.master_db)
+        #                             - FOR LAND OCCUPATION -
 
-        for i in db.index:
-            df.loc[id_count, 'Impact category'] = db.loc[i, 'Impact category']
-            df.loc[id_count, 'CF unit'] = db.loc[i, 'Unit'].split('[')[1].split(']')[0].split('/')[0]
-            df.loc[id_count, 'Elem flow unit'] = db.loc[i, 'Unit'].split('[')[1].split(']')[0].split('/')[1]
-            # hardcoded comp and subcomp
-            df.loc[id_count, 'Compartment'] = 'Raw'
-            df.loc[id_count, 'Sub-compartment'] = 'land'
-            df.loc[id_count, 'Elem flow name'] = 'Transformation, from '+ db.loc[i, 'Elem flow'].lower() + ', ' + \
-                                                 db.loc[i, 'Region code']
-            # careful, different name
-            df.loc[id_count, 'MP or Damage'] = db.loc[i, 'MP or Damage']
-            df.loc[id_count, 'Native geographical resolution scale'] = db.loc[i, 'Resolution']
-            df.loc[id_count, 'CF value'] = - db.loc[i, 'Weighted Average']
-            id_count += 1
-            df.loc[id_count, 'Impact category'] = db.loc[i, 'Impact category']
-            df.loc[id_count, 'CF unit'] = db.loc[i, 'Unit'].split('[')[1].split(']')[0].split('/')[0]
-            df.loc[id_count, 'Elem flow unit'] = db.loc[i, 'Unit'].split('[')[1].split(']')[0].split('/')[1]
-            # hardcoded comp and subcomp
-            df.loc[id_count, 'Compartment'] = 'Raw'
-            df.loc[id_count, 'Sub-compartment'] = 'land'
-            df.loc[id_count, 'Elem flow name'] = 'Transformation, to '+ db.loc[i, 'Elem flow'].lower() + ', ' + \
-                                                 db.loc[i, 'Region code']
-            # careful, different name
-            df.loc[id_count, 'MP or Damage'] = db.loc[i, 'MP or Damage']
-            df.loc[id_count, 'Native geographical resolution scale'] = db.loc[i, 'Resolution']
-            df.loc[id_count, 'CF value'] = db.loc[i, 'Weighted Average']
-            id_count += 1
+        # for countries
+        cfs = pd.DataFrame(0, set([i[1] for i in original_cf_occup.index]), proxy)
 
-        self.master_db = pd.concat([self.master_db, df])
+        for cty in cfs.index:
+            for land_type in cfs.columns:
+                native_cfs = original_cf_occup.loc(axis=0)[:, cty, 'Median'].loc[:, land_type]
+                native_cfs = native_cfs.where(native_cfs > 0).dropna()
 
+                ponderation = (original_cf_occup.loc[native_cfs.index, proxy[land_type][0]] /
+                               original_cf_occup.loc[native_cfs.index, proxy[land_type][0]].sum())
+                df = (native_cfs * ponderation).sum()
+
+                cfs.loc[cty, land_type] = df
+
+        # for continents
+        for cont in set(original_cf_occup.ID_CONT_1):
+            for land_type in cfs.columns:
+                native_cfs = original_cf_occup[original_cf_occup.ID_CONT_1 == cont].loc(axis=0)[:, :, 'Median'].loc[:,
+                             land_type]
+                native_cfs = native_cfs.where(native_cfs > 0).dropna()
+
+                ponderation = (original_cf_occup.loc[native_cfs.index, proxy[land_type][0]] /
+                               original_cf_occup.loc[native_cfs.index, proxy[land_type][0]].sum())
+                df = (native_cfs * ponderation).sum()
+
+                cfs.loc[cont, land_type] = df
+
+        for land_type in cfs.columns:
+            native_cfs = original_cf_occup.loc(axis=0)[:, :, 'Median'].loc[:, land_type]
+            native_cfs = native_cfs.where(native_cfs > 0).dropna()
+
+            ponderation = (original_cf_occup.loc[native_cfs.index, proxy[land_type][0]] /
+                           original_cf_occup.loc[native_cfs.index, proxy[land_type][0]].sum())
+            cf = (native_cfs * ponderation).sum()
+
+            cfs.loc['GLO', land_type] = cf
+
+        # CFs obtained are already for damage categories
+        occupation_damage_cfs = cfs.copy()
+
+        # to get midpoint CFS, simply normalize with reference
+        occupation_midpoint_cfs = cfs / cfs.loc['GLO', 'Annual crops']
+
+        #                              - FOR LAND TRANSFORMATION -
+
+        # for countries
+        cfs = pd.DataFrame(0, set([i[1] for i in original_cf_transfo.index]), proxy)
+
+        for cty in cfs.index:
+            for land_type in cfs.columns:
+                native_cfs = original_cf_transfo.loc(axis=0)[:, cty, 'Median'].loc[:, land_type]
+                native_cfs = native_cfs.where(native_cfs > 0).dropna()
+
+                ponderation = (original_cf_transfo.loc[native_cfs.index, proxy[land_type][0]] /
+                               original_cf_transfo.loc[native_cfs.index, proxy[land_type][0]].sum())
+                cf = (native_cfs * ponderation).sum()
+
+                cfs.loc[cty, land_type] = cf
+
+        # for continents
+        for cont in set(original_cf_transfo.ID_CONT_1):
+            for land_type in cfs.columns:
+                native_cfs = original_cf_transfo[original_cf_transfo.ID_CONT_1 == cont].loc(axis=0)[:, :, 'Median'].loc[
+                             :, land_type]
+                native_cfs = native_cfs.where(native_cfs > 0).dropna()
+
+                ponderation = (original_cf_transfo.loc[native_cfs.index, proxy[land_type][0]] /
+                               original_cf_transfo.loc[native_cfs.index, proxy[land_type][0]].sum())
+                cf = (native_cfs * ponderation).sum()
+
+                cfs.loc[cont, land_type] = cf
+
+        for land_type in cfs.columns:
+            native_cfs = original_cf_transfo.loc(axis=0)[:, :, 'Median'].loc[:, land_type]
+            native_cfs = native_cfs.where(native_cfs > 0).dropna()
+
+            ponderation = (original_cf_transfo.loc[native_cfs.index, proxy[land_type][0]] /
+                           original_cf_transfo.loc[native_cfs.index, proxy[land_type][0]].sum())
+            cf = (native_cfs * ponderation).sum()
+
+            cfs.loc['GLO', land_type] = cf
+
+        # CFs obtained are already for damage categories
+        transformation_damage_cfs = cfs.copy()
+
+        # to get midpoint CFS, simply normalize with reference
+        transformation_midpoint_cfs = cfs / cfs.loc['GLO', 'Annual crops']
+
+        # ------------------------------ DATA FORMATTING -----------------------------------
+        occupation_damage_cfs = occupation_damage_cfs.stack().reset_index()
+        occupation_midpoint_cfs = occupation_midpoint_cfs.stack().reset_index()
+        transformation_damage_cfs = transformation_damage_cfs.stack().reset_index()
+        transformation_midpoint_cfs = transformation_midpoint_cfs.stack().reset_index()
+        occupation_damage_cfs.loc[:, 'Impact category'] = 'Land occupation, biodiversity'
+        occupation_midpoint_cfs.loc[:, 'Impact category'] = 'Land occupation, biodiversity'
+        transformation_damage_cfs.loc[:, 'Impact category'] = 'Land transformation, biodiversity'
+        transformation_midpoint_cfs.loc[:, 'Impact category'] = 'Land transformation, biodiversity'
+        occupation_damage_cfs.loc[:, 'MP or Damage'] = 'Damage'
+        occupation_midpoint_cfs.loc[:, 'MP or Damage'] = 'Midpoint'
+        transformation_damage_cfs.loc[:, 'MP or Damage'] = 'Damage'
+        transformation_midpoint_cfs.loc[:, 'MP or Damage'] = 'Midpoint'
+        occupation_damage_cfs.loc[:, 'CF unit'] = 'm2 arable land eq .yr'
+        occupation_midpoint_cfs.loc[:, 'CF unit'] = 'm2 arable land eq .yr'
+        transformation_damage_cfs.loc[:, 'CF unit'] = 'm2 arable land eq'
+        transformation_midpoint_cfs.loc[:, 'CF unit'] = 'm2 arable land eq'
+        occupation_damage_cfs.loc[:, 'Elem flow unit'] = 'm2.yr'
+        occupation_midpoint_cfs.loc[:, 'Elem flow unit'] = 'm2.yr'
+        transformation_damage_cfs.loc[:, 'Elem flow unit'] = 'm2'
+        transformation_midpoint_cfs.loc[:, 'Elem flow unit'] = 'm2'
+        land_cfs = pd.concat(
+            [occupation_damage_cfs, occupation_midpoint_cfs, transformation_damage_cfs, transformation_midpoint_cfs])
+        land_cfs = clean_up_dataframe(land_cfs)
+        continents = [i for i in land_cfs.index if
+                      land_cfs.loc[i, 'level_0'] in ['RNA', 'RER', 'RLA', 'RAF', 'OCE', 'RAS', 'GLO']]
+
+        continental_data = land_cfs.loc[continents].copy('deep')
+        land_cfs = land_cfs.drop(continents)
+        land_cfs.loc[:, 'level_0'] = coco.convert(land_cfs.loc[:, 'level_0'], to='ISO2')
+        land_cfs = land_cfs.drop([i for i in land_cfs.index if land_cfs.loc[i, 'level_0'] == 'not found'])
+        land_cfs = pd.concat([land_cfs, continental_data])
+        land_cfs.level_1 = [i.lower() for i in land_cfs.level_1]
+        land_cfs.loc[:, 'Elem flow name'] = [', '.join(i) for i in
+                                             list(zip(land_cfs.loc[:, 'level_1'], land_cfs.loc[:, 'level_0']))]
+        land_cfs.loc[land_cfs.loc[:, 'Impact category'] == 'Land occupation, biodiversity', 'Elem flow name'] = [
+            'Occupation, ' + i[0].lower() + i[1:] for i in land_cfs.loc[land_cfs.loc[:, 'Impact category'] ==
+                                                                        'Land occupation, biodiversity', 'Elem flow name']]
+        land_cfs.loc[land_cfs.loc[:, 'Impact category'] == 'Land transformation, biodiversity', 'Elem flow name'] = [
+            'Transformation, to ' + i[0].lower() + i[1:] for i in land_cfs.loc[land_cfs.loc[:, 'Impact category'] ==
+                                                                               'Land transformation, biodiversity', 'Elem flow name']]
+        for_negative = land_cfs.loc[land_cfs.loc[:, 'Impact category'] == 'Land transformation, biodiversity'].copy(
+            'deep')
+        for_negative.loc[:, 0] *= -1
+        for_negative.loc[:, 'Elem flow name'] = ['Transformation, from' + i.split('Transformation, to')[1] for i in
+                                                 for_negative.loc[:, 'Elem flow name']]
+        land_cfs = pd.concat([land_cfs, for_negative])
+        land_cfs = clean_up_dataframe(land_cfs)
+        land_cfs.loc[:, 'Native geographical resolution scale'] = 'Country'
+        land_cfs.loc[
+            [i for i in land_cfs.index if land_cfs.loc[i, 'level_0'] in ['RNA', 'RER', 'RLA', 'RAF', 'OCE', 'RAS']],
+            'Native geographical resolution scale'] = 'Continent'
+        land_cfs.loc[land_cfs.level_0 == 'GLO', 'Native geographical resolution scale'] = 'Global'
+        land_cfs.loc[:, 'CAS number'] = ''
+        land_cfs.loc[:, 'Compartment'] = 'Raw'
+        land_cfs.loc[:, 'Sub-compartment'] = 'land'
+        land_cfs = land_cfs.drop(['level_0', 'level_1'], axis=1)
+        land_cfs.columns = ['CF value', 'Impact category', 'MP or Damage', 'CF unit', 'Elem flow unit',
+                            'Elem flow name', 'Native geographical resolution scale', 'CAS number','Compartment',
+                            'Sub-compartment']
+
+        # concat with master_db
+        self.master_db = pd.concat([self.master_db, land_cfs])
         self.master_db = clean_up_dataframe(self.master_db)
 
     def load_particulates_cfs(self):
@@ -1367,7 +2026,8 @@ class Parse:
 
         # ------- Particulate matter formation ---------
 
-        db = pd.read_sql(sql='SELECT * FROM [CF - regionalized - PartMatterForm - native]', con=self.conn)
+        db = pd.read_sql(sql='SELECT * FROM [CF - regionalized - PartMatterForm - native]', con=self.new_conn).drop(
+            'index', axis=1)
 
         subcomps = {'Urban': 'high. pop.',
                     'Rural': 'low. pop.',
@@ -1481,6 +2141,151 @@ class Parse:
 
         self.master_db = clean_up_dataframe(self.master_db)
 
+    def load_water_availability_hh_cfs(self):
+        """
+        Load CFs for water availability human health.
+
+        Concerned impact categories:
+            - Water availability, human health
+
+        :return: update master_db
+        """
+
+        # ------------------------------ LOADING DATA -----------------------------------
+        consumption = pd.read_sql(sql='SELECT * FROM [SI - WaterAvailability_HH - water consumption]',
+                                  con=self.new_conn).drop('index', axis=1)
+        # pandas reads the "NA" code for Namibia as Not-A-Number
+        consumption.Country.fillna('NA', inplace=True)
+
+        original_cfs = pd.read_sql(sql='SELECT * FROM [CF - regionalized - WaterAvailability_HH - native]',
+                                   con=self.new_conn).drop('index', axis=1)
+
+        original_cfs = original_cfs[original_cfs.loc[:, 'midpoint/endpoint'] == 'endpoint']
+        original_cfs = original_cfs[original_cfs.loc[:, 'Metho option'] == 'distribution']
+
+        original_cfs = original_cfs.merge(consumption, left_on='Cell ID', right_on='Cell num')
+
+        original_cfs = original_cfs.set_index('Cell ID')
+
+        # ------------------------- CALCULATING DAMAGE CFS --------------------------------
+        # for countries
+        cfs = pd.DataFrame(0, set(original_cfs.Country),
+                           ['S1', 'S2a', 'S2b', 'S2c', 'S2d', 'S3', 'S4', 'S5', 'G1', 'G2a', 'G2b', 'G2c', 'G2d',
+                            'G3', 'G4', 'G5', 'Rain', 'Surface', 'Ground', 'Unknown'])
+
+        for cty in cfs.index:
+            ponderation = (original_cfs[original_cfs.Country == cty].loc[:, 'CU_yr (km3/yr)'] /
+                           original_cfs[original_cfs.Country == cty].loc[:, 'CU_yr (km3/yr)'].sum())
+            for water_flow in cfs.columns:
+                cfs.loc[cty, water_flow] = (original_cfs.loc[ponderation.index, water_flow] * ponderation).sum()
+
+        # for continents
+        for cont in set(consumption.Continent):
+            ponderation = (original_cfs[original_cfs.Continent == cont].loc[:, 'CU_yr (km3/yr)'] /
+                           original_cfs[original_cfs.Continent == cont].loc[:, 'CU_yr (km3/yr)'].sum())
+            for water_flow in cfs.columns:
+                cfs.loc[cont, water_flow] = (original_cfs.loc[ponderation.index, water_flow] * ponderation).sum()
+
+        # global value
+        ponderation = original_cfs.loc[:, 'CU_yr (km3/yr)'] / original_cfs.loc[:, 'CU_yr (km3/yr)'].sum()
+        for water_flow in cfs.columns:
+            cfs.loc['GLO', water_flow] = (original_cfs.loc[ponderation.index, water_flow] * ponderation).sum()
+
+        # ------------------------------ DATA FORMATTING -----------------------------------
+        cfs = cfs.stack().reset_index()
+        cfs.columns = ['Region', 'Water_type', 'CF value']
+        cfs.loc[:, 'Impact category'] = 'Water availability, human health'
+        cfs.loc[:, 'Elem flow unit'] = 'm3'
+        cfs.loc[:, 'MP or Damage'] = 'Damage'
+        cfs.loc[:, 'CF unit'] = 'DALY'
+        cfs.loc[:, 'CAS number'] = '007732-18-5'
+        cfs.loc[:, 'Native geographical resolution scale'] = 'Country'
+        cfs.loc[[i for i in cfs.index if cfs.loc[i, 'Region'] in ['RAF', 'RAS', 'RER', 'RLA', 'RNA', 'OCE']],
+                'Native geographical resolution scale'] = 'Continent'
+        cfs.loc[cfs.Region == 'GLO', 'Native geographical resolution scale'] = 'Global'
+        # remove quality water flows
+        cfs = cfs.loc[[i for i in cfs.index if cfs.loc[i, 'Water_type'] in ['Surface', 'Ground', 'Unknown']]]
+        water_comp = cfs.copy('deep')
+        raw_comp = cfs.copy('deep')
+        water_comp.loc[:, 'Elem flow'] = 'Water'
+        water_comp.loc[:, 'CF value'] *= -1
+        water_comp.loc[:, 'Compartment'] = 'Water'
+        water_comp.loc[water_comp.Water_type == 'Surface', 'Sub-compartment'] = 'lake'
+        water_comp.loc[water_comp.Water_type == 'Ground', 'Sub-compartment'] = 'groundwater'
+        water_comp.loc[water_comp.Water_type == 'Unknown', 'Sub-compartment'] = '(unspecified)'
+        df = water_comp.loc[water_comp.Water_type == 'Surface'].copy('deep')
+        df.loc[:, 'Sub-compartment'] = 'river'
+        water_comp = pd.concat([water_comp, df])
+        water_comp = clean_up_dataframe(water_comp)
+
+        raw_comp.loc[:, 'Elem flow'] = 'Water, unspecified natural origin,'
+        raw_comp.loc[:, 'Compartment'] = 'Raw'
+        raw_comp.loc[:, 'Sub-compartment'] = '(unspecified)'
+        raw_comp.loc[raw_comp.Water_type == 'Surface', 'Elem flow'] = 'Water, lake'
+        raw_comp.loc[raw_comp.Water_type == 'Ground', 'Elem flow'] = 'Water, well, in ground'
+        df = raw_comp.loc[raw_comp.Water_type == 'Surface'].copy('deep')
+        df.loc[:, 'Elem flow'] = 'Water, river'
+        raw_comp = pd.concat([raw_comp, df])
+        raw_comp = clean_up_dataframe(raw_comp)
+
+        cfs = clean_up_dataframe(pd.concat([water_comp, raw_comp]))
+        cfs.loc[:, 'Elem flow name'] = [', '.join(i) for i in list(zip(cfs.loc[:, 'Elem flow'], cfs.loc[:, 'Region']))]
+        cfs = cfs.drop(['Elem flow', 'Region', 'Water_type'], axis=1)
+        cfs = clean_up_dataframe(cfs)
+
+        # concat with master_db
+        self.master_db = pd.concat([self.master_db, cfs])
+        self.master_db = clean_up_dataframe(self.master_db)
+
+    def load_water_availability_eq_cfs(self):
+        """
+        Load CFs for water availability freshwater ecosystem.
+
+        Concerned impact categories:
+            - Water availability, freshwater ecosystem
+
+        :return: update master_db
+        """
+
+        # ------------------------------ LOADING DATA -----------------------------------
+        original_cfs = pd.read_sql(sql='SELECT * FROM [CF - regionalized - WaterAvailability_FW - native]',
+                                   con=self.new_conn).drop('index', axis=1)
+
+        geos = pd.read_sql(sql='SELECT * FROM [SI - WaterAvailability_FW - geographies to create]',
+                           con=self.new_conn).Geo.tolist()
+
+        water_flows = ['Water', 'Water, lake', 'Water, river', 'Water, unspecified natural origin',
+                       'Water, well, in ground', 'Water, cooling, unspecified natural origin']
+
+        # ------------------------------ DATA FORMATTING -----------------------------------
+        cfs = pd.DataFrame(original_cfs.loc[:, 'CF value'].median(),
+                           index=pd.MultiIndex.from_product([water_flows, geos]),
+                           columns=['CF value']).reset_index()
+        cfs.columns = ['Elem flow', 'Region', 'CF value']
+
+        cfs.loc[:, 'Impact category'] = 'Water availablity, freshwater ecosystem'
+        cfs.loc[:, 'Native geographical resolution scale'] = 'Not regionalized'
+        cfs.loc[:, 'MP or Damage'] = 'Damage'
+        cfs.loc[:, 'CAS number'] = '007732-18-5'
+        cfs.loc[:, 'CF unit'] = 'PDF.m2.yr'
+        cfs.loc[:, 'Elem flow unit'] = 'm3'
+        cfs.loc[:, 'Sub-compartment'] = '(unspecified)'
+
+        raw_comp = cfs.copy('deep')
+        raw_comp.loc[:, 'Compartment'] = 'Raw'
+        water_comp = cfs.copy('deep')
+        water_comp.loc[:, 'Compartment'] = 'Water'
+        water_comp.loc[:, 'CF value'] *= -1
+
+        cfs = clean_up_dataframe(pd.concat([water_comp, raw_comp]))
+        cfs.loc[:, 'Elem flow name'] = [', '.join(i) for i in list(zip(cfs.loc[:, 'Elem flow'], cfs.loc[:, 'Region']))]
+        cfs = cfs.drop(['Elem flow', 'Region'], axis=1)
+        cfs = clean_up_dataframe(cfs)
+
+        # concat with master_db
+        self.master_db = pd.concat([self.master_db, cfs])
+        self.master_db = clean_up_dataframe(self.master_db)
+
     def load_water_scarcity_cfs(self):
         """
         Load CFs for water scarcity
@@ -1550,204 +2355,6 @@ class Parse:
         # add the RoW geography based on the Global value
         df = self.master_db.loc[
             [i for i in self.master_db.index if (self.master_db.loc[i, 'Impact category'] == 'Water scarcity' and
-                                                 'GLO' in self.master_db.loc[i, 'Elem flow name'])]]
-        df['Elem flow name'] = [i.split(', GLO')[0] + ', RoW' for i in df['Elem flow name']]
-        df['Native geographical resolution scale'] = 'Other region'
-        self.master_db = pd.concat([self.master_db, df])
-        self.master_db = clean_up_dataframe(self.master_db)
-
-    def load_water_availability_eq_cfs(self):
-        """
-        Load CFs for water availability freshwater ecosystem.
-
-        Concerned impact categories:
-            - Water availability, freshwater ecosystem
-
-        :return: update master_db
-        """
-
-        db = pd.read_sql(sql='SELECT * FROM [CF - regionalized - WaterAvailab_EcosysFW - native]', con=self.conn)
-
-        # Proper aggregation to determine the global value was not yet performed. Median is used instead.
-        def add_generic_water_avail_eq_intel(master_db, id_count):
-            master_db.loc[id_count, 'Impact category'] = 'Water availability, freshwater ecosystem'
-            master_db.loc[id_count, 'Native geographical resolution scale'] = 'Country'
-            master_db.loc[id_count, 'MP or Damage'] = 'Damage'
-            master_db.loc[id_count, 'CAS number'] = '007732-18-5'
-            master_db.loc[id_count, 'CF unit'] = 'PDF.m2.yr'
-            master_db.loc[id_count, 'Elem flow unit'] = 'm3'
-            master_db.loc[id_count, 'Sub-compartment'] = '(unspecified)'
-
-        with open(pkg_resources.resource_filename(__name__, '/Data/geographies_water.json'), 'r') as f:
-            regions = json.load(f)
-
-        # creating the other water flows from the default water flow
-        other_water = ['Water, lake', 'Water, river', 'Water, unspecified natural origin',
-                       'Water, well, in ground', 'Water, cooling, unspecified natural origin']
-
-        for region in regions:
-            # Water comp
-            id_count = len(self.master_db)
-            add_generic_water_avail_eq_intel(self.master_db, id_count)
-            self.master_db.loc[id_count, 'Elem flow name'] = 'Water, ' + region
-            self.master_db.loc[id_count, 'Compartment'] = 'Water'
-            self.master_db.loc[id_count, 'CF value'] = - db.loc[:, 'CF value'].median()
-            for water in other_water:
-                # Raw comp
-                id_count = len(self.master_db)
-                add_generic_water_avail_eq_intel(self.master_db, id_count)
-                self.master_db.loc[id_count, 'Elem flow name'] = water + ', ' + region
-                self.master_db.loc[id_count, 'Compartment'] = 'Raw'
-                self.master_db.loc[id_count, 'CF value'] = db.loc[:, 'CF value'].median()
-
-        # changes value of resolution scale for the global flow
-        self.master_db.loc[[i for i in self.master_db.index if ', GLO' in self.master_db.loc[i,'Elem flow name']],
-                           'Native geographical resolution scale'] = 'Global'
-
-        self.master_db = clean_up_dataframe(self.master_db)
-
-        # add the RoW geography based on the Global value
-        df = self.master_db.loc[
-            [i for i in self.master_db.index if (self.master_db.loc[i, 'Impact category'] ==
-                                                 'Water availability, freshwater ecosystem' and
-                                                 'GLO' in self.master_db.loc[i, 'Elem flow name'])]]
-        df['Elem flow name'] = [i.split(', GLO')[0] + ', RoW' for i in df['Elem flow name']]
-        df['Native geographical resolution scale'] = 'Other region'
-        self.master_db = pd.concat([self.master_db, df])
-        self.master_db = clean_up_dataframe(self.master_db)
-
-    def load_water_availability_hh_cfs(self):
-        """
-        Load CFs for water availability human health.
-
-        Concerned impact categories:
-            - Water availability, human health
-
-        :return: update master_db
-        """
-
-        db = pd.read_sql(sql='SELECT * FROM [CF - regionalized - WaterAvailab_HH - aggregated]', con=self.conn)
-
-        # converting 3-letters ISO codes to 2-letters ISO codes
-        db = convert_country_codes(db)
-
-        # remove the Iraq-Saudi Arabia Neutral Zone geography which creates issues with country_converter because it yields a list and not a string
-        db = clean_up_dataframe(db.drop([i for i in db.index if type(db.loc[i, 'Region code']) != str]))
-
-        def add_generic_water_avai_hh_intel(master_db, id_count):
-            master_db.loc[id_count, 'Impact category'] = 'Water availability, human health'
-            master_db.loc[id_count, 'Elem flow unit'] = 'm3'
-            master_db.loc[id_count, 'MP or Damage'] = 'Damage'
-            master_db.loc[id_count, 'CF unit'] = 'DALY'
-
-        # Water comp / unspecified subcomp
-        data = db.loc[[i for i in db.index if db.loc[i, 'Elem flow'] == 'Unknown']]
-        for i in data.index:
-            id_count = len(self.master_db)
-            add_generic_water_avai_hh_intel(self.master_db, id_count)
-            self.master_db.loc[id_count, 'Native geographical resolution scale'] = data.loc[i, 'Resolution']
-            self.master_db.loc[id_count, 'Compartment'] = 'Water'
-            self.master_db.loc[id_count, 'Sub-compartment'] = '(unspecified)'
-            self.master_db.loc[id_count, 'Elem flow name'] = 'Water' + ', ' + data.loc[i, 'Region code']
-            self.master_db.loc[id_count, 'CF value'] = -data.loc[i, 'Weighted Average']
-
-        # Water comp / lake subcomp
-        data = db.loc[[i for i in db.index if db.loc[i, 'Elem flow'] == 'Surface']]
-        for i in data.index:
-            id_count = len(self.master_db)
-            add_generic_water_avai_hh_intel(self.master_db, id_count)
-            self.master_db.loc[id_count, 'Native geographical resolution scale'] = data.loc[i, 'Resolution']
-            self.master_db.loc[id_count, 'Compartment'] = 'Water'
-            self.master_db.loc[id_count, 'Sub-compartment'] = 'lake'
-            self.master_db.loc[id_count, 'Elem flow name'] = 'Water' + ', ' + data.loc[i, 'Region code']
-            self.master_db.loc[id_count, 'CF value'] = -data.loc[i, 'Weighted Average']
-
-        # Water comp / river subcomp
-        data = db.loc[[i for i in db.index if db.loc[i, 'Elem flow'] == 'Surface']]
-        for i in data.index:
-            id_count = len(self.master_db)
-            add_generic_water_avai_hh_intel(self.master_db, id_count)
-            self.master_db.loc[id_count, 'Native geographical resolution scale'] = data.loc[i, 'Resolution']
-            self.master_db.loc[id_count, 'Compartment'] = 'Water'
-            self.master_db.loc[id_count, 'Sub-compartment'] = 'river'
-            self.master_db.loc[id_count, 'Elem flow name'] = 'Water' + ', ' + data.loc[i, 'Region code']
-            self.master_db.loc[id_count, 'CF value'] = -data.loc[i, 'Weighted Average']
-
-        # Water comp / groundwater subcomp
-        data = db.loc[[i for i in db.index if db.loc[i, 'Elem flow'] == 'Ground']]
-        for i in data.index:
-            id_count = len(self.master_db)
-            add_generic_water_avai_hh_intel(self.master_db, id_count)
-            self.master_db.loc[id_count, 'Native geographical resolution scale'] = data.loc[i, 'Resolution']
-            self.master_db.loc[id_count, 'Compartment'] = 'Water'
-            self.master_db.loc[id_count, 'Sub-compartment'] = 'groundwater'
-            self.master_db.loc[id_count, 'Elem flow name'] = 'Water' + ', ' + data.loc[i, 'Region code']
-            self.master_db.loc[id_count, 'CF value'] = -data.loc[i, 'Weighted Average']
-
-        # Raw comp / unspecified water
-        data = db.loc[[i for i in db.index if db.loc[i, 'Elem flow'] == 'Unknown']]
-        for i in data.index:
-            id_count = len(self.master_db)
-            add_generic_water_avai_hh_intel(self.master_db, id_count)
-            self.master_db.loc[id_count, 'Native geographical resolution scale'] = data.loc[i, 'Resolution']
-            self.master_db.loc[id_count, 'Compartment'] = 'Raw'
-            self.master_db.loc[id_count, 'Sub-compartment'] = '(unspecified)'
-            self.master_db.loc[id_count, 'Elem flow name'] = 'Water, unspecified natural origin' + ', ' + data.loc[
-                i, 'Region code']
-            self.master_db.loc[id_count, 'CF value'] = data.loc[i, 'Weighted Average']
-
-        # Raw comp / lake water
-        data = db.loc[[i for i in db.index if db.loc[i, 'Elem flow'] == 'Surface']]
-        for i in data.index:
-            id_count = len(self.master_db)
-            add_generic_water_avai_hh_intel(self.master_db, id_count)
-            self.master_db.loc[id_count, 'Native geographical resolution scale'] = data.loc[i, 'Resolution']
-            self.master_db.loc[id_count, 'Compartment'] = 'Raw'
-            self.master_db.loc[id_count, 'Sub-compartment'] = '(unspecified)'
-            self.master_db.loc[id_count, 'Elem flow name'] = 'Water, lake' + ', ' + data.loc[i, 'Region code']
-            self.master_db.loc[id_count, 'CF value'] = data.loc[i, 'Weighted Average']
-
-        # Raw comp / river water
-        data = db.loc[[i for i in db.index if db.loc[i, 'Elem flow'] == 'Surface']]
-        for i in data.index:
-            id_count = len(self.master_db)
-            add_generic_water_avai_hh_intel(self.master_db, id_count)
-            self.master_db.loc[id_count, 'Native geographical resolution scale'] = data.loc[i, 'Resolution']
-            self.master_db.loc[id_count, 'Compartment'] = 'Raw'
-            self.master_db.loc[id_count, 'Sub-compartment'] = '(unspecified)'
-            self.master_db.loc[id_count, 'Elem flow name'] = 'Water, river' + ', ' + data.loc[i, 'Region code']
-            self.master_db.loc[id_count, 'CF value'] = data.loc[i, 'Weighted Average']
-
-        # Raw comp / cooling, unspecified natural origin water
-        data = db.loc[[i for i in db.index if db.loc[i, 'Elem flow'] == 'Unknown']]
-        for i in data.index:
-            id_count = len(self.master_db)
-            add_generic_water_avai_hh_intel(self.master_db, id_count)
-            self.master_db.loc[id_count, 'Native geographical resolution scale'] = data.loc[i, 'Resolution']
-            self.master_db.loc[id_count, 'Compartment'] = 'Raw'
-            self.master_db.loc[id_count, 'Sub-compartment'] = '(unspecified)'
-            self.master_db.loc[id_count, 'Elem flow name'] = 'Water, cooling, unspecified natural origin' + ', ' + data.loc[i, 'Region code']
-            self.master_db.loc[id_count, 'CF value'] = data.loc[i, 'Weighted Average']
-
-        # Raw comp / well water
-        data = db.loc[[i for i in db.index if db.loc[i, 'Elem flow'] == 'Ground']]
-        for i in data.index:
-            id_count = len(self.master_db)
-            add_generic_water_avai_hh_intel(self.master_db, id_count)
-            self.master_db.loc[id_count, 'Native geographical resolution scale'] = data.loc[i, 'Resolution']
-            self.master_db.loc[id_count, 'Compartment'] = 'Raw'
-            self.master_db.loc[id_count, 'Sub-compartment'] = '(unspecified)'
-            self.master_db.loc[id_count, 'Elem flow name'] = 'Water, well, in ground' + ', ' + data.loc[
-                i, 'Region code']
-            self.master_db.loc[id_count, 'CF value'] = data.loc[i, 'Weighted Average']
-
-        # drop NaN values
-        self.master_db.dropna(subset=['CF value'], inplace=True)
-
-        # add the RoW geography based on the Global value
-        df = self.master_db.loc[
-            [i for i in self.master_db.index if (self.master_db.loc[i, 'Impact category'] ==
-                                                 'Water availability, human health' and
                                                  'GLO' in self.master_db.loc[i, 'Elem flow name'])]]
         df['Elem flow name'] = [i.split(', GLO')[0] + ', RoW' for i in df['Elem flow name']]
         df['Native geographical resolution scale'] = 'Other region'
