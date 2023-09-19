@@ -942,20 +942,20 @@ class Parse:
                                                                 self.version in ic[0])]
         bw2io.package.BW2Package.export_objs(IW_ic, filename='impact_world_plus_'+self.version+'_brightway2_expert_version',
                                              folder=path+'/bw2/')
-        # bw2 combined version
+        # bw2 footprint version
         IW_ic = [bw2.Method(ic) for ic in list(bw2.methods) if ('IMPACT World+' in ic[0] and 'Footprint' in ic[0] and
                                                                 self.version in ic[0])]
         bw2io.package.BW2Package.export_objs(IW_ic, filename='impact_world_plus_'+self.version+'_brightway2_footprint_version',
                                              folder=path+'/bw2/')
 
         # SimaPro version in csv format
-        with open(path+'/SimaPro/impact_world_plus_'+self.version+'_simapro_midpoint_version.csv', 'w', newline='') as f:
+        with open(path+'/SimaPro/impact_world_plus_'+self.version+'_midpoint_version_simapro_.csv', 'w', newline='') as f:
             writer = csv.writer(f, delimiter=";")
             writer.writerows(
                 self.sp_data['metadata'] + [['', '', '', '', '', '']] + self.sp_data['midpoint_method_metadata'] +
                 self.sp_data['midpoint_values'] + [['', '', '', '', '', '']])
             writer.writerows([['End', '', '', '', '', '']])
-        with open(path+'/SimaPro/impact_world_plus_'+self.version+'_simapro_expert_version.csv', 'w', newline='') as f:
+        with open(path+'/SimaPro/impact_world_plus_'+self.version+'_expert_version_simapro_.csv', 'w', newline='') as f:
             writer = csv.writer(f, delimiter=";")
             writer.writerows(
                 self.sp_data['metadata'] + [['', '', '', '', '', '']] + self.sp_data['damage_method_metadata'] +
@@ -969,7 +969,7 @@ class Parse:
                 self.sp_data['combined_values'] + [['', '', '', '', '', '']])
             writer.writerows(self.sp_data['weighting_info_combined'] + [['', '', '', '', '', '']])
             writer.writerows([['End', '', '', '', '', '']])
-        with open(path+'/SimaPro/impact_world_plus_'+self.version+'_simapro_footprint_version.csv', 'w', newline='') as f:
+        with open(path+'/SimaPro/impact_world_plus_'+self.version+'_footprint_version_simapro_.csv', 'w', newline='') as f:
             writer = csv.writer(f, delimiter=";")
             writer.writerows(
                 self.sp_data['metadata'] + [['', '', '', '', '', '']] + self.sp_data['simplified_method_metadata'] +
