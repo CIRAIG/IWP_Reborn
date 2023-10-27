@@ -2202,7 +2202,7 @@ class Parse:
         :return: self.ei35_iw, self.ei36_iw, self.ei371_iw, self.ei38_iw
         """
 
-        latest_ei_version = '3.9'
+        latest_ei_version = '3.10'
 
         ei_iw_db = self.master_db_not_regio.copy()
 
@@ -2366,9 +2366,7 @@ class Parse:
                                           only_in_36]).copy('deep')
 
         # ---------------------------- MATRIX VERSIONS -------------------------------
-        mapping = pd.read_excel(pkg_resources.resource_stream(__name__, '/Data/mappings/ei'+
-                                                                 latest_ei_version.replace('.','')+
-                                                                 '/ei_iw_mapping.xlsx'))
+
         # introducing UUID for stressors of ecoinvent
         stressors_ei35 = pd.read_excel(pkg_resources.resource_stream(__name__, '/Data/metadata/ei35/stressors.xlsx'))
         stressors_ei35 = stressors_ei35.set_index(['name', 'unit', 'comp', 'subcomp']).drop('cas', axis=1)
