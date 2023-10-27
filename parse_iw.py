@@ -112,16 +112,19 @@ class Parse:
         self.ei371_iw = pd.DataFrame()
         self.ei38_iw = pd.DataFrame()
         self.ei39_iw = pd.DataFrame()
+        self.ei310_iw = pd.DataFrame()
         self.simplified_version_ei35 = pd.DataFrame()
         self.simplified_version_ei36 = pd.DataFrame()
         self.simplified_version_ei371 = pd.DataFrame()
         self.simplified_version_ei38 = pd.DataFrame()
         self.simplified_version_ei39 = pd.DataFrame()
+        self.simplified_version_ei310 = pd.DataFrame()
         self.ei35_iw_as_matrix = pd.DataFrame()
         self.ei36_iw_as_matrix = pd.DataFrame()
         self.ei371_iw_as_matrix = pd.DataFrame()
         self.ei38_iw_as_matrix = pd.DataFrame()
         self.ei39_iw_as_matrix = pd.DataFrame()
+        self.ei310_iw_as_matrix = pd.DataFrame()
         self.iw_sp = pd.DataFrame()
         self.simplified_version_sp = pd.DataFrame()
         self.simplified_version_olca = pd.DataFrame()
@@ -929,6 +932,7 @@ class Parse:
         self.ei371_iw.to_excel(path + '/ecoinvent/impact_world_plus_' + self.version + '_expert_version_ecoinvent_v371.xlsx')
         self.ei38_iw.to_excel(path + '/ecoinvent/impact_world_plus_' + self.version + '_expert_version_ecoinvent_v38.xlsx')
         self.ei39_iw.to_excel(path + '/ecoinvent/impact_world_plus_' + self.version + '_expert_version_ecoinvent_v39.xlsx')
+        self.ei310_iw.to_excel(path + '/ecoinvent/impact_world_plus_' + self.version + '_expert_version_ecoinvent_v310.xlsx')
 
         # ecoinvent version in DataFrame format
         self.ei35_iw_as_matrix.to_excel(path + '/ecoinvent/impact_world_plus_' + self.version + '_expert_version_ecoinvent_v35_as_df.xlsx')
@@ -936,6 +940,7 @@ class Parse:
         self.ei371_iw_as_matrix.to_excel(path + '/ecoinvent/impact_world_plus_' + self.version + '_expert_version_ecoinvent_v371_as_df.xlsx')
         self.ei38_iw_as_matrix.to_excel(path + '/ecoinvent/impact_world_plus_' + self.version + '_expert_version_ecoinvent_v38_as_df.xlsx')
         self.ei39_iw_as_matrix.to_excel(path + '/ecoinvent/impact_world_plus_' + self.version + '_expert_version_ecoinvent_v39_as_df.xlsx')
+        self.ei310_iw_as_matrix.to_excel(path + '/ecoinvent/impact_world_plus_' + self.version + '_expert_version_ecoinvent_v310_as_df.xlsx')
 
         # ecoinvent version in DataFrame format
         self.simplified_version_ei35.to_excel(path + '/ecoinvent/impact_world_plus_' + self.version + '_footprint_version_ecoinvent_v35.xlsx')
@@ -943,6 +948,7 @@ class Parse:
         self.simplified_version_ei371.to_excel(path + '/ecoinvent/impact_world_plus_' + self.version + '_footprint_version_ecoinvent_v371.xlsx')
         self.simplified_version_ei38.to_excel(path + '/ecoinvent/impact_world_plus_' + self.version + '_footprint_version_ecoinvent_v38.xlsx')
         self.simplified_version_ei39.to_excel(path + '/ecoinvent/impact_world_plus_' + self.version + '_footprint_version_ecoinvent_v39.xlsx')
+        self.simplified_version_ei310.to_excel(path + '/ecoinvent/impact_world_plus_' + self.version + '_footprint_version_ecoinvent_v310.xlsx')
 
         # exiobase version in DataFrame format
         self.exio_iw.to_excel(path + '/exiobase/impact_world_plus_' + self.version + '_expert_version_exiobase.xlsx')
@@ -3210,7 +3216,7 @@ class Parse:
         :return: self.ei35_iw, self.ei36_iw, self.ei371_iw, self.ei38_iw
         """
 
-        latest_ei_version = '3.9'
+        latest_ei_version = '3.10'
 
         ei_iw_db = self.master_db_not_regio.copy()
 
@@ -3341,7 +3347,13 @@ class Parse:
                 ei_iw_db.loc[i, 'Impact category'] == "Fossil and nuclear energy use")], 'CF value'] = 0
 
         # start with latest available version of ecoinvent
-        self.ei39_iw = ei_iw_db.copy('deep')
+        self.ei310_iw = ei_iw_db.copy('deep')
+
+        only_in_310 = list(mapping[mapping.loc[:, 'introduced in ei v.'] == '3.10'].dropna(
+            subset=['iw name']).loc[:, 'ecoinvent name'])
+
+        self.ei39_iw = self.ei310_iw.drop([i for i in self.ei310_iw.index if self.ei310_iw.loc[i, 'Elem flow name'] in
+                                          only_in_310]).copy('deep')
 
         only_in_39 = list(mapping[mapping.loc[:, 'introduced in ei v.'] == 3.9].dropna(
             subset=['iw name']).loc[:, 'ecoinvent name'])
@@ -3368,9 +3380,7 @@ class Parse:
                                           only_in_36]).copy('deep')
 
         # ---------------------------- MATRIX VERSIONS -------------------------------
-        mapping = pd.read_excel(pkg_resources.resource_stream(__name__, '/Data/mappings/ei'+
-                                                                 latest_ei_version.replace('.','')+
-                                                                 '/ei_iw_mapping.xlsx'))
+
         # introducing UUID for stressors of ecoinvent
         stressors_ei35 = pd.read_excel(pkg_resources.resource_stream(__name__, '/Data/metadata/ei35/stressors.xlsx'))
         stressors_ei35 = stressors_ei35.set_index(['name', 'unit', 'comp', 'subcomp']).drop('cas', axis=1)
@@ -3387,6 +3397,9 @@ class Parse:
         stressors_ei39 = pd.read_excel(pkg_resources.resource_stream(__name__, '/Data/metadata/ei39/stressors.xlsx'))
         stressors_ei39 = stressors_ei39.set_index(['name', 'unit', 'comp', 'subcomp']).drop('cas', axis=1)
         stressors_ei39.index.names = (None, None, None, None)
+        stressors_ei310 = pd.read_excel(pkg_resources.resource_stream(__name__, '/Data/metadata/ei310/stressors.xlsx'))
+        stressors_ei310 = stressors_ei310.set_index(['name', 'unit', 'comp', 'subcomp']).drop('cas', axis=1)
+        stressors_ei310.index.names = (None, None, None, None)
 
         df_iw = ei_iw_db.set_index(['Elem flow name', 'Elem flow unit', 'Compartment', 'Sub-compartment'])
         df_iw.index.names = (None, None, None, None)
@@ -3407,6 +3420,9 @@ class Parse:
         df_ei39 = stressors_ei39.join(df_iw).dropna(subset=['Impact category', 'CF value'])
         df_ei39 = df_ei39.set_index('id').drop(['CAS number', 'MP or Damage',
                                                 'Native geographical resolution scale'], axis=1)
+        df_ei310 = stressors_ei310.join(df_iw).dropna(subset=['Impact category', 'CF value'])
+        df_ei310 = df_ei310.set_index('id').drop(['CAS number', 'MP or Damage',
+                                                  'Native geographical resolution scale'], axis=1)
         # changing into a dataframe format readily available for matrix calculations
         self.ei35_iw_as_matrix = df_ei35.pivot_table(values='CF value', index='id',
                                                      columns=['Impact category', 'CF unit']).fillna(0)
@@ -3423,6 +3439,9 @@ class Parse:
         self.ei39_iw_as_matrix = df_ei39.pivot_table(values='CF value', index='id',
                                                      columns=['Impact category', 'CF unit']).fillna(0)
         self.ei39_iw_as_matrix = self.ei39_iw_as_matrix.reindex(stressors_ei39.id).fillna(0)
+        self.ei310_iw_as_matrix = df_ei310.pivot_table(values='CF value', index='id',
+                                                       columns=['Impact category', 'CF unit']).fillna(0)
+        self.ei310_iw_as_matrix = self.ei310_iw_as_matrix.reindex(stressors_ei310.id).fillna(0)
 
     def link_to_sp(self):
         """
@@ -3953,6 +3972,9 @@ class Parse:
 
         self.simplified_version_ei39 = clean_up_dataframe(produce_simplified_version(self.ei39_iw).reindex(
             self.ei39_iw.columns, axis=1))
+
+        self.simplified_version_ei310 = clean_up_dataframe(produce_simplified_version(self.ei310_iw).reindex(
+            self.ei310_iw.columns, axis=1))
 
         # brightway2
         if ei_flows_version == '3.5':
