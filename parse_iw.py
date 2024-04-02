@@ -38,6 +38,7 @@ import shutil
 import zipfile
 import logging
 import sqlite3
+import math
 
 
 class Parse:
@@ -149,6 +150,8 @@ class Parse:
         self.load_basic_cfs()
         self.logger.info("Loading climate change characterization factors...")
         self.load_climate_change_cfs()
+        self.logger.info("Loading ozone layer depletion characterization factors...")
+        self.load_ozone_layer_depletion_cfs()
         self.logger.info("Loading acidification characterization factors...")
         self.load_freshwater_acidification_cfs()
         self.load_terrestrial_acidification_cfs()
@@ -1216,9 +1219,7 @@ class Parse:
         :return: updated master_db
         """
 
-        self.master_db = pd.concat([pd.read_sql(sql='SELECT * FROM [CF - not regionalized - OzoneDepletion]',
-                                                con=self.conn),
-                                    pd.read_sql(sql='SELECT * FROM [CF - not regionalized - PhotochemOxid]',
+        self.master_db = pd.concat([pd.read_sql(sql='SELECT * FROM [CF - not regionalized - PhotochemOxid]',
                                                 con=self.conn),
                                     pd.read_sql(sql='SELECT * FROM [CF - not regionalized - IonizingRadiations]',
                                                 con=self.conn),
@@ -1350,6 +1351,55 @@ class Parse:
 
         self.master_db = pd.concat([self.master_db, GWP_midpoint, GTP_midpoint, GWP_damage_EQ_short, GWP_damage_EQ_long,
                                     GWP_damage_HH_short, GWP_damage_HH_long])
+        self.master_db = clean_up_dataframe(self.master_db)
+
+    def load_ozone_layer_depletion_cfs(self):
+        """
+        Loading the CFs for the ozone layer depletion impact categories.
+
+        Concerned impact categories:
+            - Ozone layer depletion
+
+        :return: updated master_db
+        """
+
+        data = pd.read_sql('SELECT * FROM "CF - not regionalized - OzoneLayerDepletion"', self.conn).set_index('index')
+        time_horizon = 100  # years
+        for pollutant in data.index:
+            conversion_factor = 1 - math.exp(-time_horizon - 3) ** (1 / data.loc[pollutant, 'lifetime (years)'])
+            data.loc[pollutant, 'ODP (' + str(time_horizon) + ' years)'] = (
+                    data.loc[pollutant, 'ODP (infinite)'] * conversion_factor)
+
+        data.loc[:, 'ODP (' + str(time_horizon) + ' years)'] /= data.loc[
+            'CFC-11', 'ODP (' + str(time_horizon) + ' years)']
+
+        # reformat
+        data = data.loc[:, ['CAS', 'ODP (100 years)']].reset_index()
+        data = data.rename(columns={'index': 'Elem flow name', 'CAS': 'CAS number', 'ODP (100 years)': 'CF value'})
+        data.loc[:, 'Impact category'] = 'Ozone layer depletion'
+        data.loc[:, 'Compartment'] = 'Air'
+        data.loc[:, 'Sub-compartment'] = '(unspecified)'
+        data.loc[:, 'CF unit'] = 'kg CFC-11 eq'
+        data.loc[:, 'Elem flow unit'] = 'kg'
+        data.loc[:, 'MP or Damage'] = 'Midpoint'
+        data.loc[:, 'Native geographical resolution scale'] = 'Global'
+        # map names to IW+ standard
+        map = pd.read_sql('SELECT * FROM "SI - Ozone Layer Depletion - mapping"', self.conn)
+        data.loc[:, 'Elem flow name'] = [dict(zip(map.WMO_name, map.loc[:, "IW+_name"]))[i] for i in
+                                         data.loc[:, 'Elem flow name']]
+
+        # originally coming from Hayashi 2006, says ReCiPe2016 report adopting Hierarchist perspective
+        midpoint_to_damage_factor_short_term = 5.31e-4
+        damage_data_short_term = data.copy('deep')
+        damage_data_short_term.loc[:, 'CF value'] *= midpoint_to_damage_factor_short_term
+        damage_data_short_term.loc[:, 'CF unit'] = 'DALY'
+        damage_data_short_term.loc[:, 'MP or Damage'] = 'Damage'
+
+        data = pd.concat([data, damage_data_short_term])
+        data.index = [i for i in range(0, len(data.index))]
+
+        # concat with master_db
+        self.master_db = pd.concat([self.master_db, data])
         self.master_db = clean_up_dataframe(self.master_db)
 
     def load_freshwater_acidification_cfs(self):
