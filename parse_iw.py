@@ -2697,29 +2697,20 @@ class Parse:
         data = pd.read_sql('SELECT * FROM "CF - regionalized - WaterScarcity - aggregated"', self.conn).drop(
             'index', axis=1)
 
-        # apply country_converter
-        data.Code = [coco.convert(data.Code[i], to='ISO2', not_found=None) if data.Code[i] != data.Name[i]
-                     else data.Code[i] for i in data.index]
-        data = data.drop([i for i in data.index if data.Code[i] in ['xAB', 'xAC', 'xAP', 'xJK', 'xRI', 'xUK', 'xxx']])
-        # change continent names for common geography codes (from ecoinvent)
-        common_geo_codes = {'Africa': 'RAF', 'South America': 'RLA', 'Northern America': 'RNA', 'Asia': 'RAS',
-                            'Europe': 'RER', 'Oceania': 'OCE'}
-        data.Code = [common_geo_codes[i] if i in common_geo_codes else i for i in data.Code]
-
         # create the regionalized names (e.g., Water, AF)
         names = []
         for i in data.index:
             if data.loc[i, 'Water type'] == 'unspecified':
-                names.append('Water, ' + data.Code[i])
+                names.append('Water, ' + data.ecoinvent_shortname[i])
             elif data.loc[i, 'Water type'] == 'agri':
-                names.append('Water, agri, ' + data.Code[i])
+                names.append('Water, agri, ' + data.ecoinvent_shortname[i])
             elif data.loc[i, 'Water type'] == 'non-agri':
-                names.append('Water, non-agri, ' + data.Code[i])
+                names.append('Water, non-agri, ' + data.ecoinvent_shortname[i])
         data.loc[:, 'Elem flow name'] = names
 
         # formatting the data to IW+ format
-        data = data.loc[:, ['Elem flow name', 'annual']]
-        data = data.rename(columns={'annual': 'CF value'})
+        data = data.loc[:, ['Elem flow name', 'Annual']]
+        data = data.rename(columns={'Annual': 'CF value'})
         data.loc[:, 'Impact category'] = 'Water scarcity'
         data.loc[:, 'CF unit'] = 'm3 world-eq'
         data.loc[:, 'Compartment'] = 'Raw'
@@ -2729,29 +2720,16 @@ class Parse:
         data.loc[:, 'MP or Damage'] = 'Midpoint'
         data.loc[:, 'Native geographical resolution scale'] = 'Country'
 
+        data.loc[:, 'CF value'] = data.loc[:, 'CF value'].astype(float)
+
         # create the negative flows for the Water compartment
         water_data = data.copy('deep')
         water_data.loc[:, 'Compartment'] = 'Water'
-        water_data.loc[:, 'CF value'] *= 1
+        water_data.loc[:, 'CF value'] *= -1
         data = pd.concat([data, water_data])
         data = clean_up_dataframe(data)
 
-        # correct resolution scale
-        data.loc[[i for i in data.index if len(data.loc[i, 'Elem flow name'].split(', ')[-1]) != 2],
-                 'Native geographical resolution scale'] = 'Continent'
-        data.loc[[i for i in data.index if data.loc[i, 'Elem flow name'].split(', ')[-1] == 'GLO'],
-                 'Native geographical resolution scale'] = 'Global'
-
         self.master_db = pd.concat([self.master_db, data])
-        self.master_db = clean_up_dataframe(self.master_db)
-
-        # add the RoW geography based on the Global value
-        df = self.master_db.loc[
-            [i for i in self.master_db.index if (self.master_db.loc[i, 'Impact category'] == 'Water scarcity' and
-                                                 'GLO' in self.master_db.loc[i, 'Elem flow name'])]]
-        df['Elem flow name'] = [i.split(', GLO')[0] + ', RoW' for i in df['Elem flow name']]
-        df['Native geographical resolution scale'] = 'Other region'
-        self.master_db = pd.concat([self.master_db, df])
         self.master_db = clean_up_dataframe(self.master_db)
 
     def load_water_availability_terr_cfs(self):
