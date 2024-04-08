@@ -155,6 +155,8 @@ class Parse:
         self.load_climate_change_cfs()
         self.logger.info("Loading ozone layer depletion characterization factors...")
         self.load_ozone_layer_depletion_cfs()
+        self.logger.info("Loading photochemical ozone formation characterization factors...")
+        self.load_photochemical_ozone_formation()
         self.logger.info("Loading acidification characterization factors...")
         self.load_freshwater_acidification_cfs()
         self.load_terrestrial_acidification_cfs()
@@ -1222,9 +1224,7 @@ class Parse:
         :return: updated master_db
         """
 
-        self.master_db = pd.concat([pd.read_sql(sql='SELECT * FROM [CF - not regionalized - PhotochemOxid]',
-                                                con=self.conn),
-                                    pd.read_sql(sql='SELECT * FROM [CF - not regionalized - IonizingRadiations]',
+        self.master_db = pd.concat([pd.read_sql(sql='SELECT * FROM [CF - not regionalized - IonizingRadiations]',
                                                 con=self.conn),
                                     pd.read_sql(sql='SELECT * FROM [CF - not regionalized - MarAcid]',
                                                 con=self.conn),
@@ -1493,6 +1493,55 @@ class Parse:
 
         # concat with master_db
         self.master_db = pd.concat([self.master_db, data])
+        self.master_db = clean_up_dataframe(self.master_db)
+
+    def load_photochemical_ozone_formation(self):
+        """
+        Loading the CFs for the photochemical ozone formation impact categories.
+
+        Concerned impact categories:
+            - Photochemical ozone formation
+
+        :return: updated master_db
+        """
+
+        data = pd.read_sql(sql='SELECT * FROM [CF - not regionalized - PhotochemOxid]', con=self.conn)
+        conc = pd.read_sql(sql='SELECT * FROM [SI - Photochemical Ozone Formation - mapping]', con=self.conn)
+        effect_factor = pd.read_sql(sql='SELECT * FROM [SI - Photochemical Ozone Formation - effect factors]',
+                                    con=self.conn)
+        data = data.merge(conc, left_on=['Substance name'], right_on=['ReCiPe2016 name'])
+
+        photochem_damage_hh = data.copy('deep')
+        photochem_damage_hh = photochem_damage_hh.loc[:, ['CF HH (kg NOx-eq/kg)', 'IW+ name', 'CAS number']]
+        photochem_damage_hh = photochem_damage_hh.rename(columns={'CF HH (kg NOx-eq/kg)': 'CF value',
+                                                                  'IW+ name': 'Elem flow name'})
+        # apply effect factor
+        photochem_damage_hh.loc[:, 'CF value'] *= effect_factor.loc[0, 'HH (DALY/kg NOx-eq)']
+        photochem_damage_hh.loc[:, 'Impact category'] = 'Photochemical Ozone Formation, human health'
+        photochem_damage_hh.loc[:, 'CF unit'] = 'DALY'
+        photochem_damage_hh.loc[:, 'Compartment'] = 'Air'
+        photochem_damage_hh.loc[:, 'Sub-compartment'] = '(unspecified)'
+        photochem_damage_hh.loc[:, 'Elem flow unit'] = 'kg'
+        photochem_damage_hh.loc[:, 'MP or Damage'] = 'Damage'
+        photochem_damage_hh.loc[:, 'Native geographical resolution scale'] = 'Not regionalized'
+
+        # ReCiPe separates HH and EQ at midpoint. We don't. So we add both midpoint and re-normalize on NOx
+        photochem_midpoint = data.copy('deep')
+        # 2 because we re-normalize two added categories
+        photochem_midpoint.loc[:, 'CF value'] = (photochem_midpoint.loc[:, 'CF HH (kg NOx-eq/kg)'] +
+                                                 photochem_midpoint.loc[:, 'CF EQ (kg NOx-eq/kg)']) / 2
+        photochem_midpoint = photochem_midpoint.rename(columns={'IW+ name': 'Elem flow name'})
+        photochem_midpoint = photochem_midpoint.loc[:, ['CF value', 'Elem flow name', 'CAS number']]
+        photochem_midpoint.loc[:, 'Impact category'] = 'Photochemical Ozone Formation'
+        photochem_midpoint.loc[:, 'CF unit'] = 'kgNOxeq'
+        photochem_midpoint.loc[:, 'Compartment'] = 'Air'
+        photochem_midpoint.loc[:, 'Sub-compartment'] = '(unspecified)'
+        photochem_midpoint.loc[:, 'Elem flow unit'] = 'kg'
+        photochem_midpoint.loc[:, 'MP or Damage'] = 'Midpoint'
+        photochem_midpoint.loc[:, 'Native geographical resolution scale'] = 'Not regionalized'
+
+        # concat with master_db
+        self.master_db = pd.concat([self.master_db, photochem_midpoint, photochem_damage_hh])
         self.master_db = clean_up_dataframe(self.master_db)
 
     def load_freshwater_acidification_cfs(self):
