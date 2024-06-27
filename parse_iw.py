@@ -46,7 +46,7 @@ from scipy.stats import gmean
 
 
 class Parse:
-    def __init__(self, path_access_db, version, new_path_access_db, bw2_project=None):
+    def __init__(self, path_access_db, version, bw2_project=None):
         """
         :param path_access_db: path to the Microsoft access database (source version)
         :param version: the version of IW+ to parse
@@ -109,7 +109,6 @@ class Parse:
         self.logger.propagate = False
 
         self.path_access_db = path_access_db
-        self.new_path_access_db = new_path_access_db
         self.version = str(version)
         self.bw2_project = bw2_project
 
@@ -144,7 +143,7 @@ class Parse:
         self.olca_data_custom = {}
         self.exio_iw = pd.DataFrame()
 
-        self.conn = sqlite3.connect(self.new_path_access_db)
+        self.conn = sqlite3.connect(self.path_access_db)
 
 # -------------------------------------------- Main methods ------------------------------------------------------------
 
@@ -3276,19 +3275,19 @@ class Parse:
         original_cfs.loc[:, 'Native geographical resolution scale'] = 'Global'
         original_cfs.loc[:, 'MP or Damage'] = ['Midpoint' if original_cfs.loc[i, 'CF unit'] == 'CTUe' else 'Damage' for
                                                i in original_cfs.index]
-        name_changes = {'EPS': 'Expanded Polystyrene (EPS)',
-                        'HDPE': 'High density Polyethylene (HDPE)',
-                        'LDPE': 'Low Density Polyethylene (LDPE)',
-                        'PA (Nylon)': 'Polyamide/Nylon (PA)',
-                        'PET': 'Polyethylene Terephtalate (PET)',
-                        'PHA': 'Polyhydroxyalkanoates (PHA)',
-                        'PLA': 'Polyactic acid (PLA)',
-                        'PP': 'Polypropylene (PP)',
-                        'PS': 'Polystyrene (PS)',
-                        'PVC': 'Polyvinyl Chloride (PVC)',
-                        'TRWP': 'Tyre and Road Wear Particles (TRWP)',
-                        'PU/Spandex': 'Polyurethane (PU)',
-                        'Acrylic': 'Acrylic polymers'}
+        name_changes = {'EPS': 'EPS',
+                        'HDPE': 'HDPE',
+                        'LDPE': 'LDPE',
+                        'PA (Nylon)': 'PA/Nylon',
+                        'PET': 'PET',
+                        'PHA': 'PHA',
+                        'PLA': 'PLA',
+                        'PP': 'PP',
+                        'PS': 'PS',
+                        'PVC': 'PVC',
+                        'TRWP': 'TRWP',
+                        'PU/Spandex': 'PU/Spandex',
+                        'Acrylic': 'Acrylic'}
         CAS = {'EPS': '9003-53-6',
                'HDPE': '9002-88-4',
                'LDPE': '9002-88-4',
@@ -3302,12 +3301,16 @@ class Parse:
                'TRWP': None,
                'PU/Spandex': '9009-54-5',
                'Acrylic': '9065-11-6'}
+        shape_names = {'Beads/spheres': 'Microplastic beads',
+                       'Film fragments': 'Microplastic film fragments',
+                       'Microfibers/cylinders': 'Plastic microfibers'}
         original_cfs.loc[:, 'CAS number'] = [CAS[i] for i in original_cfs.loc[:, 'Polymer type']]
         original_cfs.loc[:, 'Polymer type'] = [name_changes[i] for i in original_cfs.loc[:, 'Polymer type']]
+        original_cfs.loc[:, 'Shape'] = [shape_names[i] for i in original_cfs.loc[:, 'Shape']]
         original_cfs = original_cfs.rename(columns={'Recommended CF (geometric mean)': 'CF value'})
         original_cfs.loc[:, 'Elem flow name'] = [
-            original_cfs.loc[i, 'Polymer type'] + ' - ' + original_cfs.loc[i, 'Shape'] + ' - ' +
-            str(original_cfs.loc[i, 'Size']) + 'um' for i in original_cfs.index]
+            original_cfs.loc[i, 'Shape'] + ' - ' + original_cfs.loc[i, 'Polymer type'] + ' (' +
+            str(original_cfs.loc[i, 'Size']) + ' µm diameter)' for i in original_cfs.index]
         original_cfs.drop(['Polymer type', 'Size', 'Shape'], axis=1, inplace=True)
 
         self.master_db = pd.concat([self.master_db, original_cfs])
