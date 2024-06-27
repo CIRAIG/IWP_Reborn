@@ -3311,6 +3311,19 @@ class Parse:
         original_cfs.loc[:, 'Elem flow name'] = [
             original_cfs.loc[i, 'Shape'] + ' - ' + original_cfs.loc[i, 'Polymer type'] + ' (' +
             str(original_cfs.loc[i, 'Size']) + ' µm diameter)' for i in original_cfs.index]
+
+        # we create CFs for default sizes which depend on the shape of the microplastics
+        default_sizes = {'Microplastic beads': 1000,
+                         'Microplastic film fragments': 100,
+                         'Plastic microfibers': 10}
+        for shape in default_sizes.keys():
+            df = original_cfs.loc[[i for i in original_cfs.index if
+                                   shape == original_cfs.loc[i, 'Shape'] and default_sizes[shape] == original_cfs.loc[
+                                       i, 'Size']]].copy()
+            df.loc[:, 'Elem flow name'] = [i.split(str(default_sizes[shape]) + ' µm diameter')[0] + 'default)' for i in
+                                           df.loc[:, 'Elem flow name']]
+            original_cfs = clean_up_dataframe(pd.concat([original_cfs, df]))
+
         original_cfs.drop(['Polymer type', 'Size', 'Shape'], axis=1, inplace=True)
 
         self.master_db = pd.concat([self.master_db, original_cfs])
