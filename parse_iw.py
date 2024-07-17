@@ -193,22 +193,22 @@ class Parse:
         self.order_things_around()
         self.separate_regio_cfs()
 
-        self.logger.info("Linking to ecoinvent elementary flows...")
-        self.link_to_ecoinvent()
+        # self.logger.info("Linking to ecoinvent elementary flows...")
+        # self.link_to_ecoinvent()
 
-        self.logger.info("Linking to SimaPro elementary flows...")
-        self.link_to_sp()
-
-        self.logger.info("Linking to openLCA elementary flows...")
-        self.link_to_olca()
-
-        self.logger.info("Linking to exiobase environmental extensions...")
-        self.link_to_exiobase()
-
-        self.logger.info("Prepare the footprint version...")
-        self.get_simplified_versions()
-
-        self.get_total_hh_and_eq()
+        # self.logger.info("Linking to SimaPro elementary flows...")
+        # self.link_to_sp()
+        #
+        # self.logger.info("Linking to openLCA elementary flows...")
+        # self.link_to_olca()
+        #
+        # self.logger.info("Linking to exiobase environmental extensions...")
+        # self.link_to_exiobase()
+        #
+        # self.logger.info("Prepare the footprint version...")
+        # self.get_simplified_versions()
+        #
+        # self.get_total_hh_and_eq()
 
     def export_to_bw2(self, ei_flows_version=None):
         """
@@ -1263,12 +1263,24 @@ class Parse:
         """
 
         data = pd.read_sql('SELECT * FROM "CF - not regionalized - ClimateChange"', con=self.conn)
-        mapping = pd.read_sql('SELECT * FROM "SI - Climate change - mapping GHGs"', con=self.conn)
-        data = data.merge(mapping, left_on='Name', right_on='IPCC_name', how='inner').drop(['Name', 'IPCC_name'],axis=1)
+        # add carbon monoxide, which is based on the (C) stoechiometric ratio between CO2 and CO (1.57)
+        monoxide = data.loc[data.Name == 'Carbon dioxide'].copy()
+        monoxide.Name = 'Carbon monoxide'
+        monoxide.Formula = 'CO'
+        monoxide.loc[:, 'Lifetime (yr)'] = 2 / 12  # 2 months
+        for indicator in ['Radiative Efficiency (W/m2/ppb)', 'AGWP-20 (pW/m2/yr/kg)', 'GWP-20',
+                          'AGWP-100 (pW/m2/yr/kg)', 'GWP-100', 'AGWP-500 (pW/m2/yr/kg)', 'GWP-500',
+                          'AGTP-50 (pK/kg)', 'GTP-50', 'AGTP-100 (pK/kg)', 'GTP-100']:
+            monoxide.loc[monoxide.index[0], indicator] = float(monoxide.loc[monoxide.index[0], indicator]) * 1.57
+        data = clean_up_dataframe(pd.concat([data, monoxide]))
+
+        mapping = pd.read_sql('SELECT * FROM "SI - Elementary flow list mapped"', con=self.conn)
+        data = data.merge(mapping.loc[:, ['Name IW+', 'Name-ipcc', 'CAS IW+']].dropna(subset='Name-ipcc'),
+                          left_on='Name', right_on='Name-ipcc', how='inner').drop(['Name', 'Name-ipcc'], axis=1)
 
         # ---------------------------- Climate change midpoint indicators ---------------------------------------------
         # Climate change, short term
-        GWP_midpoint = data.loc[:, ['IW+_name', 'GWP-100', 'CAS number']]
+        GWP_midpoint = data.loc[:, ['Name IW+', 'GWP-100', 'CAS IW+']]
         GWP_midpoint.columns = ['Elem flow name', 'CF value', 'CAS number']
         GWP_midpoint.loc[:, 'Impact category'] = 'Climate change, short term'
         GWP_midpoint.loc[:, 'CF unit'] = 'kg CO2 eq (short)'
@@ -1279,7 +1291,7 @@ class Parse:
         GWP_midpoint.loc[:, 'Native geographical resolution scale'] = 'Global'
 
         # Climate change, long term
-        GTP_midpoint = data.loc[:, ['IW+_name', 'GTP-100', 'CAS number']]
+        GTP_midpoint = data.loc[:, ['Name IW+', 'GTP-100', 'CAS IW+']]
         GTP_midpoint.columns = ['Elem flow name', 'CF value', 'CAS number']
         GTP_midpoint.loc[:, 'Impact category'] = 'Climate change, long term'
         GTP_midpoint.loc[:, 'CF unit'] = 'kg CO2 eq (long)'
@@ -1329,32 +1341,32 @@ class Parse:
         data.loc[:, 'Radiative Efficiency (W/m2/kg)'] = data.loc[:, 'Radiative Efficiency (W/m2/ppb)'] / (
                     1E-9 * (data.loc[:, 'Molecular Mass (kg/mol)'] / M_AIR) * M_ATMOS)
 
-        AACO2 = data.loc[data.loc[:, 'IW+_name'] == 'Carbon dioxide, fossil', 'Radiative Efficiency (W/m2/kg)'].iloc[0]
+        AACO2 = data.loc[data.loc[:, 'Name IW+'] == 'Carbon dioxide, fossil', 'Radiative Efficiency (W/m2/kg)'].iloc[0]
 
         # AGTP cumulative 100 years
         data.loc[:, 'AGTP cumulative 100 years'] = 0
 
         for t in range(0, 100):
-            data.loc[data[data.loc[:, 'IW+_name'] == 'Carbon dioxide, fossil'].index[
+            data.loc[data[data.loc[:, 'Name IW+'] == 'Carbon dioxide, fossil'].index[
                          0], 'AGTP cumulative 100 years'] += AGTPCO2(t, aC1, aC2, aC3, aC4, tauC1, tauC2, tauC3,
                                                                      kPulseT, aT1, tauT1, aT2, tauT2, AACO2)
 
-            data.loc[data[data.loc[:, 'IW+_name'] == 'Methane, fossil'].index[
+            data.loc[data[data.loc[:, 'Name IW+'] == 'Methane, fossil'].index[
                          0], 'AGTP cumulative 100 years'] += AGTPCH4Fossil_Final(
-                t, data.loc[data.loc[:, 'IW+_name'] == 'Methane, fossil', 'Lifetime (yr)'].iloc[0], kPulseT, aT1, tauT1,
+                t, data.loc[data.loc[:, 'Name IW+'] == 'Methane, fossil', 'Lifetime (yr)'].iloc[0], kPulseT, aT1, tauT1,
                 aT2, tauT2,
-                data.loc[data.loc[:, 'IW+_name'] == 'Methane, fossil', 'Radiative Efficiency (W/m2/kg)'].iloc[0], aC1,
+                data.loc[data.loc[:, 'Name IW+'] == 'Methane, fossil', 'Radiative Efficiency (W/m2/kg)'].iloc[0], aC1,
                 aC2, aC3, aC4, tauC1, tauC2, tauC3, AACO2, gamma, aS1, aS2, aS3, tauS1, tauS2, tauS3)
 
-            data.loc[data[data.loc[:, 'IW+_name'] == 'Methane, biogenic'].index[
+            data.loc[data[data.loc[:, 'Name IW+'] == 'Methane, biogenic'].index[
                          0], 'AGTP cumulative 100 years'] += AGTPCH4NonFossil_Final(
-                t, data.loc[data.loc[:, 'IW+_name'] == 'Methane, biogenic', 'Lifetime (yr)'].iloc[0], kPulseT, aT1,
+                t, data.loc[data.loc[:, 'Name IW+'] == 'Methane, biogenic', 'Lifetime (yr)'].iloc[0], kPulseT, aT1,
                 tauT1, aT2, tauT2,
-                data.loc[data.loc[:, 'IW+_name'] == 'Methane, biogenic', 'Radiative Efficiency (W/m2/kg)'].iloc[0], aC1,
+                data.loc[data.loc[:, 'Name IW+'] == 'Methane, biogenic', 'Radiative Efficiency (W/m2/kg)'].iloc[0], aC1,
                 aC2, aC3, aC4, tauC1, tauC2, tauC3, AACO2, gamma, aS1, aS2, aS3, tauS1, tauS2, tauS3)
 
             for ghg in data.index:
-                if data.loc[ghg, 'IW+_name'] not in ['Carbon dioxide, fossil', 'Methane, fossil', 'Methane, biogenic']:
+                if data.loc[ghg, 'Name IW+'] not in ['Carbon dioxide, fossil', 'Methane, fossil', 'Methane, biogenic']:
                     if data.loc[ghg, 'Lifetime (yr)'] != 0:
                         data.loc[ghg, 'AGTP cumulative 100 years'] += AGTPNonCO2_Final(
                             t, data.loc[ghg, 'Lifetime (yr)'], kPulseT, aT1, tauT1, aT2, tauT2,
@@ -1365,26 +1377,26 @@ class Parse:
         data.loc[:, 'AGTP cumulative 500 years'] = 0
 
         for t in range(0, 500):
-            data.loc[data[data.loc[:, 'IW+_name'] == 'Carbon dioxide, fossil'].index[
+            data.loc[data[data.loc[:, 'Name IW+'] == 'Carbon dioxide, fossil'].index[
                          0], 'AGTP cumulative 500 years'] += AGTPCO2(t, aC1, aC2, aC3, aC4, tauC1, tauC2, tauC3,
                                                                      kPulseT, aT1, tauT1, aT2, tauT2, AACO2)
 
-            data.loc[data[data.loc[:, 'IW+_name'] == 'Methane, fossil'].index[
+            data.loc[data[data.loc[:, 'Name IW+'] == 'Methane, fossil'].index[
                          0], 'AGTP cumulative 500 years'] += AGTPCH4Fossil_Final(
-                t, data.loc[data.loc[:, 'IW+_name'] == 'Methane, fossil', 'Lifetime (yr)'].iloc[0], kPulseT, aT1, tauT1,
+                t, data.loc[data.loc[:, 'Name IW+'] == 'Methane, fossil', 'Lifetime (yr)'].iloc[0], kPulseT, aT1, tauT1,
                 aT2, tauT2,
-                data.loc[data.loc[:, 'IW+_name'] == 'Methane, fossil', 'Radiative Efficiency (W/m2/kg)'].iloc[0], aC1,
+                data.loc[data.loc[:, 'Name IW+'] == 'Methane, fossil', 'Radiative Efficiency (W/m2/kg)'].iloc[0], aC1,
                 aC2, aC3, aC4, tauC1, tauC2, tauC3, AACO2, gamma, aS1, aS2, aS3, tauS1, tauS2, tauS3)
 
-            data.loc[data[data.loc[:, 'IW+_name'] == 'Methane, biogenic'].index[
+            data.loc[data[data.loc[:, 'Name IW+'] == 'Methane, biogenic'].index[
                          0], 'AGTP cumulative 500 years'] += AGTPCH4NonFossil_Final(
-                t, data.loc[data.loc[:, 'IW+_name'] == 'Methane, biogenic', 'Lifetime (yr)'].iloc[0], kPulseT, aT1,
+                t, data.loc[data.loc[:, 'Name IW+'] == 'Methane, biogenic', 'Lifetime (yr)'].iloc[0], kPulseT, aT1,
                 tauT1, aT2, tauT2,
-                data.loc[data.loc[:, 'IW+_name'] == 'Methane, biogenic', 'Radiative Efficiency (W/m2/kg)'].iloc[0], aC1,
+                data.loc[data.loc[:, 'Name IW+'] == 'Methane, biogenic', 'Radiative Efficiency (W/m2/kg)'].iloc[0], aC1,
                 aC2, aC3, aC4, tauC1, tauC2, tauC3, AACO2, gamma, aS1, aS2, aS3, tauS1, tauS2, tauS3)
 
             for ghg in data.index:
-                if data.loc[ghg, 'IW+_name'] not in ['Carbon dioxide, fossil', 'Methane, fossil', 'Methane, biogenic']:
+                if data.loc[ghg, 'Name IW+'] not in ['Carbon dioxide, fossil', 'Methane, fossil', 'Methane, biogenic']:
                     if data.loc[ghg, 'Lifetime (yr)'] != 0:
                         data.loc[ghg, 'AGTP cumulative 500 years'] += AGTPNonCO2_Final(
                             t, data.loc[ghg, 'Lifetime (yr)'], kPulseT, aT1, tauT1, aT2, tauT2,
@@ -1397,7 +1409,7 @@ class Parse:
         EQ_effect_factor = effect_factors.loc['Total', 'PDF.m2.yr/K/yr']
 
         # Climate change, human health, short term
-        GWP_damage_HH_short = data.loc[:, ['IW+_name', 'AGTP cumulative 100 years', 'CAS number']].copy()
+        GWP_damage_HH_short = data.loc[:, ['Name IW+', 'AGTP cumulative 100 years', 'CAS IW+']].copy()
         GWP_damage_HH_short.columns = ['Elem flow name', 'CF value', 'CAS number']
         GWP_damage_HH_short.loc[:, 'Impact category'] = 'Climate change, human health, short term'
         GWP_damage_HH_short.loc[:, 'CF unit'] = 'DALY'
@@ -1409,9 +1421,9 @@ class Parse:
         GWP_damage_HH_short.loc[:, 'CF value'] *= HH_effect_factor
 
         # Climate change, human health, long term
-        GWP_damage_HH_long = data.loc[:, ['IW+_name', 'AGTP cumulative 100 years', 'AGTP cumulative 500 years',
-                                          'CAS number']].copy()
-        GWP_damage_HH_long = GWP_damage_HH_long.rename(columns={'IW+_name': 'Elem flow name'})
+        GWP_damage_HH_long = data.loc[:, ['Name IW+', 'AGTP cumulative 100 years', 'AGTP cumulative 500 years',
+                                          'CAS IW+']].copy()
+        GWP_damage_HH_long = GWP_damage_HH_long.rename(columns={'Name IW+': 'Elem flow name','CAS IW+':'CAS number'})
         GWP_damage_HH_long.loc[:, 'Impact category'] = 'Climate change, human health, long term'
         GWP_damage_HH_long.loc[:, 'CF unit'] = 'DALY'
         GWP_damage_HH_long.loc[:, 'Compartment'] = 'Air'
@@ -1424,7 +1436,7 @@ class Parse:
         GWP_damage_HH_long = GWP_damage_HH_long.drop(['AGTP cumulative 100 years', 'AGTP cumulative 500 years'], axis=1)
 
         # Climate change, ecosystem quality, short term
-        GWP_damage_EQ_short = data.loc[:, ['IW+_name', 'AGTP cumulative 100 years', 'CAS number']]
+        GWP_damage_EQ_short = data.loc[:, ['Name IW+', 'AGTP cumulative 100 years', 'CAS IW+']]
         GWP_damage_EQ_short.columns = ['Elem flow name', 'CF value', 'CAS number']
         GWP_damage_EQ_short.loc[:, 'Impact category'] = 'Climate change, ecosystem quality, short term'
         GWP_damage_EQ_short.loc[:, 'CF unit'] = 'PDF.m2.yr'
@@ -1436,9 +1448,9 @@ class Parse:
         GWP_damage_EQ_short.loc[:, 'CF value'] *= EQ_effect_factor
 
         # Climate change, ecosystem quality, long term
-        GWP_damage_EQ_long = data.loc[:, ['IW+_name', 'AGTP cumulative 100 years', 'AGTP cumulative 500 years',
-                                          'CAS number']].copy()
-        GWP_damage_EQ_long = GWP_damage_EQ_long.rename(columns={'IW+_name': 'Elem flow name'})
+        GWP_damage_EQ_long = data.loc[:, ['Name IW+', 'AGTP cumulative 100 years', 'AGTP cumulative 500 years',
+                                          'CAS IW+']].copy()
+        GWP_damage_EQ_long = GWP_damage_EQ_long.rename(columns={'Name IW+': 'Elem flow name','CAS IW+':'CAS number'})
         GWP_damage_EQ_long.loc[:, 'Impact category'] = 'Climate change, ecosystem quality, long term'
         GWP_damage_EQ_long.loc[:, 'CF unit'] = 'PDF.m2.yr'
         GWP_damage_EQ_long.loc[:, 'Compartment'] = 'Air'
@@ -1477,8 +1489,8 @@ class Parse:
         data.loc[:, 'MP or Damage'] = 'Midpoint'
         data.loc[:, 'Native geographical resolution scale'] = 'Not regionalized'
         # map names to IW+ standard
-        map = pd.read_sql('SELECT * FROM "SI - Ozone Layer Depletion - mapping"', self.conn)
-        data.loc[:, 'Elem flow name'] = [dict(zip(map.WMO_name, map.loc[:, "IW+_name"]))[i] for i in
+        mapping = pd.read_sql('SELECT * FROM "SI - Elementary flow list mapped"', con=self.conn)
+        data.loc[:, 'Elem flow name'] = [dict(zip(mapping.loc[:, 'Name-ODP'], mapping.loc[:, "Name IW+"]))[i] for i in
                                          data.loc[:, 'Elem flow name']]
 
         # originally coming from Hayashi 2006, says ReCiPe2016 report adopting Egalitarian perspective
@@ -1506,15 +1518,16 @@ class Parse:
         """
 
         data = pd.read_sql(sql='SELECT * FROM [CF - not regionalized - PhotochemOxid]', con=self.conn)
-        conc = pd.read_sql(sql='SELECT * FROM [SI - Photochemical Ozone Formation - mapping]', con=self.conn)
+        mapping = pd.read_sql('SELECT * FROM "SI - Elementary flow list mapped"', con=self.conn)
         effect_factor = pd.read_sql(sql='SELECT * FROM [SI - Photochemical Ozone Formation - effect factors]',
                                     con=self.conn)
-        data = data.merge(conc, left_on=['Substance name'], right_on=['ReCiPe2016 name'])
+        data = data.merge(mapping, left_on=['Substance name'], right_on=['Name-photochem'])
 
         photochem_damage_hh = data.copy('deep')
-        photochem_damage_hh = photochem_damage_hh.loc[:, ['CF HH (kg NOx-eq/kg)', 'IW+ name', 'CAS number']]
+        photochem_damage_hh = photochem_damage_hh.loc[:, ['CF HH (kg NOx-eq/kg)', 'Name IW+', 'CAS IW+']]
         photochem_damage_hh = photochem_damage_hh.rename(columns={'CF HH (kg NOx-eq/kg)': 'CF value',
-                                                                  'IW+ name': 'Elem flow name'})
+                                                                  'Name IW+': 'Elem flow name',
+                                                                  'CAS IW+': 'CAS number'})
         photochem_damage_hh.loc[:, 'CF value'] *= effect_factor.loc[0, 'HH (DALY/kg NOx-eq)']
         photochem_damage_hh.loc[:, 'Impact category'] = 'Photochemical Ozone Formation, human health'
         photochem_damage_hh.loc[:, 'CF unit'] = 'DALY'
@@ -1525,9 +1538,10 @@ class Parse:
         photochem_damage_hh.loc[:, 'Native geographical resolution scale'] = 'Not regionalized'
 
         photochem_damage_eq = data.copy('deep')
-        photochem_damage_eq = photochem_damage_eq.loc[:, ['CF EQ (kg NOx-eq/kg)', 'IW+ name', 'CAS number']]
+        photochem_damage_eq = photochem_damage_eq.loc[:, ['CF EQ (kg NOx-eq/kg)', 'Name IW+', 'CAS IW+']]
         photochem_damage_eq = photochem_damage_eq.rename(columns={'CF EQ (kg NOx-eq/kg)': 'CF value',
-                                                                  'IW+ name': 'Elem flow name'})
+                                                                  'Name IW+': 'Elem flow name',
+                                                                  'CAS IW+': 'CAS number'})
         photochem_damage_eq.loc[:, 'CF value'] *= (effect_factor.loc[0, 'EQ (species.yr/kg NOx-eq)'] /
                                                    effect_factor.loc[0, 'species density in ReCiPe (species/m2)'])
         photochem_damage_eq.loc[:, 'Impact category'] = 'Photochemical Ozone Formation, ecosystem quality'
@@ -1541,7 +1555,8 @@ class Parse:
         # ReCiPe separates HH and EQ at midpoint. We only base our midpoint on  HH.
         photochem_midpoint = data.copy('deep')
         photochem_midpoint.loc[:, 'CF value'] = photochem_midpoint.loc[:, 'CF HH (kg NOx-eq/kg)']
-        photochem_midpoint = photochem_midpoint.rename(columns={'IW+ name': 'Elem flow name'})
+        photochem_midpoint = photochem_midpoint.rename(columns={'Name IW+': 'Elem flow name',
+                                                                'CAS IW+': 'CAS number'})
         photochem_midpoint = photochem_midpoint.loc[:, ['CF value', 'Elem flow name', 'CAS number']]
         photochem_midpoint.loc[:, 'Impact category'] = 'Photochemical Ozone Formation'
         photochem_midpoint.loc[:, 'CF unit'] = 'kgNOxeq'
@@ -2776,11 +2791,10 @@ class Parse:
         secondary_pm_if = pd.read_sql(sql='SELECT * FROM [SI - ParticulateMatter - secondary PM intake fractions]',
                                       con=self.conn).set_index("precursor")
 
-        secondary_pm_particulate_damage = pd.DataFrame()
-
         so2 = particulate_damage.copy()
         so2.loc[:, 'Elem flow name'] = [i.replace('Particulates, < 2.5 um', 'Sulfur dioxide') for i in
                                         so2.loc[:, 'Elem flow name']]
+        so2.loc[:, 'CAS number'] = '007446-09-5'
 
         for flow in so2.index:
             region = so2.loc[flow, 'Elem flow name'].split('Sulfur dioxide, ')[1]
@@ -2829,6 +2843,7 @@ class Parse:
         nh3 = particulate_damage.copy()
         nh3.loc[:, 'Elem flow name'] = [i.replace('Particulates, < 2.5 um', 'Ammonia') for i in
                                         nh3.loc[:, 'Elem flow name']]
+        nh3.loc[:, 'CAS number'] = '007664-41-7'
 
         for flow in nh3.index:
             region = nh3.loc[flow, 'Elem flow name'].split('Ammonia, ')[1]
@@ -2877,6 +2892,7 @@ class Parse:
         nox = particulate_damage.copy()
         nox.loc[:, 'Elem flow name'] = [i.replace('Particulates, < 2.5 um', 'Nitrogen oxides') for i in
                                         nox.loc[:, 'Elem flow name']]
+        nox.loc[:, 'CAS number'] = '011104-93-1'
 
         for flow in nox.index:
             region = nox.loc[flow, 'Elem flow name'].split('Nitrogen oxides, ')[1]
@@ -2944,8 +2960,21 @@ class Parse:
             'Global' if ('RoW' in i or 'GLO' in i) else 'Country' for i in particulate_cfs.loc[:, 'Elem flow name']]
         particulate_cfs.loc[[i for i in particulate_cfs.index if particulate_cfs.loc[i, 'Elem flow name'].split(', ')[
             -1] in continents], 'Native geographical resolution scale'] = 'Continent'
+        particulate_cfs.loc[[i for i in particulate_cfs.index if particulate_cfs.loc[i, 'Elem flow name'].split(', ')[
+            -1] == 'RoW'], 'Native geographical resolution scale'] = 'Other region'
 
-        self.master_db = pd.concat([self.master_db, particulate_cfs])
+        # add zero values for PMs above 2.5um
+        big_pms = particulate_cfs.loc[[i for i in particulate_cfs.index if (
+                particulate_cfs.loc[i, 'Elem flow name'] == 'Particulates, < 2.5 um, GLO' and
+                particulate_cfs.loc[i, 'Sub-compartment'] == '(unspecified)')]].copy()
+        big_pms = pd.concat([big_pms] * 2)
+        big_pms.loc[:, 'CF value'] = 0
+        big_pms.iloc[0, big_pms.columns.get_loc('Elem flow name')] = 'Particulates, > 10 um'
+        big_pms.iloc[1, big_pms.columns.get_loc('Elem flow name')] = 'Particulates, > 10 um'
+        big_pms.iloc[2, big_pms.columns.get_loc('Elem flow name')] = 'Particulates, > 2.5 um, and < 10um'
+        big_pms.iloc[3, big_pms.columns.get_loc('Elem flow name')] = 'Particulates, > 2.5 um, and < 10um'
+
+        self.master_db = pd.concat([self.master_db, particulate_cfs, big_pms])
         self.master_db = clean_up_dataframe(self.master_db)
 
     def load_water_availability_hh_cfs(self):
@@ -3174,6 +3203,38 @@ class Parse:
                          'Native geographical resolution scale'] = 'Global'
         all_data.loc[[i for i in all_data.index if 'RoW' in all_data.loc[i, 'Elem flow name']],
                          'Native geographical resolution scale'] = 'Other region'
+
+        # adding the different other water flows (lake, river, well, etc.)
+        df_lake = all_data.loc[[i for i in all_data.index if
+                                'agri' not in all_data.loc[i, 'Elem flow name'] and all_data.loc[
+                                    i, 'Compartment'] == 'Raw']].copy()
+        df_lake.loc[:, 'Elem flow name'] = [i.replace('Water', 'Water, lake') for i in df_lake.loc[:, 'Elem flow name']]
+        df_river = all_data.loc[[i for i in all_data.index if
+                                 'agri' not in all_data.loc[i, 'Elem flow name'] and all_data.loc[
+                                     i, 'Compartment'] == 'Raw']].copy()
+        df_river.loc[:, 'Elem flow name'] = [i.replace('Water', 'Water, river') for i in
+                                             df_river.loc[:, 'Elem flow name']]
+        df_unspe = all_data.loc[[i for i in all_data.index if
+                                 'agri' not in all_data.loc[i, 'Elem flow name'] and all_data.loc[
+                                     i, 'Compartment'] == 'Raw']].copy()
+        df_unspe.loc[:, 'Elem flow name'] = [i.replace('Water', 'Water, unspecified natural origin') for i in
+                                             df_unspe.loc[:, 'Elem flow name']]
+        df_well = all_data.loc[[i for i in all_data.index if
+                                'agri' not in all_data.loc[i, 'Elem flow name'] and all_data.loc[
+                                    i, 'Compartment'] == 'Raw']].copy()
+        df_well.loc[:, 'Elem flow name'] = [i.replace('Water', 'Water, well, in ground') for i in
+                                            df_well.loc[:, 'Elem flow name']]
+        df_cooling = all_data.loc[[i for i in all_data.index if
+                                   'agri' not in all_data.loc[i, 'Elem flow name'] and all_data.loc[
+                                       i, 'Compartment'] == 'Raw']].copy()
+        df_cooling.loc[:, 'Elem flow name'] = [i.replace('Water', 'Water, cooling, unspecified natural origin') for i in
+                                               df_cooling.loc[:, 'Elem flow name']]
+
+        # drop "Water" flow in Raw comp, that flow is only for the water comp
+        all_data = all_data.drop([i for i in all_data.index if
+                       'agri' not in all_data.loc[i, 'Elem flow name'] and all_data.loc[i, 'Compartment'] == 'Raw'])
+
+        all_data = clean_up_dataframe(pd.concat([all_data, df_lake, df_river, df_unspe, df_well, df_cooling]))
 
         self.master_db = pd.concat([self.master_db, all_data])
         self.master_db = clean_up_dataframe(self.master_db)
@@ -4156,22 +4217,15 @@ class Parse:
         self.iw_sp = clean_up_dataframe(self.iw_sp)
         # some other flows from SP that require conversions because of units
         new_flows = {
-            'Gas, natural/kg': 'Gas, natural/m3', 'Uranium/kg': 'Uranium',
-            'Gas, mine, off-gas, process, coal mining/kg':'Gas, mine, off-gas, process, coal mining/m3',
-            'Water, cooling, unspecified natural origin/kg': 'Water, cooling, unspecified natural origin',
-            'Water, process, unspecified natural origin/kg': 'Water, cooling, unspecified natural origin',
-            'Water, unspecified natural origin/kg': 'Water, unspecified natural origin',
-            'Water/kg': 'Water/m3', 'Wood, unspecified, standing/kg': 'Wood, unspecified, standing/m3'
+            'Gas, natural/kg': 'Gas, natural/m3',
+            'Gas, mine, off-gas, process, coal mining/kg': 'Gas, mine, off-gas, process, coal mining/m3',
+            'Wood, unspecified, standing/kg': 'Wood, unspecified, standing/m3'
         }
         for flow in new_flows:
             if 'Gas' in flow:
                 density = 0.8  # kg/m3 (https://www.engineeringtoolbox.com/gas-density-d_158.html)
-            elif 'Water' in flow:
-                density = 1000  # kg/m3
             elif 'Wood' in flow:
                 density = 600  # kg/m3 (https://www.engineeringtoolbox.com/wood-density-d_40.html)
-            elif 'Uranium' in flow:
-                density = 1  # kg/kg
 
             df = self.iw_sp[self.iw_sp['Elem flow name'] == new_flows[flow]].copy()
             df.loc[:, 'Elem flow name'] = flow
@@ -4180,14 +4234,28 @@ class Parse:
             self.iw_sp = pd.concat([self.iw_sp, df])
         self.iw_sp = clean_up_dataframe(self.iw_sp)
 
-        # some final adjustments for annoying flows...
-        problems = {'Water, process, drinking': 'kg',
-                    'Water, cooling, surface': 'kg',
-                    'Water, process, surface': 'kg',
-                    'Water, process, well': 'kg',
-                    'Water, groundwater consumption': 'kg',
-                    'Water, surface water consumption': 'kg',
-                    'Water, Saline water consumption': 'kg'}
+        # some water flows are in kilograms instead of cubic meters...
+        problems = ['Water/kg',
+                    'Water, barrage',
+                    'Water, cooling, drinking',
+                    'Water, cooling, salt, ocean',
+                    'Water, cooling, unspecified natural origin/kg',
+                    'Water, process, unspecified natural origin/kg',
+                    'Water, unspecified natural origin/kg',
+                    'Water, process, drinking',
+                    'Water, cooling, surface',
+                    'Water, cooling, well',
+                    'Water, process, surface',
+                    'Water, process, salt, ocean',
+                    'Water, process, well',
+                    'Water, groundwater consumption',
+                    'Water, surface water consumption',
+                    'Water, Saline water consumption',
+                    'Water, thermoelectric groundwater consumption',
+                    'Water, thermoelectric saline water consumption',
+                    'Water, thermoelectric surface water consumption',
+                    'Thermally polluted water',
+                    'Turbined water/kg']
 
         for problem_child in problems:
             self.iw_sp.loc[self.iw_sp['Elem flow name'] == problem_child, 'Elem flow unit'] = 'kg'
