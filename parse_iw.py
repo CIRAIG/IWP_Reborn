@@ -73,7 +73,7 @@ class Parse:
             - load_land_use_cfs()
             - load_particulates_cfs()
             - load_water_scarcity_cfs()
-            - load_water_availability_eq_cfs()
+            - load_water_availability_fw_cfs()
             - load_water_availability_hh_cfs()
             - load_water_availability_terr_cfs()
             - load_thermally_polluted_water_cfs()
@@ -174,7 +174,7 @@ class Parse:
         self.logger.info("Loading water scarcity characterization factors...")
         self.load_water_scarcity_cfs()
         self.logger.info("Loading water availability characterization factors...")
-        self.load_water_availability_eq_cfs()
+        self.load_water_availability_fw_cfs()
         self.load_water_availability_hh_cfs()
         self.load_water_availability_terr_cfs()
         self.logger.info("Loading thermally polluted water characterization factors...")
@@ -1274,7 +1274,7 @@ class Parse:
             monoxide.loc[monoxide.index[0], indicator] = float(monoxide.loc[monoxide.index[0], indicator]) * 1.57
         data = clean_up_dataframe(pd.concat([data, monoxide]))
 
-        mapping = pd.read_sql('SELECT * FROM "SI - Elementary flow list mapped"', con=self.conn)
+        mapping = pd.read_sql('SELECT * FROM "SI - Mapping with elementary flows"', con=self.conn)
         data = data.merge(mapping.loc[:, ['Name IW+', 'Name-ipcc', 'CAS IW+']].dropna(subset='Name-ipcc'),
                           left_on='Name', right_on='Name-ipcc', how='inner').drop(['Name', 'Name-ipcc'], axis=1)
 
@@ -1489,7 +1489,7 @@ class Parse:
         data.loc[:, 'MP or Damage'] = 'Midpoint'
         data.loc[:, 'Native geographical resolution scale'] = 'Not regionalized'
         # map names to IW+ standard
-        mapping = pd.read_sql('SELECT * FROM "SI - Elementary flow list mapped"', con=self.conn)
+        mapping = pd.read_sql('SELECT * FROM "SI - Mapping with elementary flows"', con=self.conn)
         data.loc[:, 'Elem flow name'] = [dict(zip(mapping.loc[:, 'Name-ODP'], mapping.loc[:, "Name IW+"]))[i] for i in
                                          data.loc[:, 'Elem flow name']]
 
@@ -1518,7 +1518,7 @@ class Parse:
         """
 
         data = pd.read_sql(sql='SELECT * FROM [CF - not regionalized - PhotochemOxid]', con=self.conn)
-        mapping = pd.read_sql('SELECT * FROM "SI - Elementary flow list mapped"', con=self.conn)
+        mapping = pd.read_sql('SELECT * FROM "SI - Mapping with elementary flows"', con=self.conn)
         effect_factor = pd.read_sql(sql='SELECT * FROM [SI - Photochemical Ozone Formation - effect factors]',
                                     con=self.conn)
         data = data.merge(mapping, left_on=['Substance name'], right_on=['Name-photochem'])
@@ -1703,7 +1703,7 @@ class Parse:
         cfs.loc[cfs.loc[:, 'Region code'] == 'GLO', 'Native geographical resolution scale'] = 'Global'
 
         # ------------------------------ APPLYING STOECHIOMETRIC RATIOS --------------------------
-        stoc = pd.read_sql('SELECT * FROM [SI - stoechiometry]', self.conn)
+        stoc = pd.read_sql('SELECT * FROM [SI - Stoechiometry]', self.conn)
         for i in stoc.index:
             proxy = stoc.loc[i, 'Corresponding elem flow in IW']
             df = cfs[cfs.loc[:, 'Elem flow'] == proxy].copy('deep')
@@ -1860,7 +1860,7 @@ class Parse:
         cfs.loc[cfs.loc[:, 'Region code'] == 'GLO', 'Native geographical resolution scale'] = 'Global'
 
         # ------------------------------ APPLYING STOECHIOMETRIC RATIOS --------------------------
-        stoc = pd.read_sql('SELECT * FROM [SI - stoechiometry]', self.conn)
+        stoc = pd.read_sql('SELECT * FROM [SI - Stoechiometry]', self.conn)
         for i in stoc.index:
             proxy = stoc.loc[i, 'Corresponding elem flow in IW']
             df = cfs[cfs.loc[:, 'Elem flow'] == proxy].copy('deep')
@@ -2021,7 +2021,7 @@ class Parse:
             [cfs, pd.read_sql('SELECT * FROM [CF - not regionalized - MarEutro]', self.conn)])
 
         # ------------------------------ APPLYING STOECHIOMETRIC RATIOS --------------------------
-        stoc = pd.read_sql('SELECT * FROM [SI - stoechiometry]', self.conn)
+        stoc = pd.read_sql('SELECT * FROM [SI - Stoechiometry]', self.conn)
         for i in stoc.index:
             if stoc.loc[i,'Formula'] not in list(cfs.loc[:,'Elem flow']):
                 proxy = stoc.loc[i, 'Corresponding elem flow in IW']
@@ -2117,7 +2117,7 @@ class Parse:
                        'Elem flow', 'CAS number']
 
         # ------------------------------ APPLYING STOECHIOMETRIC RATIOS --------------------------
-        stoc = pd.read_sql('SELECT * FROM [SI - stoechiometry]', self.conn)
+        stoc = pd.read_sql('SELECT * FROM [SI - Stoechiometry]', self.conn)
         for i in stoc.index:
             proxy = stoc.loc[i, 'Corresponding elem flow in IW']
             df = cfs[cfs.loc[:, 'Elem flow'] == proxy].copy('deep')
@@ -2150,7 +2150,7 @@ class Parse:
         """
 
         # ------------------------------ LOADING DATA -----------------------------------
-        original_cf_occup = pd.read_sql(sql='SELECT * FROM [CF - regionalized - land occupation per biome]',
+        original_cf_occup = pd.read_sql(sql='SELECT * FROM [CF - regionalized - Land occupation per biome]',
                                         con=self.conn)
 
         intersect_country = pd.read_sql(sql='SELECT * FROM [SI - Land occupation - countries cell resolution]',
@@ -2159,7 +2159,7 @@ class Parse:
         land_use_type = pd.read_sql(sql='SELECT * FROM [SI - Land occupation - land use type per country/continent]',
                                     con=self.conn)
 
-        recovery_times = pd.read_sql(sql='SELECT * FROM [SI - land transformation - recovery times]', con=self.conn)
+        recovery_times = pd.read_sql(sql='SELECT * FROM [SI - Land transformation - recovery times]', con=self.conn)
 
         original_cf_occup = original_cf_occup.merge(intersect_country, left_on='Biome', right_on='WWF_MHTNUM',
                                                     how='outer')
@@ -2598,7 +2598,7 @@ class Parse:
         """
 
         data = pd.read_sql(sql='SELECT * FROM [CF - regionalized - ParticulateMatter - native]', con=self.conn)
-        conc = pd.read_sql(sql='SELECT * FROM [SI - mapping with regions of ecoinvent]', con=self.conn).set_index(
+        conc = pd.read_sql(sql='SELECT * FROM [SI - Mapping with regions of ecoinvent]', con=self.conn).set_index(
             'Ecoinvent_short_name').PM
 
         # first we need to aggregate sub-regions to country level for a few countries which otherwise undefined
@@ -2977,155 +2977,6 @@ class Parse:
         self.master_db = pd.concat([self.master_db, particulate_cfs, big_pms])
         self.master_db = clean_up_dataframe(self.master_db)
 
-    def load_water_availability_hh_cfs(self):
-        """
-        Load CFs for water availability human health.
-
-        Concerned impact categories:
-            - Water availability, human health
-
-        :return: update master_db
-        """
-
-        # ------------------------------ LOADING DATA -----------------------------------
-        data = pd.read_sql('SELECT * FROM "CF - regionalized - WaterAvailability_HH - native"', self.conn)
-
-        # ------------------------- CALCULATING DAMAGE CFS --------------------------------
-        data.loc[:, 'CF value'] = (data.loc[:, 'FATE - Scarcity'] *
-                                   data.loc[:, 'EXP (1 - Adaptation Capacity)'] *
-                                   data.loc[:, 'EF country (DALY/m3 deprived)'])
-
-        water_hh_cfs = pd.DataFrame()
-        # countries
-        for country in set(data.ISO2):
-            df = data.loc[data.ISO2 == country].copy('deep')
-            df.loc[:, 'Water_use_HWCtot'] /= df.loc[:, 'Water_use_HWCtot'].sum()
-            water_hh_cfs.loc[country, 'CF value'] = (df.loc[:, 'Water_use_HWCtot'] * df.loc[:, 'CF value']).sum()
-        # continents
-        for cont in set(data.Continent):
-            df = data.loc[data.Continent == cont].copy('deep')
-            df.loc[:, 'Water_use_HWCtot'] /= df.loc[:, 'Water_use_HWCtot'].sum()
-            water_hh_cfs.loc[cont, 'CF value'] = (df.loc[:, 'Water_use_HWCtot'] * df.loc[:, 'CF value']).sum()
-        # global value
-        df = data.copy('deep')
-        df.loc[:, 'Water_use_HWCtot'] /= df.loc[:, 'Water_use_HWCtot'].sum()
-        water_hh_cfs.loc['GLO', 'CF value'] = (df.loc[:, 'Water_use_HWCtot'] * df.loc[:, 'CF value']).sum()
-
-        # ------------------------------ DATA FORMATTING -----------------------------------
-        water_hh_cfs.loc[:, 'Impact category'] = 'Water availability, human health'
-        water_hh_cfs.loc[:, 'CF unit'] = 'DALY'
-        water_hh_cfs.loc[:, 'Compartment'] = 'Raw'
-        water_hh_cfs.loc[:, 'Sub-compartment'] = '(unspecified)'
-        water_hh_cfs.loc[:, 'CAS number'] = '7732-18-5'
-        water_hh_cfs.loc[:, 'Elem flow unit'] = 'm3'
-        water_hh_cfs.loc[:, 'MP or Damage'] = 'Damage'
-        water_hh_cfs.loc[:, 'Native geographical resolution scale'] = 'Country'
-        water_hh_cfs.loc[:, 'Elem flow name'] = ['Water, unspecified natural origin, ' + i for i in water_hh_cfs.index]
-        water_hh_cfs = water_hh_cfs.reset_index().drop('index', axis=1)
-
-        # create other water flows
-        df_cooling = water_hh_cfs.copy('deep')
-        df_cooling.loc[:, 'Elem flow name'] = ['Water, cooling, unspecified natural origin' + i.split(
-            'Water, unspecified natural origin')[1] for i in df_cooling.loc[:, 'Elem flow name']]
-        df_lake = water_hh_cfs.copy('deep')
-        df_lake.loc[:, 'Elem flow name'] = ['Water, lake' + i.split('Water, unspecified natural origin')[1]
-                                            for i in df_lake.loc[:, 'Elem flow name']]
-        df_river = water_hh_cfs.copy('deep')
-        df_river.loc[:, 'Elem flow name'] = ['Water, river' + i.split('Water, unspecified natural origin')[1]
-                                             for i in df_river.loc[:, 'Elem flow name']]
-        df_well = water_hh_cfs.copy('deep')
-        df_well.loc[:, 'Elem flow name'] = ['Water, well, in ground' + i.split('Water, unspecified natural origin')[1]
-                                            for i in df_well.loc[:, 'Elem flow name']]
-        df_water = water_hh_cfs.copy('deep')
-        df_water.loc[:, 'Elem flow name'] = ['Water' + i.split('Water, unspecified natural origin')[1]
-                                             for i in df_water.loc[:, 'Elem flow name']]
-        df_water.loc[:, 'CF value'] *= -1
-        df_water.loc[:, 'Compartment'] = 'Water'
-
-        water_hh_cfs = pd.concat([water_hh_cfs, df_cooling, df_lake, df_river, df_well, df_water])
-        water_hh_cfs = clean_up_dataframe(water_hh_cfs)
-
-        # change the resolution to continents and global
-        water_hh_cfs.loc[[i for i in water_hh_cfs.index if ('RER' in water_hh_cfs.loc[i, 'Elem flow name'] or
-                                                            'RAS' in water_hh_cfs.loc[i, 'Elem flow name'] or
-                                                            'RAF' in water_hh_cfs.loc[i, 'Elem flow name'] or
-                                                            'RLA' in water_hh_cfs.loc[i, 'Elem flow name'] or
-                                                            'OCE' in water_hh_cfs.loc[i, 'Elem flow name'] or
-                                                            'RNA' in water_hh_cfs.loc[i, 'Elem flow name'])],
-                         'Native geographical resolution scale'] = 'Continent'
-        water_hh_cfs.loc[[i for i in water_hh_cfs.index if 'GLO' in water_hh_cfs.loc[i, 'Elem flow name']],
-                         'Native geographical resolution scale'] = 'Global'
-
-        # concat with master_db
-        self.master_db = pd.concat([self.master_db, water_hh_cfs])
-        self.master_db = clean_up_dataframe(self.master_db)
-
-        # add the RoW geography based on the Global value
-        df = self.master_db.loc[
-            [i for i in self.master_db.index if (self.master_db.loc[i, 'Impact category'] ==
-                                                 'Water availability, human health' and
-                                                 'GLO' in self.master_db.loc[i, 'Elem flow name'])]]
-        df['Elem flow name'] = [i.split(', GLO')[0] + ', RoW' for i in df['Elem flow name']]
-        df['Native geographical resolution scale'] = 'Other region'
-        self.master_db = pd.concat([self.master_db, df])
-        self.master_db = clean_up_dataframe(self.master_db)
-
-    def load_water_availability_eq_cfs(self):
-        """
-        Load CFs for water availability freshwater ecosystem.
-
-        Concerned impact categories:
-            - Water availability, freshwater ecosystem
-
-        :return: update master_db
-        """
-
-        # ------------------------------ LOADING DATA -----------------------------------
-        original_cfs = pd.read_sql(sql='SELECT * FROM [CF - regionalized - WaterAvailability_FW - native]',
-                                   con=self.conn)
-
-        geos = pd.read_sql(sql='SELECT * FROM [SI - mapping with regions of ecoinvent]', con=self.conn).loc[
-               :, 'Ecoinvent_short_name'].tolist()
-        geos += ['GLO', 'RoW']
-
-        water_flows = ['Water, lake', 'Water, river', 'Water, unspecified natural origin',
-                       'Water, well, in ground', 'Water, cooling, unspecified natural origin']
-
-        # ------------------------------ DATA FORMATTING -----------------------------------
-        cfs = pd.DataFrame(original_cfs.loc[:, 'CF value'].median(),
-                           index=pd.MultiIndex.from_product([water_flows, geos]),
-                           columns=['CF value']).reset_index()
-        cfs.columns = ['Elem flow', 'Region', 'CF value']
-
-        cfs.loc[:, 'Impact category'] = 'Water availability, freshwater ecosystem'
-        cfs.loc[:, 'Native geographical resolution scale'] = 'Country'
-        cfs.loc[:, 'MP or Damage'] = 'Damage'
-        cfs.loc[:, 'CAS number'] = '7732-18-5'
-        cfs.loc[:, 'CF unit'] = 'PDF.m2.yr'
-        cfs.loc[:, 'Elem flow unit'] = 'm3'
-        cfs.loc[:, 'Compartment'] = 'Raw'
-        cfs.loc[:, 'Sub-compartment'] = '(unspecified)'
-        # pandas interprets "NA" (for Namibia) in sqlite as NaN
-        cfs.loc[:, 'Region'] = cfs.loc[:, 'Region'].fillna('NA')
-
-        # change resolution scale for GLO and RoW
-        cfs.loc[cfs.loc[:, 'Region'].isin(['GLO']), 'Native geographical resolution scale'] = 'Global'
-        cfs.loc[cfs.loc[:, 'Region'].isin(['RoW']), 'Native geographical resolution scale'] = 'Other region'
-
-        water_comp = cfs.loc[cfs.loc[:, 'Elem flow'] == 'Water, lake'].copy('deep')
-        water_comp.loc[:, 'Elem flow'] = 'Water'
-        water_comp.loc[:, 'Compartment'] = 'Water'
-        water_comp.loc[:, 'CF value'] *= -1
-
-        cfs = clean_up_dataframe(pd.concat([cfs, water_comp]))
-        cfs.loc[:, 'Elem flow name'] = [', '.join(i) for i in list(zip(cfs.loc[:, 'Elem flow'], cfs.loc[:, 'Region']))]
-        cfs = cfs.drop(['Elem flow', 'Region'], axis=1)
-        cfs = clean_up_dataframe(cfs)
-
-        # concat with master_db
-        self.master_db = pd.concat([self.master_db, cfs])
-        self.master_db = clean_up_dataframe(self.master_db)
-
     def load_water_scarcity_cfs(self):
         """
         Load CFs for water scarcity
@@ -3137,7 +2988,7 @@ class Parse:
         """
 
         data = pd.read_sql('SELECT * FROM "CF - regionalized - WaterScarcity - aggregated"', self.conn)
-        conc = pd.read_sql('SELECT * FROM "SI - mapping with regions of ecoinvent"', self.conn).set_index(
+        conc = pd.read_sql('SELECT * FROM "SI - Mapping with regions of ecoinvent"', self.conn).set_index(
             'AWARE').Ecoinvent_short_name
 
         # create the regionalized names (e.g., Water, AF)
@@ -3201,7 +3052,89 @@ class Parse:
                          'Native geographical resolution scale'] = 'Continent'
         all_data.loc[[i for i in all_data.index if 'GLO' in all_data.loc[i, 'Elem flow name']],
                          'Native geographical resolution scale'] = 'Global'
-        all_data.loc[[i for i in all_data.index if 'RoW' in all_data.loc[i, 'Elem flow name']],
+        all_data.loc[[i for i in all_data.index if ('RoW' in all_data.loc[i, 'Elem flow name'] or
+                                                    'Akrotiri' in all_data.loc[i, 'Elem flow name'] or
+                                                    'Asia without China' in all_data.loc[i, 'Elem flow name'] or
+                                                    'Australia, including overseas territories' in all_data.loc[i, 'Elem flow name'] or
+                                                    'BALTSO' in all_data.loc[i, 'Elem flow name'] or
+                                                    'CENTREL' in all_data.loc[i, 'Elem flow name'] or
+                                                    'CUSMA/T-MEC/USMCA' in all_data.loc[i, 'Elem flow name'] or
+                                                    'Canada without Alberta' in all_data.loc[i, 'Elem flow name'] or
+                                                    'Canada without Alberta and Quebec' in all_data.loc[i, 'Elem flow name'] or
+                                                    'Canada without Quebec' in all_data.loc[i, 'Elem flow name'] or
+                                                    'Canary Islands' in all_data.loc[i, 'Elem flow name'] or
+                                                    'Central Asia' in all_data.loc[i, 'Elem flow name'] or
+                                                    'China w/o Inner Mongol' in all_data.loc[i, 'Elem flow name'] or
+                                                    'Crimea' in all_data.loc[i, 'Elem flow name'] or
+                                                    'Cyprus No Mans Area' in all_data.loc[i, 'Elem flow name'] or
+                                                    'Dhekelia Base' in all_data.loc[i, 'Elem flow name'] or
+                                                    'ENTSO-E' in all_data.loc[i, 'Elem flow name'] or
+                                                    'Europe without Austria' in all_data.loc[i, 'Elem flow name'] or
+                                                    'Europe without NORDEL (NCPA)' in all_data.loc[i, 'Elem flow name'] or
+                                                    'Europe without Switzerland' in all_data.loc[i, 'Elem flow name'] or
+                                                    'Europe without Switzerland and Austria' in all_data.loc[i, 'Elem flow name'] or
+                                                    'Europe without Switzerland and France' in all_data.loc[i, 'Elem flow name'] or
+                                                    'Europe, without Russia and Türkiye' in all_data.loc[i, 'Elem flow name'] or
+                                                    'FSU' in all_data.loc[i, 'Elem flow name'] or
+                                                    'France, including overseas territories' in all_data.loc[i, 'Elem flow name'] or
+                                                    'Guantanamo Bay' in all_data.loc[i, 'Elem flow name'] or
+                                                    'IAI Area, Africa' in all_data.loc[i, 'Elem flow name'] or
+                                                    'IAI Area, Asia, without China and GCC' in all_data.loc[i, 'Elem flow name'] or
+                                                    'IAI Area, EU27 & EFTA' in all_data.loc[i, 'Elem flow name'] or
+                                                    'IAI Area, Gulf Cooperation Council' in all_data.loc[i, 'Elem flow name'] or
+                                                    'IAI Area, North America' in all_data.loc[i, 'Elem flow name'] or
+                                                    'IAI Area, North America, without Quebec' in all_data.loc[i, 'Elem flow name'] or
+                                                    'IAI Area, Russia & RER w/o EU27 & EFTA' in all_data.loc[i, 'Elem flow name'] or
+                                                    'IAI Area, South America' in all_data.loc[i, 'Elem flow name'] or
+                                                    'IN-Islands' in all_data.loc[i, 'Elem flow name'] or
+                                                    'MRO' in all_data.loc[i, 'Elem flow name'] or
+                                                    'NAFTA' in all_data.loc[i, 'Elem flow name'] or
+                                                    'NORDEL' in all_data.loc[i, 'Elem flow name'] or
+                                                    'NPCC' in all_data.loc[i, 'Elem flow name'] or
+                                                    'North America without Quebec' in all_data.loc[i, 'Elem flow name'] or
+                                                    'Northern Cyprus' in all_data.loc[i, 'Elem flow name'] or
+                                                    'Québec, HQ distribution network' in all_data.loc[i, 'Elem flow name'] or
+                                                    'RER w/o AT+BE+CH+DE+FR+IT' in all_data.loc[i, 'Elem flow name'] or
+                                                    'RER w/o CH+DE' in all_data.loc[i, 'Elem flow name'] or
+                                                    'RER w/o DE+NL+NO' in all_data.loc[i, 'Elem flow name'] or
+                                                    'RER w/o DE+NL+NO+RU' in all_data.loc[i, 'Elem flow name'] or
+                                                    'RER w/o DE+NL+RU' in all_data.loc[i, 'Elem flow name'] or
+                                                    'RER w/o RU' in all_data.loc[i, 'Elem flow name'] or
+                                                    'Russia (Asia)' in all_data.loc[i, 'Elem flow name'] or
+                                                    'Russia (Europe)' in all_data.loc[i, 'Elem flow name'] or
+                                                    'SAS' in all_data.loc[i, 'Elem flow name'] or
+                                                    'Siachen Glacier' in all_data.loc[i, 'Elem flow name'] or
+                                                    'Somaliland' in all_data.loc[i, 'Elem flow name'] or
+                                                    'UCTE' in all_data.loc[i, 'Elem flow name'] or
+                                                    'UCTE without France' in all_data.loc[i, 'Elem flow name'] or
+                                                    'UCTE without Germany' in all_data.loc[i, 'Elem flow name'] or
+                                                    'UCTE without Germany and France' in all_data.loc[i, 'Elem flow name'] or
+                                                    'UN-AMERICAS' in all_data.loc[i, 'Elem flow name'] or
+                                                    'UN-ASIA' in all_data.loc[i, 'Elem flow name'] or
+                                                    'UN-AUSTRALIANZ' in all_data.loc[i, 'Elem flow name'] or
+                                                    'UN-CAMERICA' in all_data.loc[i, 'Elem flow name'] or
+                                                    'UN-CARIBBEAN' in all_data.loc[i, 'Elem flow name'] or
+                                                    'UN-EAFRICA' in all_data.loc[i, 'Elem flow name'] or
+                                                    'UN-EASIA' in all_data.loc[i, 'Elem flow name'] or
+                                                    'UN-EEUROPE' in all_data.loc[i, 'Elem flow name'] or
+                                                    'UN-EUROPE' in all_data.loc[i, 'Elem flow name'] or
+                                                    'UN-MAFRICA' in all_data.loc[i, 'Elem flow name'] or
+                                                    'UN-MELANESIA' in all_data.loc[i, 'Elem flow name'] or
+                                                    'UN-MICRONESIA' in all_data.loc[i, 'Elem flow name'] or
+                                                    'UN-NAFRICA' in all_data.loc[i, 'Elem flow name'] or
+                                                    'UN-NEUROPE' in all_data.loc[i, 'Elem flow name'] or
+                                                    'UN-OCEANIA' in all_data.loc[i, 'Elem flow name'] or
+                                                    'UN-POLYNESIA' in all_data.loc[i, 'Elem flow name'] or
+                                                    'UN-SAMERICA' in all_data.loc[i, 'Elem flow name'] or
+                                                    'UN-SASIA' in all_data.loc[i, 'Elem flow name'] or
+                                                    'UN-SEASIA' in all_data.loc[i, 'Elem flow name'] or
+                                                    'UN-SEUROPE' in all_data.loc[i, 'Elem flow name'] or
+                                                    'UN-WAFRICA' in all_data.loc[i, 'Elem flow name'] or
+                                                    'UN-WASIA' in all_data.loc[i, 'Elem flow name'] or
+                                                    'United States of America, including overseas territories' in all_data.loc[i, 'Elem flow name'] or
+                                                    'WECC' in all_data.loc[i, 'Elem flow name'] or
+                                                    'WEU' in all_data.loc[i, 'Elem flow name']
+                                                    )],
                          'Native geographical resolution scale'] = 'Other region'
 
         # adding the different other water flows (lake, river, well, etc.)
@@ -3239,6 +3172,343 @@ class Parse:
         self.master_db = pd.concat([self.master_db, all_data])
         self.master_db = clean_up_dataframe(self.master_db)
 
+    def load_water_availability_hh_cfs(self):
+        """
+        Load CFs for water availability human health.
+
+        Concerned impact categories:
+            - Water availability, human health
+
+        :return: update master_db
+        """
+
+        data = pd.read_sql('SELECT * FROM "CF - regionalized - WaterAvailability_HH - aggregated"', self.conn).loc[
+               :, ['ecoinvent_shortname', 'CF_tot']]
+        conc = pd.read_sql('SELECT * FROM "SI - Mapping with regions of ecoinvent"', self.conn).set_index(
+            'AWARE').Ecoinvent_short_name
+
+        # create the regionalized names (e.g., Water, AF)
+        water_data = pd.DataFrame()
+        for i in data.index:
+            if data.ecoinvent_shortname[i] in conc.index:
+                if type(conc.loc[data.ecoinvent_shortname[i]]) == str:
+                    water_data.loc[i, 'Elem flow name'] = 'Water, ' + conc.loc[data.ecoinvent_shortname[i]]
+                    water_data.loc[i, 'CF value'] = data.loc[i, 'CF_tot']
+                else:
+                    for j in range(0, len(conc.loc[data.ecoinvent_shortname[i]])):
+                        water_data.loc[str(i + j), 'Elem flow name'] = 'Water, ' + conc.loc[data.ecoinvent_shortname[i]].iloc[j]
+                        water_data.loc[str(i + j), 'CF value'] = data.loc[i, 'CF_tot']
+            else:
+                water_data.loc[i, 'Elem flow name'] = 'Water, ' + data.ecoinvent_shortname[i]
+                water_data.loc[i, 'CF value'] = data.loc[i, 'CF_tot']
+
+        # formatting the data to IW+ format
+        water_data.loc[:, 'Impact category'] = 'Water availability, human health'
+        water_data.loc[:, 'CF unit'] = 'DALY'
+        water_data.loc[:, 'Compartment'] = 'Raw'
+        water_data.loc[:, 'Sub-compartment'] = '(unspecified)'
+        water_data.loc[:, 'CAS number'] = '7732-18-5'
+        water_data.loc[:, 'Elem flow unit'] = 'm3'
+        water_data.loc[:, 'MP or Damage'] = 'Damage'
+        water_data.loc[:, 'Native geographical resolution scale'] = 'Country'
+        water_data.loc[:, 'CF value'] = water_data.loc[:, 'CF value'].astype(float)
+
+        # create the negative flows for the Water compartment
+        water_extraction_data = water_data.copy('deep')
+        water_extraction_data.loc[:, 'Compartment'] = 'Water'
+        water_extraction_data.loc[:, 'CF value'] *= -1
+
+        all_data = pd.concat([water_data, water_extraction_data])
+        all_data = clean_up_dataframe(all_data)
+
+        all_data.loc[[i for i in all_data.index if ('RER' in all_data.loc[i, 'Elem flow name'] or
+                                                    'RAS' in all_data.loc[i, 'Elem flow name'] or
+                                                    'RAF' in all_data.loc[i, 'Elem flow name'] or
+                                                    'RLA' in all_data.loc[i, 'Elem flow name'] or
+                                                    'OCE' in all_data.loc[i, 'Elem flow name'] or
+                                                    'RNA' in all_data.loc[i, 'Elem flow name'])],
+                         'Native geographical resolution scale'] = 'Continent'
+        all_data.loc[[i for i in all_data.index if 'GLO' in all_data.loc[i, 'Elem flow name']],
+                         'Native geographical resolution scale'] = 'Global'
+        all_data.loc[[i for i in all_data.index if ('RoW' in all_data.loc[i, 'Elem flow name'] or
+                                                    'Akrotiri' in all_data.loc[i, 'Elem flow name'] or
+                                                    'Asia without China' in all_data.loc[i, 'Elem flow name'] or
+                                                    'Australia, including overseas territories' in all_data.loc[i, 'Elem flow name'] or
+                                                    'BALTSO' in all_data.loc[i, 'Elem flow name'] or
+                                                    'CENTREL' in all_data.loc[i, 'Elem flow name'] or
+                                                    'CUSMA/T-MEC/USMCA' in all_data.loc[i, 'Elem flow name'] or
+                                                    'Canada without Alberta' in all_data.loc[i, 'Elem flow name'] or
+                                                    'Canada without Alberta and Quebec' in all_data.loc[i, 'Elem flow name'] or
+                                                    'Canada without Quebec' in all_data.loc[i, 'Elem flow name'] or
+                                                    'Canary Islands' in all_data.loc[i, 'Elem flow name'] or
+                                                    'Central Asia' in all_data.loc[i, 'Elem flow name'] or
+                                                    'China w/o Inner Mongol' in all_data.loc[i, 'Elem flow name'] or
+                                                    'Crimea' in all_data.loc[i, 'Elem flow name'] or
+                                                    'Cyprus No Mans Area' in all_data.loc[i, 'Elem flow name'] or
+                                                    'Dhekelia Base' in all_data.loc[i, 'Elem flow name'] or
+                                                    'ENTSO-E' in all_data.loc[i, 'Elem flow name'] or
+                                                    'Europe without Austria' in all_data.loc[i, 'Elem flow name'] or
+                                                    'Europe without NORDEL (NCPA)' in all_data.loc[i, 'Elem flow name'] or
+                                                    'Europe without Switzerland' in all_data.loc[i, 'Elem flow name'] or
+                                                    'Europe without Switzerland and Austria' in all_data.loc[i, 'Elem flow name'] or
+                                                    'Europe without Switzerland and France' in all_data.loc[i, 'Elem flow name'] or
+                                                    'Europe, without Russia and Türkiye' in all_data.loc[i, 'Elem flow name'] or
+                                                    'FSU' in all_data.loc[i, 'Elem flow name'] or
+                                                    'France, including overseas territories' in all_data.loc[i, 'Elem flow name'] or
+                                                    'Guantanamo Bay' in all_data.loc[i, 'Elem flow name'] or
+                                                    'IAI Area, Africa' in all_data.loc[i, 'Elem flow name'] or
+                                                    'IAI Area, Asia, without China and GCC' in all_data.loc[i, 'Elem flow name'] or
+                                                    'IAI Area, EU27 & EFTA' in all_data.loc[i, 'Elem flow name'] or
+                                                    'IAI Area, Gulf Cooperation Council' in all_data.loc[i, 'Elem flow name'] or
+                                                    'IAI Area, North America' in all_data.loc[i, 'Elem flow name'] or
+                                                    'IAI Area, North America, without Quebec' in all_data.loc[i, 'Elem flow name'] or
+                                                    'IAI Area, Russia & RER w/o EU27 & EFTA' in all_data.loc[i, 'Elem flow name'] or
+                                                    'IAI Area, South America' in all_data.loc[i, 'Elem flow name'] or
+                                                    'IN-Islands' in all_data.loc[i, 'Elem flow name'] or
+                                                    'MRO' in all_data.loc[i, 'Elem flow name'] or
+                                                    'NAFTA' in all_data.loc[i, 'Elem flow name'] or
+                                                    'NORDEL' in all_data.loc[i, 'Elem flow name'] or
+                                                    'NPCC' in all_data.loc[i, 'Elem flow name'] or
+                                                    'North America without Quebec' in all_data.loc[i, 'Elem flow name'] or
+                                                    'Northern Cyprus' in all_data.loc[i, 'Elem flow name'] or
+                                                    'Québec, HQ distribution network' in all_data.loc[i, 'Elem flow name'] or
+                                                    'RER w/o AT+BE+CH+DE+FR+IT' in all_data.loc[i, 'Elem flow name'] or
+                                                    'RER w/o CH+DE' in all_data.loc[i, 'Elem flow name'] or
+                                                    'RER w/o DE+NL+NO' in all_data.loc[i, 'Elem flow name'] or
+                                                    'RER w/o DE+NL+NO+RU' in all_data.loc[i, 'Elem flow name'] or
+                                                    'RER w/o DE+NL+RU' in all_data.loc[i, 'Elem flow name'] or
+                                                    'RER w/o RU' in all_data.loc[i, 'Elem flow name'] or
+                                                    'Russia (Asia)' in all_data.loc[i, 'Elem flow name'] or
+                                                    'Russia (Europe)' in all_data.loc[i, 'Elem flow name'] or
+                                                    'SAS' in all_data.loc[i, 'Elem flow name'] or
+                                                    'Siachen Glacier' in all_data.loc[i, 'Elem flow name'] or
+                                                    'Somaliland' in all_data.loc[i, 'Elem flow name'] or
+                                                    'UCTE' in all_data.loc[i, 'Elem flow name'] or
+                                                    'UCTE without France' in all_data.loc[i, 'Elem flow name'] or
+                                                    'UCTE without Germany' in all_data.loc[i, 'Elem flow name'] or
+                                                    'UCTE without Germany and France' in all_data.loc[i, 'Elem flow name'] or
+                                                    'UN-AMERICAS' in all_data.loc[i, 'Elem flow name'] or
+                                                    'UN-ASIA' in all_data.loc[i, 'Elem flow name'] or
+                                                    'UN-AUSTRALIANZ' in all_data.loc[i, 'Elem flow name'] or
+                                                    'UN-CAMERICA' in all_data.loc[i, 'Elem flow name'] or
+                                                    'UN-CARIBBEAN' in all_data.loc[i, 'Elem flow name'] or
+                                                    'UN-EAFRICA' in all_data.loc[i, 'Elem flow name'] or
+                                                    'UN-EASIA' in all_data.loc[i, 'Elem flow name'] or
+                                                    'UN-EEUROPE' in all_data.loc[i, 'Elem flow name'] or
+                                                    'UN-EUROPE' in all_data.loc[i, 'Elem flow name'] or
+                                                    'UN-MAFRICA' in all_data.loc[i, 'Elem flow name'] or
+                                                    'UN-MELANESIA' in all_data.loc[i, 'Elem flow name'] or
+                                                    'UN-MICRONESIA' in all_data.loc[i, 'Elem flow name'] or
+                                                    'UN-NAFRICA' in all_data.loc[i, 'Elem flow name'] or
+                                                    'UN-NEUROPE' in all_data.loc[i, 'Elem flow name'] or
+                                                    'UN-OCEANIA' in all_data.loc[i, 'Elem flow name'] or
+                                                    'UN-POLYNESIA' in all_data.loc[i, 'Elem flow name'] or
+                                                    'UN-SAMERICA' in all_data.loc[i, 'Elem flow name'] or
+                                                    'UN-SASIA' in all_data.loc[i, 'Elem flow name'] or
+                                                    'UN-SEASIA' in all_data.loc[i, 'Elem flow name'] or
+                                                    'UN-SEUROPE' in all_data.loc[i, 'Elem flow name'] or
+                                                    'UN-WAFRICA' in all_data.loc[i, 'Elem flow name'] or
+                                                    'UN-WASIA' in all_data.loc[i, 'Elem flow name'] or
+                                                    'United States of America, including overseas territories' in all_data.loc[i, 'Elem flow name'] or
+                                                    'WECC' in all_data.loc[i, 'Elem flow name'] or
+                                                    'WEU' in all_data.loc[i, 'Elem flow name']
+                                                    )],
+                         'Native geographical resolution scale'] = 'Other region'
+
+        # adding the different other water flows (lake, river, well, etc.)
+        df_lake = all_data[all_data.Compartment == 'Raw'].copy()
+        df_lake.loc[:, 'Elem flow name'] = [i.replace('Water', 'Water, lake') for i in df_lake.loc[:, 'Elem flow name']]
+        df_river = all_data[all_data.Compartment == 'Raw'].copy()
+        df_river.loc[:, 'Elem flow name'] = [i.replace('Water', 'Water, river') for i in
+                                             df_river.loc[:, 'Elem flow name']]
+        df_unspe = all_data[all_data.Compartment == 'Raw'].copy()
+        df_unspe.loc[:, 'Elem flow name'] = [i.replace('Water', 'Water, unspecified natural origin') for i in
+                                             df_unspe.loc[:, 'Elem flow name']]
+        df_well = all_data[all_data.Compartment == 'Raw'].copy()
+        df_well.loc[:, 'Elem flow name'] = [i.replace('Water', 'Water, well, in ground') for i in
+                                            df_well.loc[:, 'Elem flow name']]
+        df_cooling = all_data[all_data.Compartment == 'Raw'].copy()
+        df_cooling.loc[:, 'Elem flow name'] = [i.replace('Water', 'Water, cooling, unspecified natural origin') for i in
+                                               df_cooling.loc[:, 'Elem flow name']]
+
+        # drop "Water" flow in Raw comp, that flow is only for the water comp
+        all_data = all_data[all_data.Compartment != 'Raw']
+
+        all_data = clean_up_dataframe(pd.concat([all_data, df_lake, df_river, df_unspe, df_well, df_cooling]))
+
+        self.master_db = pd.concat([self.master_db, all_data])
+        self.master_db = clean_up_dataframe(self.master_db)
+
+    def load_water_availability_fw_cfs(self):
+        """
+        Load CFs for water availability freshwater ecosystem.
+
+        Concerned impact categories:
+            - Water availability, freshwater ecosystem
+
+        :return: update master_db
+        """
+
+        data = pd.read_sql(sql='SELECT * FROM [CF - regionalized - WaterAvailability_EQ_fw - native]', con=self.conn)
+        conc = pd.read_sql('SELECT * FROM "SI - Mapping with regions of ecoinvent"', self.conn).set_index(
+            'AWARE').Ecoinvent_short_name
+        geos = pd.read_sql(sql='SELECT * FROM [CF - regionalized - WaterScarcity - aggregated]', con=self.conn).loc[
+               :, 'ecoinvent_shortname'].tolist()
+
+        CF_value = data.loc[:, 'CF value'].median()
+        # create the regionalized names (e.g., Water, AF)
+        water_data = pd.DataFrame()
+        for i, geo in enumerate(geos):
+            if geo in conc.index:
+                if type(conc.loc[geo]) == str:
+                    water_data.loc[i, 'Elem flow name'] = 'Water, ' + conc.loc[geo]
+                    water_data.loc[i, 'CF value'] = CF_value
+                else:
+                    for j in range(0, len(conc.loc[geo])):
+                        water_data.loc[str(i + j), 'Elem flow name'] = 'Water, ' + conc.loc[geo].iloc[j]
+                        water_data.loc[str(i + j), 'CF value'] = CF_value
+            else:
+                water_data.loc[i, 'Elem flow name'] = 'Water, ' + geo
+                water_data.loc[i, 'CF value'] = CF_value
+
+        # formatting the data to IW+ format
+        water_data.loc[:, 'Impact category'] = 'Water availability, freshwater ecosystem'
+        water_data.loc[:, 'CF unit'] = 'PDF.m2.yr'
+        water_data.loc[:, 'Compartment'] = 'Raw'
+        water_data.loc[:, 'Sub-compartment'] = '(unspecified)'
+        water_data.loc[:, 'CAS number'] = '7732-18-5'
+        water_data.loc[:, 'Elem flow unit'] = 'm3'
+        water_data.loc[:, 'MP or Damage'] = 'Damage'
+        water_data.loc[:, 'Native geographical resolution scale'] = 'Country'
+        water_data.loc[:, 'CF value'] = water_data.loc[:, 'CF value'].astype(float)
+
+        # create the negative flows for the Water compartment
+        water_extraction_data = water_data.copy('deep')
+        water_extraction_data.loc[:, 'Compartment'] = 'Water'
+        water_extraction_data.loc[:, 'CF value'] *= -1
+
+        all_data = pd.concat([water_data, water_extraction_data])
+        all_data = clean_up_dataframe(all_data)
+
+        all_data.loc[[i for i in all_data.index if ('RER' in all_data.loc[i, 'Elem flow name'] or
+                                                    'RAS' in all_data.loc[i, 'Elem flow name'] or
+                                                    'RAF' in all_data.loc[i, 'Elem flow name'] or
+                                                    'RLA' in all_data.loc[i, 'Elem flow name'] or
+                                                    'OCE' in all_data.loc[i, 'Elem flow name'] or
+                                                    'RNA' in all_data.loc[i, 'Elem flow name'])],
+                         'Native geographical resolution scale'] = 'Continent'
+        all_data.loc[[i for i in all_data.index if 'GLO' in all_data.loc[i, 'Elem flow name']],
+                         'Native geographical resolution scale'] = 'Global'
+        all_data.loc[[i for i in all_data.index if ('RoW' in all_data.loc[i, 'Elem flow name'] or
+                                                    'Akrotiri' in all_data.loc[i, 'Elem flow name'] or
+                                                    'Asia without China' in all_data.loc[i, 'Elem flow name'] or
+                                                    'Australia, including overseas territories' in all_data.loc[i, 'Elem flow name'] or
+                                                    'BALTSO' in all_data.loc[i, 'Elem flow name'] or
+                                                    'CENTREL' in all_data.loc[i, 'Elem flow name'] or
+                                                    'CUSMA/T-MEC/USMCA' in all_data.loc[i, 'Elem flow name'] or
+                                                    'Canada without Alberta' in all_data.loc[i, 'Elem flow name'] or
+                                                    'Canada without Alberta and Quebec' in all_data.loc[i, 'Elem flow name'] or
+                                                    'Canada without Quebec' in all_data.loc[i, 'Elem flow name'] or
+                                                    'Canary Islands' in all_data.loc[i, 'Elem flow name'] or
+                                                    'Central Asia' in all_data.loc[i, 'Elem flow name'] or
+                                                    'China w/o Inner Mongol' in all_data.loc[i, 'Elem flow name'] or
+                                                    'Crimea' in all_data.loc[i, 'Elem flow name'] or
+                                                    'Cyprus No Mans Area' in all_data.loc[i, 'Elem flow name'] or
+                                                    'Dhekelia Base' in all_data.loc[i, 'Elem flow name'] or
+                                                    'ENTSO-E' in all_data.loc[i, 'Elem flow name'] or
+                                                    'Europe without Austria' in all_data.loc[i, 'Elem flow name'] or
+                                                    'Europe without NORDEL (NCPA)' in all_data.loc[i, 'Elem flow name'] or
+                                                    'Europe without Switzerland' in all_data.loc[i, 'Elem flow name'] or
+                                                    'Europe without Switzerland and Austria' in all_data.loc[i, 'Elem flow name'] or
+                                                    'Europe without Switzerland and France' in all_data.loc[i, 'Elem flow name'] or
+                                                    'Europe, without Russia and Türkiye' in all_data.loc[i, 'Elem flow name'] or
+                                                    'FSU' in all_data.loc[i, 'Elem flow name'] or
+                                                    'France, including overseas territories' in all_data.loc[i, 'Elem flow name'] or
+                                                    'Guantanamo Bay' in all_data.loc[i, 'Elem flow name'] or
+                                                    'IAI Area, Africa' in all_data.loc[i, 'Elem flow name'] or
+                                                    'IAI Area, Asia, without China and GCC' in all_data.loc[i, 'Elem flow name'] or
+                                                    'IAI Area, EU27 & EFTA' in all_data.loc[i, 'Elem flow name'] or
+                                                    'IAI Area, Gulf Cooperation Council' in all_data.loc[i, 'Elem flow name'] or
+                                                    'IAI Area, North America' in all_data.loc[i, 'Elem flow name'] or
+                                                    'IAI Area, North America, without Quebec' in all_data.loc[i, 'Elem flow name'] or
+                                                    'IAI Area, Russia & RER w/o EU27 & EFTA' in all_data.loc[i, 'Elem flow name'] or
+                                                    'IAI Area, South America' in all_data.loc[i, 'Elem flow name'] or
+                                                    'IN-Islands' in all_data.loc[i, 'Elem flow name'] or
+                                                    'MRO' in all_data.loc[i, 'Elem flow name'] or
+                                                    'NAFTA' in all_data.loc[i, 'Elem flow name'] or
+                                                    'NORDEL' in all_data.loc[i, 'Elem flow name'] or
+                                                    'NPCC' in all_data.loc[i, 'Elem flow name'] or
+                                                    'North America without Quebec' in all_data.loc[i, 'Elem flow name'] or
+                                                    'Northern Cyprus' in all_data.loc[i, 'Elem flow name'] or
+                                                    'Québec, HQ distribution network' in all_data.loc[i, 'Elem flow name'] or
+                                                    'RER w/o AT+BE+CH+DE+FR+IT' in all_data.loc[i, 'Elem flow name'] or
+                                                    'RER w/o CH+DE' in all_data.loc[i, 'Elem flow name'] or
+                                                    'RER w/o DE+NL+NO' in all_data.loc[i, 'Elem flow name'] or
+                                                    'RER w/o DE+NL+NO+RU' in all_data.loc[i, 'Elem flow name'] or
+                                                    'RER w/o DE+NL+RU' in all_data.loc[i, 'Elem flow name'] or
+                                                    'RER w/o RU' in all_data.loc[i, 'Elem flow name'] or
+                                                    'Russia (Asia)' in all_data.loc[i, 'Elem flow name'] or
+                                                    'Russia (Europe)' in all_data.loc[i, 'Elem flow name'] or
+                                                    'SAS' in all_data.loc[i, 'Elem flow name'] or
+                                                    'Siachen Glacier' in all_data.loc[i, 'Elem flow name'] or
+                                                    'Somaliland' in all_data.loc[i, 'Elem flow name'] or
+                                                    'UCTE' in all_data.loc[i, 'Elem flow name'] or
+                                                    'UCTE without France' in all_data.loc[i, 'Elem flow name'] or
+                                                    'UCTE without Germany' in all_data.loc[i, 'Elem flow name'] or
+                                                    'UCTE without Germany and France' in all_data.loc[i, 'Elem flow name'] or
+                                                    'UN-AMERICAS' in all_data.loc[i, 'Elem flow name'] or
+                                                    'UN-ASIA' in all_data.loc[i, 'Elem flow name'] or
+                                                    'UN-AUSTRALIANZ' in all_data.loc[i, 'Elem flow name'] or
+                                                    'UN-CAMERICA' in all_data.loc[i, 'Elem flow name'] or
+                                                    'UN-CARIBBEAN' in all_data.loc[i, 'Elem flow name'] or
+                                                    'UN-EAFRICA' in all_data.loc[i, 'Elem flow name'] or
+                                                    'UN-EASIA' in all_data.loc[i, 'Elem flow name'] or
+                                                    'UN-EEUROPE' in all_data.loc[i, 'Elem flow name'] or
+                                                    'UN-EUROPE' in all_data.loc[i, 'Elem flow name'] or
+                                                    'UN-MAFRICA' in all_data.loc[i, 'Elem flow name'] or
+                                                    'UN-MELANESIA' in all_data.loc[i, 'Elem flow name'] or
+                                                    'UN-MICRONESIA' in all_data.loc[i, 'Elem flow name'] or
+                                                    'UN-NAFRICA' in all_data.loc[i, 'Elem flow name'] or
+                                                    'UN-NEUROPE' in all_data.loc[i, 'Elem flow name'] or
+                                                    'UN-OCEANIA' in all_data.loc[i, 'Elem flow name'] or
+                                                    'UN-POLYNESIA' in all_data.loc[i, 'Elem flow name'] or
+                                                    'UN-SAMERICA' in all_data.loc[i, 'Elem flow name'] or
+                                                    'UN-SASIA' in all_data.loc[i, 'Elem flow name'] or
+                                                    'UN-SEASIA' in all_data.loc[i, 'Elem flow name'] or
+                                                    'UN-SEUROPE' in all_data.loc[i, 'Elem flow name'] or
+                                                    'UN-WAFRICA' in all_data.loc[i, 'Elem flow name'] or
+                                                    'UN-WASIA' in all_data.loc[i, 'Elem flow name'] or
+                                                    'United States of America, including overseas territories' in all_data.loc[i, 'Elem flow name'] or
+                                                    'WECC' in all_data.loc[i, 'Elem flow name'] or
+                                                    'WEU' in all_data.loc[i, 'Elem flow name']
+                                                    )],
+                         'Native geographical resolution scale'] = 'Other region'
+
+        # adding the different other water flows (lake, river, well, etc.)
+        df_lake = all_data[all_data.Compartment == 'Raw'].copy()
+        df_lake.loc[:, 'Elem flow name'] = [i.replace('Water', 'Water, lake') for i in df_lake.loc[:, 'Elem flow name']]
+        df_river = all_data[all_data.Compartment == 'Raw'].copy()
+        df_river.loc[:, 'Elem flow name'] = [i.replace('Water', 'Water, river') for i in
+                                             df_river.loc[:, 'Elem flow name']]
+        df_unspe = all_data[all_data.Compartment == 'Raw'].copy()
+        df_unspe.loc[:, 'Elem flow name'] = [i.replace('Water', 'Water, unspecified natural origin') for i in
+                                             df_unspe.loc[:, 'Elem flow name']]
+        df_well = all_data[all_data.Compartment == 'Raw'].copy()
+        df_well.loc[:, 'Elem flow name'] = [i.replace('Water', 'Water, well, in ground') for i in
+                                            df_well.loc[:, 'Elem flow name']]
+        df_cooling = all_data[all_data.Compartment == 'Raw'].copy()
+        df_cooling.loc[:, 'Elem flow name'] = [i.replace('Water', 'Water, cooling, unspecified natural origin') for i in
+                                               df_cooling.loc[:, 'Elem flow name']]
+
+        # drop "Water" flow in Raw comp, that flow is only for the water comp
+        all_data = all_data[all_data.Compartment != 'Raw']
+
+        all_data = clean_up_dataframe(pd.concat([all_data, df_lake, df_river, df_unspe, df_well, df_cooling]))
+
+        # concat with master_db
+        self.master_db = pd.concat([self.master_db, all_data])
+        self.master_db = clean_up_dataframe(self.master_db)
+
     def load_water_availability_terr_cfs(self):
         """
         Load CFs for water availability terrestrial ecosystem.
@@ -3249,42 +3519,129 @@ class Parse:
         :return: update master_db
         """
 
-        original_cfs = pd.read_sql('SELECT * FROM "CF - not regionalized - WaterAvailabilityTerrestrial"',
-                                   self.conn)
+        data = pd.read_sql('SELECT * FROM "CF - regionalized - WaterAvailability_EQ_terr - aggregated"', self.conn)
+        conc = pd.read_sql('SELECT * FROM "SI - Mapping with regions of ecoinvent"', self.conn).set_index(
+            'AWARE').Ecoinvent_short_name
 
-        geos = pd.read_sql(sql='SELECT * FROM [SI - mapping with regions of ecoinvent]', con=self.conn).loc[
-               :,'Ecoinvent_short_name'].tolist()
-        geos += ['GLO', 'RoW']
+        # create the regionalized names (e.g., Water, AF)
+        water_data = pd.DataFrame()
+        for i in data.index:
+            if data.ecoinvent_shortname[i] in conc.index:
+                if type(conc.loc[data.ecoinvent_shortname[i]]) == str:
+                    water_data.loc[i, 'Elem flow name'] = 'Water, well, in ground, ' + conc.loc[data.ecoinvent_shortname[i]]
+                    water_data.loc[i, 'CF value'] = data.loc[i, 'CF (PDF.m2.yr/m3)']
+                else:
+                    for j in range(0, len(conc.loc[data.ecoinvent_shortname[i]])):
+                        water_data.loc[str(i + j), 'Elem flow name'] = 'Water, well, in ground, ' + conc.loc[data.ecoinvent_shortname[i]].iloc[j]
+                        water_data.loc[str(i + j), 'CF value'] = data.loc[i, 'CF (PDF.m2.yr/m3)']
+            else:
+                water_data.loc[i, 'Elem flow name'] = 'Water, well, in ground, ' + data.ecoinvent_shortname[i]
+                water_data.loc[i, 'CF value'] = data.loc[i, 'CF (PDF.m2.yr/m3)']
 
-        list_flows = pd.MultiIndex.from_product([original_cfs.loc[:, 'Elem flow name'], geos])
-        cfs = pd.DataFrame([i[0] + ', ' + i[1] for i in list_flows], columns=['Elem flow name'])
+        water_data.loc[:, 'Impact category'] = 'Water availability, terrestrial ecosystem'
+        water_data.loc[:, 'CF unit'] = 'PDF.m2.yr'
+        water_data.loc[:, 'Compartment'] = 'Raw'
+        water_data.loc[:, 'Sub-compartment'] = '(unspecified)'
+        water_data.loc[:, 'CAS number'] = '7732-18-5'
+        water_data.loc[:, 'Elem flow unit'] = 'm3'
+        water_data.loc[:, 'MP or Damage'] = 'Damage'
+        water_data.loc[:, 'Native geographical resolution scale'] = 'Country'
+        water_data.loc[:, 'CF value'] = water_data.loc[:, 'CF value'].astype(float)
 
-        cfs.loc[:, 'Impact category'] = 'Water availability, terrestrial ecosystem'
-        cfs.loc[:, 'Native geographical resolution scale'] = 'Country'
-        cfs.loc[:, 'MP or Damage'] = 'Damage'
-        cfs.loc[:, 'CAS number'] = '7732-18-5'
-        cfs.loc[:, 'CF unit'] = 'PDF.m2.yr'
-        cfs.loc[:, 'Elem flow unit'] = 'm3'
-        cfs.loc[:, 'Sub-compartment'] = 'in water'
-        cfs.loc[:, 'Compartment'] = 'Raw'
-        cfs.loc[:, 'CF value'] = 0
+        water_data.loc[[i for i in water_data.index if ('RER' in water_data.loc[i, 'Elem flow name'] or
+                                            'RAS' in water_data.loc[i, 'Elem flow name'] or
+                                            'RAF' in water_data.loc[i, 'Elem flow name'] or
+                                            'RLA' in water_data.loc[i, 'Elem flow name'] or
+                                            'OCE' in water_data.loc[i, 'Elem flow name'] or
+                                            'RNA' in water_data.loc[i, 'Elem flow name'])],
+                         'Native geographical resolution scale'] = 'Continent'
+        water_data.loc[[i for i in water_data.index if 'GLO' in water_data.loc[i, 'Elem flow name']],
+                         'Native geographical resolution scale'] = 'Global'
+        water_data.loc[[i for i in water_data.index if ('RoW' in water_data.loc[i, 'Elem flow name'] or
+                                            'Akrotiri' in water_data.loc[i, 'Elem flow name'] or
+                                            'Asia without China' in water_data.loc[i, 'Elem flow name'] or
+                                            'Australia, including overseas territories' in water_data.loc[i, 'Elem flow name'] or
+                                            'BALTSO' in water_data.loc[i, 'Elem flow name'] or
+                                            'CENTREL' in water_data.loc[i, 'Elem flow name'] or
+                                            'CUSMA/T-MEC/USMCA' in water_data.loc[i, 'Elem flow name'] or
+                                            'Canada without Alberta' in water_data.loc[i, 'Elem flow name'] or
+                                            'Canada without Alberta and Quebec' in water_data.loc[i, 'Elem flow name'] or
+                                            'Canada without Quebec' in water_data.loc[i, 'Elem flow name'] or
+                                            'Canary Islands' in water_data.loc[i, 'Elem flow name'] or
+                                            'Central Asia' in water_data.loc[i, 'Elem flow name'] or
+                                            'China w/o Inner Mongol' in water_data.loc[i, 'Elem flow name'] or
+                                            'Crimea' in water_data.loc[i, 'Elem flow name'] or
+                                            'Cyprus No Mans Area' in water_data.loc[i, 'Elem flow name'] or
+                                            'Dhekelia Base' in water_data.loc[i, 'Elem flow name'] or
+                                            'ENTSO-E' in water_data.loc[i, 'Elem flow name'] or
+                                            'Europe without Austria' in water_data.loc[i, 'Elem flow name'] or
+                                            'Europe without NORDEL (NCPA)' in water_data.loc[i, 'Elem flow name'] or
+                                            'Europe without Switzerland' in water_data.loc[i, 'Elem flow name'] or
+                                            'Europe without Switzerland and Austria' in water_data.loc[i, 'Elem flow name'] or
+                                            'Europe without Switzerland and France' in water_data.loc[i, 'Elem flow name'] or
+                                            'Europe, without Russia and Türkiye' in water_data.loc[i, 'Elem flow name'] or
+                                            'FSU' in water_data.loc[i, 'Elem flow name'] or
+                                            'France, including overseas territories' in water_data.loc[i, 'Elem flow name'] or
+                                            'Guantanamo Bay' in water_data.loc[i, 'Elem flow name'] or
+                                            'IAI Area, Africa' in water_data.loc[i, 'Elem flow name'] or
+                                            'IAI Area, Asia, without China and GCC' in water_data.loc[i, 'Elem flow name'] or
+                                            'IAI Area, EU27 & EFTA' in water_data.loc[i, 'Elem flow name'] or
+                                            'IAI Area, Gulf Cooperation Council' in water_data.loc[i, 'Elem flow name'] or
+                                            'IAI Area, North America' in water_data.loc[i, 'Elem flow name'] or
+                                            'IAI Area, North America, without Quebec' in water_data.loc[i, 'Elem flow name'] or
+                                            'IAI Area, Russia & RER w/o EU27 & EFTA' in water_data.loc[i, 'Elem flow name'] or
+                                            'IAI Area, South America' in water_data.loc[i, 'Elem flow name'] or
+                                            'IN-Islands' in water_data.loc[i, 'Elem flow name'] or
+                                            'MRO' in water_data.loc[i, 'Elem flow name'] or
+                                            'NAFTA' in water_data.loc[i, 'Elem flow name'] or
+                                            'NORDEL' in water_data.loc[i, 'Elem flow name'] or
+                                            'NPCC' in water_data.loc[i, 'Elem flow name'] or
+                                            'North America without Quebec' in water_data.loc[i, 'Elem flow name'] or
+                                            'Northern Cyprus' in water_data.loc[i, 'Elem flow name'] or
+                                            'Québec, HQ distribution network' in water_data.loc[i, 'Elem flow name'] or
+                                            'RER w/o AT+BE+CH+DE+FR+IT' in water_data.loc[i, 'Elem flow name'] or
+                                            'RER w/o CH+DE' in water_data.loc[i, 'Elem flow name'] or
+                                            'RER w/o DE+NL+NO' in water_data.loc[i, 'Elem flow name'] or
+                                            'RER w/o DE+NL+NO+RU' in water_data.loc[i, 'Elem flow name'] or
+                                            'RER w/o DE+NL+RU' in water_data.loc[i, 'Elem flow name'] or
+                                            'RER w/o RU' in water_data.loc[i, 'Elem flow name'] or
+                                            'Russia (Asia)' in water_data.loc[i, 'Elem flow name'] or
+                                            'Russia (Europe)' in water_data.loc[i, 'Elem flow name'] or
+                                            'SAS' in water_data.loc[i, 'Elem flow name'] or
+                                            'Siachen Glacier' in water_data.loc[i, 'Elem flow name'] or
+                                            'Somaliland' in water_data.loc[i, 'Elem flow name'] or
+                                            'UCTE' in water_data.loc[i, 'Elem flow name'] or
+                                            'UCTE without France' in water_data.loc[i, 'Elem flow name'] or
+                                            'UCTE without Germany' in water_data.loc[i, 'Elem flow name'] or
+                                            'UCTE without Germany and France' in water_data.loc[i, 'Elem flow name'] or
+                                            'UN-AMERICAS' in water_data.loc[i, 'Elem flow name'] or
+                                            'UN-ASIA' in water_data.loc[i, 'Elem flow name'] or
+                                            'UN-AUSTRALIANZ' in water_data.loc[i, 'Elem flow name'] or
+                                            'UN-CAMERICA' in water_data.loc[i, 'Elem flow name'] or
+                                            'UN-CARIBBEAN' in water_data.loc[i, 'Elem flow name'] or
+                                            'UN-EAFRICA' in water_data.loc[i, 'Elem flow name'] or
+                                            'UN-EASIA' in water_data.loc[i, 'Elem flow name'] or
+                                            'UN-EEUROPE' in water_data.loc[i, 'Elem flow name'] or
+                                            'UN-EUROPE' in water_data.loc[i, 'Elem flow name'] or
+                                            'UN-MAFRICA' in water_data.loc[i, 'Elem flow name'] or
+                                            'UN-MELANESIA' in water_data.loc[i, 'Elem flow name'] or
+                                            'UN-MICRONESIA' in water_data.loc[i, 'Elem flow name'] or
+                                            'UN-NAFRICA' in water_data.loc[i, 'Elem flow name'] or
+                                            'UN-NEUROPE' in water_data.loc[i, 'Elem flow name'] or
+                                            'UN-OCEANIA' in water_data.loc[i, 'Elem flow name'] or
+                                            'UN-POLYNESIA' in water_data.loc[i, 'Elem flow name'] or
+                                            'UN-SAMERICA' in water_data.loc[i, 'Elem flow name'] or
+                                            'UN-SASIA' in water_data.loc[i, 'Elem flow name'] or
+                                            'UN-SEASIA' in water_data.loc[i, 'Elem flow name'] or
+                                            'UN-SEUROPE' in water_data.loc[i, 'Elem flow name'] or
+                                            'UN-WAFRICA' in water_data.loc[i, 'Elem flow name'] or
+                                            'UN-WASIA' in water_data.loc[i, 'Elem flow name'] or
+                                            'United States of America, including overseas territories' in water_data.loc[i, 'Elem flow name'] or
+                                            'WECC' in water_data.loc[i, 'Elem flow name'] or
+                                            'WEU' in water_data.loc[i, 'Elem flow name'])],
+                         'Native geographical resolution scale'] = 'Other region'
 
-        cfs.loc[[i for i in cfs.index if 'GLO' in cfs.loc[i, 'Elem flow name']],
-                'Native geographical resolution scale'] = 'Global'
-        cfs.loc[[i for i in cfs.index if 'RoW' in cfs.loc[i, 'Elem flow name']],
-                'Native geographical resolution scale'] = 'Other region'
-
-        cfs.loc[[i for i in cfs.index if 'shallow' in cfs.loc[i, 'Elem flow name']], 'CF value'] = (
-            original_cfs.loc[[i for i in original_cfs.index if
-                              'shallow' in original_cfs.loc[i, 'Elem flow name']], 'CF value'].iloc[0]
-        )
-
-        cfs.loc[[i for i in cfs.index if 'shallow' not in cfs.loc[i, 'Elem flow name']], 'CF value'] = (
-            original_cfs.loc[[i for i in original_cfs.index if
-                              'shallow' not in original_cfs.loc[i, 'Elem flow name']], 'CF value'].iloc[0]
-        )
-
-        self.master_db = pd.concat([self.master_db, cfs])
+        self.master_db = pd.concat([self.master_db, water_data])
         self.master_db = clean_up_dataframe(self.master_db)
 
     def load_thermally_polluted_water_cfs(self):
@@ -3297,24 +3654,134 @@ class Parse:
         :return: update master_db
         """
 
-        db = pd.read_sql('SELECT * FROM "CF - not regionalized - ThermallyPollutedWater"', self.conn)
-        geos = pd.read_sql(sql='SELECT * FROM [SI - mapping with regions of ecoinvent]', con=self.conn).loc[
-               :, 'Ecoinvent_short_name'].tolist()
-        geos += ['GLO', 'RoW']
+        data = pd.read_sql('SELECT * FROM "CF - not regionalized - ThermallyPollutedWater"', self.conn)
+        conc = pd.read_sql('SELECT * FROM "SI - Mapping with regions of ecoinvent"', self.conn).set_index(
+            'AWARE').Ecoinvent_short_name
+        geos = pd.read_sql(sql='SELECT * FROM [CF - regionalized - WaterScarcity - aggregated]', con=self.conn).loc[
+               :, 'ecoinvent_shortname'].tolist()
 
-        df = db.loc[0].copy('deep')
+        CF_value = data.loc[:, 'CF value'].iloc[0]
+        # create the regionalized names (e.g., Water, AF)
+        water_data = pd.DataFrame()
         for i, geo in enumerate(geos):
-            db.loc[i + 1] = df
-            db.loc[i + 1, 'Elem flow name'] = db.loc[0, 'Elem flow name'] + ', ' + geo
-            if geo == 'GLO':
-                db.loc[i + 1, 'Native geographical resolution scale'] = 'Global'
-            elif geo == 'RoW':
-                db.loc[i + 1, 'Native geographical resolution scale'] = 'Other region'
+            if geo in conc.index:
+                if type(conc.loc[geo]) == str:
+                    water_data.loc[i, 'Elem flow name'] = 'Water, cooling, unspecified natural origin, ' + conc.loc[geo]
+                    water_data.loc[i, 'CF value'] = CF_value
+                else:
+                    for j in range(0, len(conc.loc[geo])):
+                        water_data.loc[str(i + j), 'Elem flow name'] = 'Water, cooling, unspecified natural origin, ' + conc.loc[geo].iloc[j]
+                        water_data.loc[str(i + j), 'CF value'] = CF_value
             else:
-                db.loc[i + 1, 'Native geographical resolution scale'] = 'Country'
-        db = db.drop(0)
+                water_data.loc[i, 'Elem flow name'] = 'Water, cooling, unspecified natural origin, ' + geo
+                water_data.loc[i, 'CF value'] = CF_value
 
-        self.master_db = pd.concat([self.master_db, db])
+        # formatting the data to IW+ format
+        water_data.loc[:, 'Impact category'] = 'Thermally polluted water'
+        water_data.loc[:, 'CF unit'] = 'PDF.m2.yr'
+        water_data.loc[:, 'Compartment'] = 'Raw'
+        water_data.loc[:, 'Sub-compartment'] = '(unspecified)'
+        water_data.loc[:, 'CAS number'] = '7732-18-5'
+        water_data.loc[:, 'Elem flow unit'] = 'm3'
+        water_data.loc[:, 'MP or Damage'] = 'Damage'
+        water_data.loc[:, 'Native geographical resolution scale'] = 'Country'
+        water_data.loc[:, 'CF value'] = water_data.loc[:, 'CF value'].astype(float)
+
+        water_data.loc[[i for i in water_data.index if ('RER' in water_data.loc[i, 'Elem flow name'] or
+                                            'RAS' in water_data.loc[i, 'Elem flow name'] or
+                                            'RAF' in water_data.loc[i, 'Elem flow name'] or
+                                            'RLA' in water_data.loc[i, 'Elem flow name'] or
+                                            'OCE' in water_data.loc[i, 'Elem flow name'] or
+                                            'RNA' in water_data.loc[i, 'Elem flow name'])],
+                         'Native geographical resolution scale'] = 'Continent'
+        water_data.loc[[i for i in water_data.index if 'GLO' in water_data.loc[i, 'Elem flow name']],
+                         'Native geographical resolution scale'] = 'Global'
+        water_data.loc[[i for i in water_data.index if ('RoW' in water_data.loc[i, 'Elem flow name'] or
+                                            'Akrotiri' in water_data.loc[i, 'Elem flow name'] or
+                                            'Asia without China' in water_data.loc[i, 'Elem flow name'] or
+                                            'Australia, including overseas territories' in water_data.loc[i, 'Elem flow name'] or
+                                            'BALTSO' in water_data.loc[i, 'Elem flow name'] or
+                                            'CENTREL' in water_data.loc[i, 'Elem flow name'] or
+                                            'CUSMA/T-MEC/USMCA' in water_data.loc[i, 'Elem flow name'] or
+                                            'Canada without Alberta' in water_data.loc[i, 'Elem flow name'] or
+                                            'Canada without Alberta and Quebec' in water_data.loc[i, 'Elem flow name'] or
+                                            'Canada without Quebec' in water_data.loc[i, 'Elem flow name'] or
+                                            'Canary Islands' in water_data.loc[i, 'Elem flow name'] or
+                                            'Central Asia' in water_data.loc[i, 'Elem flow name'] or
+                                            'China w/o Inner Mongol' in water_data.loc[i, 'Elem flow name'] or
+                                            'Crimea' in water_data.loc[i, 'Elem flow name'] or
+                                            'Cyprus No Mans Area' in water_data.loc[i, 'Elem flow name'] or
+                                            'Dhekelia Base' in water_data.loc[i, 'Elem flow name'] or
+                                            'ENTSO-E' in water_data.loc[i, 'Elem flow name'] or
+                                            'Europe without Austria' in water_data.loc[i, 'Elem flow name'] or
+                                            'Europe without NORDEL (NCPA)' in water_data.loc[i, 'Elem flow name'] or
+                                            'Europe without Switzerland' in water_data.loc[i, 'Elem flow name'] or
+                                            'Europe without Switzerland and Austria' in water_data.loc[i, 'Elem flow name'] or
+                                            'Europe without Switzerland and France' in water_data.loc[i, 'Elem flow name'] or
+                                            'Europe, without Russia and Türkiye' in water_data.loc[i, 'Elem flow name'] or
+                                            'FSU' in water_data.loc[i, 'Elem flow name'] or
+                                            'France, including overseas territories' in water_data.loc[i, 'Elem flow name'] or
+                                            'Guantanamo Bay' in water_data.loc[i, 'Elem flow name'] or
+                                            'IAI Area, Africa' in water_data.loc[i, 'Elem flow name'] or
+                                            'IAI Area, Asia, without China and GCC' in water_data.loc[i, 'Elem flow name'] or
+                                            'IAI Area, EU27 & EFTA' in water_data.loc[i, 'Elem flow name'] or
+                                            'IAI Area, Gulf Cooperation Council' in water_data.loc[i, 'Elem flow name'] or
+                                            'IAI Area, North America' in water_data.loc[i, 'Elem flow name'] or
+                                            'IAI Area, North America, without Quebec' in water_data.loc[i, 'Elem flow name'] or
+                                            'IAI Area, Russia & RER w/o EU27 & EFTA' in water_data.loc[i, 'Elem flow name'] or
+                                            'IAI Area, South America' in water_data.loc[i, 'Elem flow name'] or
+                                            'IN-Islands' in water_data.loc[i, 'Elem flow name'] or
+                                            'MRO' in water_data.loc[i, 'Elem flow name'] or
+                                            'NAFTA' in water_data.loc[i, 'Elem flow name'] or
+                                            'NORDEL' in water_data.loc[i, 'Elem flow name'] or
+                                            'NPCC' in water_data.loc[i, 'Elem flow name'] or
+                                            'North America without Quebec' in water_data.loc[i, 'Elem flow name'] or
+                                            'Northern Cyprus' in water_data.loc[i, 'Elem flow name'] or
+                                            'Québec, HQ distribution network' in water_data.loc[i, 'Elem flow name'] or
+                                            'RER w/o AT+BE+CH+DE+FR+IT' in water_data.loc[i, 'Elem flow name'] or
+                                            'RER w/o CH+DE' in water_data.loc[i, 'Elem flow name'] or
+                                            'RER w/o DE+NL+NO' in water_data.loc[i, 'Elem flow name'] or
+                                            'RER w/o DE+NL+NO+RU' in water_data.loc[i, 'Elem flow name'] or
+                                            'RER w/o DE+NL+RU' in water_data.loc[i, 'Elem flow name'] or
+                                            'RER w/o RU' in water_data.loc[i, 'Elem flow name'] or
+                                            'Russia (Asia)' in water_data.loc[i, 'Elem flow name'] or
+                                            'Russia (Europe)' in water_data.loc[i, 'Elem flow name'] or
+                                            'SAS' in water_data.loc[i, 'Elem flow name'] or
+                                            'Siachen Glacier' in water_data.loc[i, 'Elem flow name'] or
+                                            'Somaliland' in water_data.loc[i, 'Elem flow name'] or
+                                            'UCTE' in water_data.loc[i, 'Elem flow name'] or
+                                            'UCTE without France' in water_data.loc[i, 'Elem flow name'] or
+                                            'UCTE without Germany' in water_data.loc[i, 'Elem flow name'] or
+                                            'UCTE without Germany and France' in water_data.loc[i, 'Elem flow name'] or
+                                            'UN-AMERICAS' in water_data.loc[i, 'Elem flow name'] or
+                                            'UN-ASIA' in water_data.loc[i, 'Elem flow name'] or
+                                            'UN-AUSTRALIANZ' in water_data.loc[i, 'Elem flow name'] or
+                                            'UN-CAMERICA' in water_data.loc[i, 'Elem flow name'] or
+                                            'UN-CARIBBEAN' in water_data.loc[i, 'Elem flow name'] or
+                                            'UN-EAFRICA' in water_data.loc[i, 'Elem flow name'] or
+                                            'UN-EASIA' in water_data.loc[i, 'Elem flow name'] or
+                                            'UN-EEUROPE' in water_data.loc[i, 'Elem flow name'] or
+                                            'UN-EUROPE' in water_data.loc[i, 'Elem flow name'] or
+                                            'UN-MAFRICA' in water_data.loc[i, 'Elem flow name'] or
+                                            'UN-MELANESIA' in water_data.loc[i, 'Elem flow name'] or
+                                            'UN-MICRONESIA' in water_data.loc[i, 'Elem flow name'] or
+                                            'UN-NAFRICA' in water_data.loc[i, 'Elem flow name'] or
+                                            'UN-NEUROPE' in water_data.loc[i, 'Elem flow name'] or
+                                            'UN-OCEANIA' in water_data.loc[i, 'Elem flow name'] or
+                                            'UN-POLYNESIA' in water_data.loc[i, 'Elem flow name'] or
+                                            'UN-SAMERICA' in water_data.loc[i, 'Elem flow name'] or
+                                            'UN-SASIA' in water_data.loc[i, 'Elem flow name'] or
+                                            'UN-SEASIA' in water_data.loc[i, 'Elem flow name'] or
+                                            'UN-SEUROPE' in water_data.loc[i, 'Elem flow name'] or
+                                            'UN-WAFRICA' in water_data.loc[i, 'Elem flow name'] or
+                                            'UN-WASIA' in water_data.loc[i, 'Elem flow name'] or
+                                            'United States of America, including overseas territories' in water_data.loc[i, 'Elem flow name'] or
+                                            'WECC' in water_data.loc[i, 'Elem flow name'] or
+                                            'WEU' in water_data.loc[i, 'Elem flow name'])],
+                         'Native geographical resolution scale'] = 'Other region'
+
+        # concat with master_db
+        self.master_db = pd.concat([self.master_db, water_data])
         self.master_db = clean_up_dataframe(self.master_db)
 
     def load_plastic_cfs(self):
@@ -3482,7 +3949,7 @@ class Parse:
         data.loc[:, 'CF value'] = cfs.loc[:, 'CF (PDF.m2.yr)']
 
         data = pd.concat([data, pd.concat(
-            [pd.DataFrame([i[1] + ' fish , FAO zone ' + i[0] for i in cf_regions.index], columns=['Elem flow name']),
+            [pd.DataFrame([i[1] + ' fish, FAO zone ' + i[0] for i in cf_regions.index], columns=['Elem flow name']),
              pd.DataFrame(cf_regions.loc[:, 'CF (PDF.m2.yr)'].values, columns=['CF value'])], axis=1)])
 
         data = pd.concat(
@@ -3779,14 +4246,6 @@ class Parse:
             # clean up index
             self.master_db = clean_up_dataframe(self.master_db)
 
-        # -------------- Shallow groundwater ----------------
-
-        # water availability terrestrial ecosystem introduces a new water flow type: "water, shallow well, in ground"
-        # its impact for all other water impact categories should be a copy of the typical groundwater CF
-
-
-
-
         # ----------------- Special cases --------------------
 
         # special case from/to soil or biomass flows should only be defined for short term damage categories so
@@ -3832,45 +4291,45 @@ class Parse:
         :return:
         """
 
-        # identify regionalized flows, regions and impact categories
+        regio_flows_per_ic = {}
 
-        regio_flows = set([', '.join(i.split(', ')[:-1]) for i in
-                           self.master_db[self.master_db['Native geographical resolution scale'] == 'Country'].loc[
-                           :, 'Elem flow name']])
-
-        regio_regions = set(
-            [i.split(', ')[-1] for i in self.master_db[self.master_db['Native geographical resolution scale'] ==
-                                                       'Country'].loc[:, 'Elem flow name']])
-
-        regio_ic = set(self.master_db[self.master_db['Native geographical resolution scale'] ==
-                                      'Country'].loc[:, 'Impact category'])
-
-        # identify which regionalized flows need to be characterized for non-regionalized impact categories
+        for ic in set(self.master_db.loc[:, 'Impact category']):
+            df = self.master_db[self.master_db['Impact category'] == ic].copy()
+            regio_flows_per_ic[ic] = set([', '.join(i.split(', ')[:-1]) for i in df['Elem flow name'] if ', FR' in i])
 
         flows_to_create = {}
 
         for ic in set(self.master_db.loc[:, 'Impact category']):
-            if ic not in regio_ic:
-                df = self.master_db[self.master_db['Impact category'] == ic].copy()
-                for flow in regio_flows:
-                    if flow in df['Elem flow name'].tolist():
-                        # if the CF is equal to zero we don't care
-                        if df.loc[[i for i in df.index if (df.loc[i, 'Elem flow name'] == flow and
-                                                           df.loc[i, 'Impact category'] == ic)], 'CF value'].sum() != 0:
-                            if ic in flows_to_create.keys():
-                                flows_to_create[ic].append(flow)
-                            else:
-                                flows_to_create[ic] = [flow]
+            df = self.master_db[self.master_db['Impact category'] == ic].copy()
+            for flow in set.union(*[set(i) for i in list(regio_flows_per_ic.values())]):
+                if flow in df['Elem flow name'].tolist():
+                    # if the CF is equal to zero we don't care
+                    if df.loc[[i for i in df.index if (df.loc[i, 'Elem flow name'] == flow and
+                                                       df.loc[i, 'Impact category'] == ic)], 'CF value'].sum() != 0:
+                        if ic in flows_to_create.keys():
+                            flows_to_create[ic].append(flow)
+                        else:
+                            flows_to_create[ic] = [flow]
 
-        # create CF for the previously identified flows
+        flows_to_create = {k: set(v) for k, v in flows_to_create.items()}
 
         for ic in flows_to_create.keys():
-            df = self.master_db[self.master_db['Impact category'] == ic].copy()
-            for flow in flows_to_create[ic]:
-                dff = df[df['Elem flow name'] == flow]
-                list_flow_added = ([flow + ', ' + i for i in regio_regions] * len(dff))
+            flows_to_create[ic] = flows_to_create[ic] - regio_flows_per_ic[ic]
+
+        flows_to_create = {k: v for k, v in flows_to_create.items() if v != set()}
+
+        for substance in set.union(*[set(i) for i in list(flows_to_create.values())]):
+            df = self.master_db.loc[
+                self.master_db[self.master_db['Elem flow name'].str.contains(substance, na=False)].index.tolist()]
+            df = df[df.loc[:, 'Native geographical resolution scale'] == 'Country']
+            regions = set([i.split(substance + ', ')[-1] for i in df.loc[:, 'Elem flow name'] if substance + ', ' in i])
+            ic_flows_to_create = {k for k, v in flows_to_create.items() if substance in v}
+            for ic in ic_flows_to_create:
+                dff = self.master_db.loc[self.master_db.loc[:, 'Elem flow name'] == substance].loc[
+                    self.master_db.loc[:, 'Impact category'] == ic].copy()
+                list_flow_added = ([substance + ', ' + i for i in regions] * len(dff))
                 list_flow_added.sort()
-                dff = pd.concat([dff] * (len(regio_regions)))
+                dff = pd.concat([dff] * (len(regions)))
                 dff['Elem flow name'] = list_flow_added
                 dff['Native geographical resolution scale'] = 'Country'
 
@@ -4152,10 +4611,7 @@ class Parse:
         self.iw_sp = self.master_db.copy()
 
         # need to change the unit of land occupation flows to match SP nomenclature
-        self.iw_sp.loc[[i for i in self.iw_sp.index if self.iw_sp.loc[i, 'Elem flow unit'] == 'm2.yr'], 'Elem flow unit'] = 'm2a'
-
-        # SP does not like the "remote" subcomp of IW+ for particulate matter
-        self.iw_sp.drop([i for i in self.iw_sp.index if self.iw_sp.loc[i, 'Sub-compartment'] == 'remote'], inplace=True)
+        self.iw_sp.loc[self.iw_sp.loc[:, 'Elem flow unit'] == 'm2.yr', 'Elem flow unit'] = 'm2a'
 
         # Some water names are reserved names in SimaPro, so we modify it
         self.iw_sp.loc[self.iw_sp['Elem flow name'] == 'Water', 'Elem flow name'] = 'Water/m3'
@@ -4163,63 +4619,87 @@ class Parse:
         self.iw_sp.loc[self.iw_sp['Elem flow name'] == 'Water, non-agri', 'Elem flow name'] = 'Water/m3, non-agri'
 
         # now apply the mapping with the different SP flow names
-        sp = pd.read_excel(pkg_resources.resource_filename(__name__, '/Data/mappings/SP/sp_mapping.xlsx'), None)
-        sp = pd.concat([sp['Non regionalized'], sp['Regions existing in SP'], sp['Regions only in IW+']]).dropna()
-        sp = clean_up_dataframe(sp)
-        differences = sp.loc[[i for i in sp.index if sp.loc[i, 'SimaPro flows'] != sp.loc[i, 'IW+ flows']]]
+        sp = pd.read_excel(pkg_resources.resource_filename(__name__, '/Data/mappings/SP/new_mapping.xlsx'), None)
+        sp = clean_up_dataframe(pd.concat([sp['Non regionalized'], sp['Regionalized']]))
+        sp = sp.drop('Unnamed: 0', axis=1).loc[:, ['Name', 'Name IW+']].dropna()
+        differences = sp.loc[sp.Name != sp.loc[:, 'Name IW+']].set_index('Name IW+')
+        double_iw_flow = sp.loc[sp.loc[:, 'Name IW+'].duplicated(), 'Name IW+']
+        sp = sp.set_index('Name IW+')
+
         for diff in differences.index:
-            if '%' not in sp.loc[diff, 'SimaPro flows']:
-                df = self.iw_sp.loc[self.iw_sp.loc[:, 'Elem flow name'] == sp.loc[diff, 'IW+ flows']].copy()
-                df.loc[:, 'Elem flow name'] = sp.loc[diff, 'SimaPro flows']
-                self.iw_sp = pd.concat([self.iw_sp, df])
-            # special case for minerals in ground, need to only apply their CFs to the Mineral resources use category
-            else:
-                df = self.iw_sp.loc[self.iw_sp.loc[:, 'Elem flow name'] == sp.loc[diff, 'IW+ flows']].copy()
-                df = df[df['Impact category'] == 'Mineral resources use']
-                df.loc[:, 'Elem flow name'] = sp.loc[diff, 'SimaPro flows']
-                self.iw_sp = pd.concat([self.iw_sp, df])
-        self.iw_sp = clean_up_dataframe(self.iw_sp)
+            if diff in list(self.iw_sp.loc[:, 'Elem flow name']):
+                if diff not in list(double_iw_flow):
+                    # just rename
+                    self.iw_sp.loc[self.iw_sp.loc[:, 'Elem flow name'] == diff, 'Elem flow name'] = differences.loc[
+                        diff, 'Name']
+                else:
+                    # here we cannot just replace because otherwise we lose one SP flow
+                    # also we do not look into differences also because one of the doubles could be one that is not different from IW+
+                    for i in range(len(sp.loc[diff, 'Name'])):
+                        # we concat over the df except for the last element where we directly replace within the df
+                        if i == len(sp.loc[diff, 'Name']):
+                            self.iw_sp.loc[self.iw_sp.loc[:, 'Elem flow name'] == diff, 'Elem flow name'] = \
+                            sp.loc[diff, 'Name'].iloc[i]
+                        else:
+                            df = self.iw_sp.loc[self.iw_sp.loc[:, 'Elem flow name'] == diff].copy()
+                            df.loc[:, 'Elem flow name'] = sp.loc[diff, 'Name'].iloc[i]
+                            self.iw_sp = clean_up_dataframe(pd.concat([self.iw_sp, df]))
 
         # need an unspecified subcomp for mineral resource uses, for some databases in SP (e.g., Industry2.0)
         df = self.iw_sp.loc[
             [i for i in self.iw_sp.index if self.iw_sp.loc[i, 'Impact category'] == 'Mineral resources use']].copy()
         df['Sub-compartment'] = '(unspecified)'
-        self.iw_sp = pd.concat([self.iw_sp, df])
-        self.iw_sp = clean_up_dataframe(self.iw_sp)
+        self.iw_sp = clean_up_dataframe(pd.concat([self.iw_sp, df]))
 
-        # add some flows from SP that require conversions because of units
-        new_flows = sp.loc[[i for i in sp.index if 'MJ' in sp.loc[i, 'SimaPro flows']], 'SimaPro flows'].values.tolist()
-        for new_flow in new_flows:
-            if 'Wood' not in new_flow:
+        # flows from SP that require conversions because of units
+        mj_flows = sp.loc[[i for i in sp.index if 'MJ' in sp.loc[i, 'Name']], 'Name']
+        for flow in mj_flows:
+            if 'per kg' in flow:
                 to_add = pd.DataFrame(['Fossil and nuclear energy use',
                                        'MJ deprived',
                                        'Raw',
                                        'in ground',
-                                       new_flow,
+                                       flow,
                                        '',
-                                       new_flow.split(' MJ')[0].split(', ')[-1],
+                                       float(flow.split(' MJ')[0].split(', ')[-1]),
                                        'kg',
                                        'Midpoint',
                                        'Global'], index=self.iw_sp.columns)
                 self.iw_sp = pd.concat([self.iw_sp, to_add.T], axis=0)
-                # same with other subcomp
+            elif 'per m3' in flow:
                 to_add = pd.DataFrame(['Fossil and nuclear energy use',
                                        'MJ deprived',
                                        'Raw',
-                                       '(unspecified)',
-                                       new_flow,
+                                       'in ground',
+                                       flow,
                                        '',
-                                       new_flow.split(' MJ')[0].split(', ')[-1],
-                                       'kg',
+                                       float(flow.split(' MJ')[0].split(', ')[-1]),
+                                       'm3',
                                        'Midpoint',
                                        'Global'], index=self.iw_sp.columns)
                 self.iw_sp = pd.concat([self.iw_sp, to_add.T], axis=0)
         self.iw_sp = clean_up_dataframe(self.iw_sp)
+        gj_flows = sp.loc[[i for i in sp.index if 'GJ per kg' in sp.loc[i, 'Name']], 'Name']
+        for flow in gj_flows:
+            to_add = pd.DataFrame(['Fossil and nuclear energy use',
+                                   'MJ deprived',
+                                   'Raw',
+                                   'in ground',
+                                   flow,
+                                   '',
+                                   float(flow.split(' GJ per kg')[0].split(', ')[-1]),
+                                   'kg',
+                                   'Midpoint',
+                                   'Global'], index=self.iw_sp.columns)
+            self.iw_sp = pd.concat([self.iw_sp, to_add.T], axis=0)
+        self.iw_sp = clean_up_dataframe(self.iw_sp)
+
         # some other flows from SP that require conversions because of units
         new_flows = {
             'Gas, natural/kg': 'Gas, natural/m3',
             'Gas, mine, off-gas, process, coal mining/kg': 'Gas, mine, off-gas, process, coal mining/m3',
-            'Wood, unspecified, standing/kg': 'Wood, unspecified, standing/m3'
+            'Wood, unspecified, standing/kg': 'Wood, unspecified, standing/m3',
+            'Wood (16.9 MJ/kg)': 'Wood, unspecified, standing/m3'
         }
         for flow in new_flows:
             if 'Gas' in flow:
@@ -4235,7 +4715,7 @@ class Parse:
         self.iw_sp = clean_up_dataframe(self.iw_sp)
 
         # some water flows are in kilograms instead of cubic meters...
-        problems = ['Water/kg',
+        problems = ['Water',
                     'Water, barrage',
                     'Water, cooling, drinking',
                     'Water, cooling, salt, ocean',
@@ -4259,6 +4739,7 @@ class Parse:
 
         for problem_child in problems:
             self.iw_sp.loc[self.iw_sp['Elem flow name'] == problem_child, 'Elem flow unit'] = 'kg'
+            self.iw_sp.loc[self.iw_sp['Elem flow name'] == problem_child, 'CF value'] /= 1000
 
     def link_to_olca(self):
         """
