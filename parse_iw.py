@@ -184,6 +184,9 @@ class Parse:
         self.logger.info("Loading fisheries impact characterization factors...")
         self.load_fisheries_cfs()
 
+        self.logger.info("Harmonizing regionalized substances across indicators...")
+        self.harmonize_regionalized_substances()
+
         self.logger.info("Applying rules...")
         self.apply_rules()
 
@@ -193,22 +196,22 @@ class Parse:
         self.order_things_around()
         self.separate_regio_cfs()
 
-        # self.logger.info("Linking to ecoinvent elementary flows...")
-        # self.link_to_ecoinvent()
+        self.logger.info("Linking to ecoinvent elementary flows...")
+        self.link_to_ecoinvent()
 
-        # self.logger.info("Linking to SimaPro elementary flows...")
-        # self.link_to_sp()
-        #
-        # self.logger.info("Linking to openLCA elementary flows...")
-        # self.link_to_olca()
-        #
-        # self.logger.info("Linking to exiobase environmental extensions...")
-        # self.link_to_exiobase()
-        #
-        # self.logger.info("Prepare the footprint version...")
-        # self.get_simplified_versions()
-        #
-        # self.get_total_hh_and_eq()
+        self.logger.info("Linking to SimaPro elementary flows...")
+        self.link_to_sp()
+
+        self.logger.info("Linking to openLCA elementary flows...")
+        self.link_to_olca()
+
+        self.logger.info("Linking to exiobase environmental extensions...")
+        self.link_to_exiobase()
+
+        self.logger.info("Prepare the footprint version...")
+        self.get_simplified_versions()
+
+        self.get_total_hh_and_eq()
 
     def export_to_bw2(self, ei_flows_version=None):
         """
@@ -2583,6 +2586,20 @@ class Parse:
         land_cfs = land_cfs.drop(['level_0', 'level_1'], axis=1)
         land_cfs = land_cfs.rename(columns={0: 'CF value'})
 
+        # assign global default value to zero values (except for "not used" land type)
+        for indicator in ['Occupation, ', 'Transformation, from ', 'Transformation, to ']:
+            for land_type in ['secondary vegetation', 'forest, used', 'pasture/meadow', 'annual crops',
+                              'permanent crops',
+                              'agriculture, mosaic (agroforestry)', 'artificial areas', 'unspecified']:
+                for level in ['Midpoint', 'Damage']:
+                    to_adapt_to_global_default = (land_cfs.loc[land_cfs.loc[:, 'CF value'] == 0].loc[
+                                                      land_cfs.loc[:, 'MP or Damage'] == level].loc[
+                                                      land_cfs.loc[:, 'Elem flow name'].str.contains(
+                                                          indicator + land_type.split('(')[0])].index)
+                    land_cfs.loc[to_adapt_to_global_default, 'CF value'] = (
+                        land_cfs.loc[land_cfs.loc[:, 'MP or Damage'] == level].loc[
+                        land_cfs.loc[:, 'Elem flow name'] == indicator + land_type + ', GLO', 'CF value'].iloc[0])
+
         # concat with master_db
         self.master_db = pd.concat([self.master_db, land_cfs])
         self.master_db = clean_up_dataframe(self.master_db)
@@ -2702,6 +2719,11 @@ class Parse:
                                          data.loc[:, 'iF rural'] * data.loc[:, 'Population rural'] / (
                                                      data.loc[:, 'Population urban'] + data.loc[:, 'Population rural']))
 
+        # add ISO 2-letter codes to countries
+        coco_logger = coco.logging.getLogger()
+        coco_logger.setLevel(coco.logging.CRITICAL)
+        data.loc[:, 'Country_code'] = coco.convert(data.Country, to='ISO2')
+
         # ------------------------------------------ PM 2.5 -----------------------------------------------------
         particulate_damage = pd.Series(dtype=float)
 
@@ -2745,6 +2767,23 @@ class Parse:
                                                 pd.Series(data.loc[data.loc[:, 'Continent'] == conc.loc[
                                                     region], 'CF unspecified'].iloc[0], index=[
                                                     ('Particulates, < 2.5 um, ' + region, '(unspecified)')])])
+
+        # add other regions (e.g., Andorra)
+        for region in data.Country_code:
+            if region not in conc.index and region != 'not found':
+                particulate_damage = pd.concat([particulate_damage,
+                                                pd.Series(
+                                                    data.loc[data.loc[:, 'Country_code'] == region, 'CF urban'].iloc[0],
+                                                    index=[('Particulates, < 2.5 um, ' + region, 'high. pop.')])])
+                particulate_damage = pd.concat([particulate_damage,
+                                                pd.Series(
+                                                    data.loc[data.loc[:, 'Country_code'] == region, 'CF rural'].iloc[0],
+                                                    index=[('Particulates, < 2.5 um, ' + region, 'low. pop.')])])
+                particulate_damage = pd.concat([particulate_damage,
+                                                pd.Series(data.loc[data.loc[:,
+                                                                   'Country_code'] == region, 'CF unspecified'].iloc[0],
+                                                          index=[
+                                                              ('Particulates, < 2.5 um, ' + region, '(unspecified)')])])
 
         # add GLO and RoW values
         particulate_damage = pd.concat([particulate_damage,
@@ -2825,6 +2864,19 @@ class Parse:
                         so2.loc[flow, 'CF value'] = (so2.loc[flow, 'CF value'] /
                                                      data.loc[data.Continent == conc[region], 'iF unspecified'].iloc[
                                                          0] * secondary_pm_if.loc['SO2', 'unspecified'])
+            elif region in data.Country_code:
+                if so2.loc[flow, 'Sub-compartment'] == 'high. pop.':
+                    so2.loc[flow, 'CF value'] = (
+                                so2.loc[flow, 'CF value'] / data.loc[data.Country_code == region, 'iF urban'].iloc[0] *
+                                secondary_pm_if.loc['SO2', 'urban'])
+                elif so2.loc[flow, 'Sub-compartment'] == 'low. pop.':
+                    so2.loc[flow, 'CF value'] = (
+                                so2.loc[flow, 'CF value'] / data.loc[data.Country_code == region, 'iF rural'].iloc[0] *
+                                secondary_pm_if.loc['SO2', 'rural'])
+                elif so2.loc[flow, 'Sub-compartment'] == '(unspecified)':
+                    so2.loc[flow, 'CF value'] = (so2.loc[flow, 'CF value'] /
+                                                 data.loc[data.Country_code == region, 'iF unspecified'].iloc[0] *
+                                                 secondary_pm_if.loc['SO2', 'unspecified'])
             else:
                 # for RoW and GLO
                 if so2.loc[flow, 'Sub-compartment'] == 'high. pop.':
@@ -2874,6 +2926,19 @@ class Parse:
                         nh3.loc[flow, 'CF value'] = (nh3.loc[flow, 'CF value'] /
                                                      data.loc[data.Continent == conc[region], 'iF unspecified'].iloc[
                                                          0] * secondary_pm_if.loc['NH3', 'unspecified'])
+            elif region in data.Country_code:
+                if nh3.loc[flow, 'Sub-compartment'] == 'high. pop.':
+                    nh3.loc[flow, 'CF value'] = (nh3.loc[flow, 'CF value'] /
+                                                 data.loc[data.Country_code == region, 'iF urban'].iloc[0] *
+                                                 secondary_pm_if.loc['NH3', 'urban'])
+                elif nh3.loc[flow, 'Sub-compartment'] == 'low. pop.':
+                    nh3.loc[flow, 'CF value'] = (nh3.loc[flow, 'CF value'] /
+                                                 data.loc[data.Country_code == region, 'iF rural'].iloc[0] *
+                                                 secondary_pm_if.loc['NH3', 'rural'])
+                elif nh3.loc[flow, 'Sub-compartment'] == '(unspecified)':
+                    nh3.loc[flow, 'CF value'] = (nh3.loc[flow, 'CF value'] /
+                                                 data.loc[data.Country_code == region, 'iF unspecified'].iloc[
+                                                     0] * secondary_pm_if.loc['NH3', 'unspecified'])
             else:
                 # for RoW and GLO
                 if nh3.loc[flow, 'Sub-compartment'] == 'high. pop.':
@@ -2923,6 +2988,19 @@ class Parse:
                         nox.loc[flow, 'CF value'] = (nox.loc[flow, 'CF value'] /
                                                      data.loc[data.Continent == conc[region], 'iF unspecified'].iloc[
                                                          0] * secondary_pm_if.loc['NOx', 'unspecified'])
+            elif region in data.Country_code:
+                if nox.loc[flow, 'Sub-compartment'] == 'high. pop.':
+                    nox.loc[flow, 'CF value'] = (
+                                nox.loc[flow, 'CF value'] / data.loc[data.Country_code == region, 'iF urban'].iloc[0] *
+                                secondary_pm_if.loc['NOx', 'urban'])
+                elif nox.loc[flow, 'Sub-compartment'] == 'low. pop.':
+                    nox.loc[flow, 'CF value'] = (
+                                nox.loc[flow, 'CF value'] / data.loc[data.Country_code == region, 'iF rural'].iloc[0] *
+                                secondary_pm_if.loc['NOx', 'rural'])
+                elif nox.loc[flow, 'Sub-compartment'] == '(unspecified)':
+                    nox.loc[flow, 'CF value'] = (nox.loc[flow, 'CF value'] /
+                                                 data.loc[data.Country_code == region, 'iF unspecified'].iloc[0] *
+                                                 secondary_pm_if.loc['NOx', 'unspecified'])
             else:
                 # for RoW and GLO
                 if nox.loc[flow, 'Sub-compartment'] == 'high. pop.':
@@ -3983,6 +4061,56 @@ class Parse:
         self.master_db = pd.concat([self.master_db, data])
         self.master_db = clean_up_dataframe(self.master_db)
 
+    def harmonize_regionalized_substances(self):
+        """
+        Between different regionalized impact categories, the spatialization precision is not the same. One category
+        can define the region "AD" (Andorra) for Ammonia, while another does not provide a CF for AD. Not solving these
+        disparities means that when using Ammonia, AD, it is not characterized on all the indicators. So we identify
+        these problemes and assign the continental value to each (e.g., RER for AD)
+        :return: updated self.master_db
+        """
+
+        map = pd.read_sql('SELECT * FROM [SI - Mapping countries to continents]', self.conn).set_index('country')
+
+        for indicator in ['Particulate matter formation', 'Freshwater acidification', 'Terrestrial acidification',
+                          'Marine eutrophication']:
+            for substance in ['Ammonia', 'Nitrogen oxides', 'Sulfur dioxide']:
+                existing_geos = set(self.master_db.loc[self.master_db.loc[:, 'Impact category'] == indicator].loc[
+                                        self.master_db.loc[:, 'Elem flow name'].str.contains(
+                                            substance + ', '), 'Elem flow name'])
+                existing_geos = [i.split(substance + ', ')[1] for i in existing_geos]
+                if existing_geos:
+                    for country in map.index:
+                        if country not in existing_geos:
+                            df = self.master_db.loc[self.master_db.loc[:, 'Impact category'] == indicator].loc[
+                                self.master_db.loc[:, 'Elem flow name'] == substance + ', ' + map.loc[
+                                    country, 'continent']].copy('deep')
+                            df.loc[:, 'Elem flow name'] = substance + ', ' + country
+                            df.loc[:, 'Native geographical resolution scale'] = 'Country'
+                            self.master_db = clean_up_dataframe(pd.concat([self.master_db, df]))
+
+                    # specific cases
+                    if indicator == 'Particulate matter formation':
+                        df = self.master_db.loc[self.master_db.loc[:, 'Impact category'] == indicator].loc[
+                            self.master_db.loc[:, 'Elem flow name'] == substance + ', UN-OCEANIA'].copy('deep')
+                        df.loc[:, 'Elem flow name'] = substance + ', OCE'
+                        self.master_db = clean_up_dataframe(pd.concat([self.master_db, df]))
+
+                        df = self.master_db.loc[self.master_db.loc[:, 'Impact category'] == indicator].loc[
+                            self.master_db.loc[:, 'Elem flow name'] == substance + ', US-PR'].copy('deep')
+                        df.loc[:, 'Elem flow name'] = substance + ', PR'
+                        self.master_db = clean_up_dataframe(pd.concat([self.master_db, df]))
+                    else:
+                        df = self.master_db.loc[self.master_db.loc[:, 'Impact category'] == indicator].loc[
+                            self.master_db.loc[:, 'Elem flow name'] == substance + ', OCE'].copy('deep')
+                        df.loc[:, 'Elem flow name'] = substance + ', UN-OCEANIA'
+                        self.master_db = clean_up_dataframe(pd.concat([self.master_db, df]))
+
+                        df = self.master_db.loc[self.master_db.loc[:, 'Impact category'] == indicator].loc[
+                            self.master_db.loc[:, 'Elem flow name'] == substance + ', PR'].copy('deep')
+                        df.loc[:, 'Elem flow name'] = substance + ', US-PR'
+                        self.master_db = clean_up_dataframe(pd.concat([self.master_db, df]))
+
     def apply_rules(self):
         """
         Applying rules creating values for new sub compartments, for each substance.  The value is either equal to the
@@ -4321,7 +4449,7 @@ class Parse:
         for substance in set.union(*[set(i) for i in list(flows_to_create.values())]):
             df = self.master_db.loc[
                 self.master_db[self.master_db['Elem flow name'].str.contains(substance, na=False)].index.tolist()]
-            df = df[df.loc[:, 'Native geographical resolution scale'] == 'Country']
+            df = df[df.loc[:, 'Native geographical resolution scale'].isin(['Country', 'Continent', 'Other region'])]
             regions = set([i.split(substance + ', ')[-1] for i in df.loc[:, 'Elem flow name'] if substance + ', ' in i])
             ic_flows_to_create = {k for k, v in flows_to_create.items() if substance in v}
             for ic in ic_flows_to_create:
