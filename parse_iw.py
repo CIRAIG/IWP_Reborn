@@ -1237,7 +1237,7 @@ class Parse:
 
         self.master_db = pd.concat([pd.read_sql(sql='SELECT * FROM [CF - not regionalized - IonizingRadiations]',
                                                 con=self.conn),
-                                    pd.read_sql(sql='SELECT * FROM [CF - not regionalized - MarAcid]',
+                                    pd.read_sql(sql='SELECT * FROM [CF - not regionalized - MarineAcidification]',
                                                 con=self.conn),
                                     pd.read_sql(sql='SELECT * FROM [CF - not regionalized - FossilResources]',
                                                 con=self.conn),
@@ -1726,6 +1726,16 @@ class Parse:
         cfs = cfs.drop(['Elem flow', 'Region code'], axis=1)
         cfs = clean_up_dataframe(cfs)
 
+        # add value for RME (Middle East) based on RAS (Asia)
+        df = cfs.loc[cfs.loc[:, 'Elem flow name'].str.contains(', RAS')].copy()
+        df.loc[:, 'Elem flow name'] = [i.split(', RAS')[0] + ', RME' for i in df.loc[:, 'Elem flow name']]
+        cfs = clean_up_dataframe(pd.concat([cfs, df]))
+        # add RoW based on GLO
+        df = cfs.loc[cfs.loc[:, 'Elem flow name'].str.contains(', GLO')].copy()
+        df.loc[:, 'Elem flow name'] = [i.split(', GLO')[0] + ', RoW' for i in df.loc[:, 'Elem flow name']]
+        df.loc[:, 'Native geographical resolution scale'] = 'Other region'
+        cfs = clean_up_dataframe(pd.concat([cfs, df]))
+
         # concat with master_db
         self.master_db = pd.concat([self.master_db, cfs])
         self.master_db = clean_up_dataframe(self.master_db)
@@ -1882,6 +1892,16 @@ class Parse:
         cfs.loc[:, 'Elem flow name'] = [', '.join(i) for i in list(zip(cfs.loc[:, 'Elem flow'], cfs.loc[:, 'Region code']))]
         cfs = cfs.drop(['Elem flow', 'Region code'], axis=1)
         cfs = clean_up_dataframe(cfs)
+
+        # add value for RME (Middle East) based on RAS (Asia)
+        df = cfs.loc[cfs.loc[:, 'Elem flow name'].str.contains(', RAS')].copy()
+        df.loc[:, 'Elem flow name'] = [i.split(', RAS')[0] + ', RME' for i in df.loc[:, 'Elem flow name']]
+        cfs = clean_up_dataframe(pd.concat([cfs, df]))
+        # add RoW based on GLO
+        df = cfs.loc[cfs.loc[:, 'Elem flow name'].str.contains(', GLO')].copy()
+        df.loc[:, 'Elem flow name'] = [i.split(', GLO')[0] + ', RoW' for i in df.loc[:, 'Elem flow name']]
+        df.loc[:, 'Native geographical resolution scale'] = 'Other region'
+        cfs = clean_up_dataframe(pd.concat([cfs, df]))
 
         # concat with master_db
         self.master_db = pd.concat([self.master_db, cfs])
@@ -2046,6 +2066,16 @@ class Parse:
         cfs = cfs.drop(['Elem flow', 'Region code'], axis=1)
         cfs = clean_up_dataframe(cfs)
 
+        # add value for RME (Middle East) based on RAS (Asia)
+        df = cfs.loc[cfs.loc[:, 'Elem flow name'].str.contains(', RAS')].copy()
+        df.loc[:, 'Elem flow name'] = [i.split(', RAS')[0] + ', RME' for i in df.loc[:, 'Elem flow name']]
+        cfs = clean_up_dataframe(pd.concat([cfs, df]))
+        # add RoW based on GLO
+        df = cfs.loc[cfs.loc[:, 'Elem flow name'].str.contains(', GLO')].copy()
+        df.loc[:, 'Elem flow name'] = [i.split(', GLO')[0] + ', RoW' for i in df.loc[:, 'Elem flow name']]
+        df.loc[:, 'Native geographical resolution scale'] = 'Other region'
+        cfs = clean_up_dataframe(pd.concat([cfs, df]))
+
         # concat with master_db
         self.master_db = pd.concat([self.master_db, cfs])
         self.master_db = clean_up_dataframe(self.master_db)
@@ -2136,6 +2166,16 @@ class Parse:
                                         list(zip(cfs.loc[:, 'Elem flow'], cfs.loc[:, 'Region code']))]
         cfs = cfs.drop(['Elem flow', 'Region code'], axis=1)
         cfs = clean_up_dataframe(cfs)
+
+        # add value for RME (Middle East) based on RAS (Asia)
+        df = cfs.loc[cfs.loc[:, 'Elem flow name'].str.contains(', RAS')].copy()
+        df.loc[:, 'Elem flow name'] = [i.split(', RAS')[0] + ', RME' for i in df.loc[:, 'Elem flow name']]
+        cfs = clean_up_dataframe(pd.concat([cfs, df]))
+        # add RoW based on GLO
+        df = cfs.loc[cfs.loc[:, 'Elem flow name'].str.contains(', GLO')].copy()
+        df.loc[:, 'Elem flow name'] = [i.split(', GLO')[0] + ', RoW' for i in df.loc[:, 'Elem flow name']]
+        df.loc[:, 'Native geographical resolution scale'] = 'Other region'
+        cfs = clean_up_dataframe(pd.concat([cfs, df]))
 
         # concat with master_db
         self.master_db = pd.concat([self.master_db, cfs])
@@ -3034,12 +3074,19 @@ class Parse:
 
         # re-establish the native geographical resolution scale
         continents = list({k for k, v in conc.items() if v in set(data.loc[:, 'Continent'].dropna())})
-        particulate_cfs.loc[:, 'Native geographical resolution scale'] = [
-            'Global' if ('RoW' in i or 'GLO' in i) else 'Country' for i in particulate_cfs.loc[:, 'Elem flow name']]
+        particulate_cfs.loc[:, 'Native geographical resolution scale'] = 'Country'
         particulate_cfs.loc[[i for i in particulate_cfs.index if particulate_cfs.loc[i, 'Elem flow name'].split(', ')[
-            -1] in continents], 'Native geographical resolution scale'] = 'Continent'
-        particulate_cfs.loc[[i for i in particulate_cfs.index if particulate_cfs.loc[i, 'Elem flow name'].split(', ')[
-            -1] == 'RoW'], 'Native geographical resolution scale'] = 'Other region'
+            -1] in continents], 'Native geographical resolution scale'] = 'Other region'
+        particulate_cfs.loc[[i for i in particulate_cfs.index if
+                             particulate_cfs.loc[i, 'Elem flow name'].split(', ')[-1] in [
+                                 'RER', 'RLA', 'RNA', 'RAS', 'RAF', 'OCE', 'RME']],
+                            'Native geographical resolution scale'] = 'Continent'
+        particulate_cfs.loc[[i for i in particulate_cfs.index if
+                             particulate_cfs.loc[i, 'Elem flow name'].split(', ')[-1] == 'GLO'],
+                            'Native geographical resolution scale'] = 'Global'
+        particulate_cfs.loc[[i for i in particulate_cfs.index if
+                             particulate_cfs.loc[i, 'Elem flow name'].split(', ')[-1] == 'RoW'],
+                            'Native geographical resolution scale'] = 'Other region'
 
         # add zero values for PMs above 2.5um
         big_pms = particulate_cfs.loc[[i for i in particulate_cfs.index if (
@@ -4072,43 +4119,55 @@ class Parse:
 
         map = pd.read_sql('SELECT * FROM [SI - Mapping countries to continents]', self.conn).set_index('country')
 
+        # keep both as separate loops, first one has to run before the second one
         for indicator in ['Particulate matter formation', 'Freshwater acidification', 'Terrestrial acidification',
                           'Marine eutrophication']:
             for substance in ['Ammonia', 'Nitrogen oxides', 'Sulfur dioxide']:
+                if indicator == 'Particulate matter formation':
+                    df = self.master_db.loc[self.master_db.loc[:, 'Impact category'] == indicator].loc[
+                        self.master_db.loc[:, 'Elem flow name'] == substance + ', UN-OCEANIA'].copy('deep')
+                    df.loc[:, 'Elem flow name'] = substance + ', OCE'
+                    self.master_db = clean_up_dataframe(pd.concat([self.master_db, df]))
+
+                    df = self.master_db.loc[self.master_db.loc[:, 'Impact category'] == indicator].loc[
+                        self.master_db.loc[:, 'Elem flow name'] == substance + ', US-PR'].copy('deep')
+                    df.loc[:, 'Elem flow name'] = substance + ', PR'
+                    self.master_db = clean_up_dataframe(pd.concat([self.master_db, df]))
+                else:
+                    df = self.master_db.loc[self.master_db.loc[:, 'Impact category'] == indicator].loc[
+                        self.master_db.loc[:, 'Elem flow name'] == substance + ', OCE'].copy('deep')
+                    df.loc[:, 'Elem flow name'] = substance + ', UN-OCEANIA'
+                    self.master_db = clean_up_dataframe(pd.concat([self.master_db, df]))
+
+                    df = self.master_db.loc[self.master_db.loc[:, 'Impact category'] == indicator].loc[
+                        self.master_db.loc[:, 'Elem flow name'] == substance + ', PR'].copy('deep')
+                    df.loc[:, 'Elem flow name'] = substance + ', US-PR'
+                    self.master_db = clean_up_dataframe(pd.concat([self.master_db, df]))
+
+        for substance in ['Ammonia', 'Nitrogen oxides', 'Sulfur dioxide']:
+            all_existing_geos = set(self.master_db.loc[self.master_db.loc[:, 'Elem flow name'].str.contains(
+                substance + ', '), 'Elem flow name'])
+            all_existing_geos = [i.split(substance + ', ')[1] for i in all_existing_geos]
+
+            for indicator in ['Particulate matter formation', 'Freshwater acidification', 'Terrestrial acidification',
+                              'Marine eutrophication']:
                 existing_geos = set(self.master_db.loc[self.master_db.loc[:, 'Impact category'] == indicator].loc[
                                         self.master_db.loc[:, 'Elem flow name'].str.contains(
                                             substance + ', '), 'Elem flow name'])
                 existing_geos = [i.split(substance + ', ')[1] for i in existing_geos]
-                if existing_geos:
-                    for country in map.index:
-                        if country not in existing_geos:
-                            df = self.master_db.loc[self.master_db.loc[:, 'Impact category'] == indicator].loc[
-                                self.master_db.loc[:, 'Elem flow name'] == substance + ', ' + map.loc[
-                                    country, 'continent']].copy('deep')
-                            df.loc[:, 'Elem flow name'] = substance + ', ' + country
+
+                to_create = set(all_existing_geos) - set(existing_geos)
+
+                for new_geo in to_create:
+                    if new_geo in map.index:
+                        df = self.master_db.loc[self.master_db.loc[:, 'Impact category'] == indicator].loc[
+                            self.master_db.loc[:, 'Elem flow name'] == substance + ', ' + map.loc[
+                                new_geo, 'continent']].copy('deep')
+                        df.loc[:, 'Elem flow name'] = substance + ', ' + new_geo
+                        if ('-' in new_geo and new_geo not in ['ENTSO-E', 'UN-SEASIA']) or len(new_geo) == 2:
                             df.loc[:, 'Native geographical resolution scale'] = 'Country'
-                            self.master_db = clean_up_dataframe(pd.concat([self.master_db, df]))
-
-                    # specific cases
-                    if indicator == 'Particulate matter formation':
-                        df = self.master_db.loc[self.master_db.loc[:, 'Impact category'] == indicator].loc[
-                            self.master_db.loc[:, 'Elem flow name'] == substance + ', UN-OCEANIA'].copy('deep')
-                        df.loc[:, 'Elem flow name'] = substance + ', OCE'
-                        self.master_db = clean_up_dataframe(pd.concat([self.master_db, df]))
-
-                        df = self.master_db.loc[self.master_db.loc[:, 'Impact category'] == indicator].loc[
-                            self.master_db.loc[:, 'Elem flow name'] == substance + ', US-PR'].copy('deep')
-                        df.loc[:, 'Elem flow name'] = substance + ', PR'
-                        self.master_db = clean_up_dataframe(pd.concat([self.master_db, df]))
-                    else:
-                        df = self.master_db.loc[self.master_db.loc[:, 'Impact category'] == indicator].loc[
-                            self.master_db.loc[:, 'Elem flow name'] == substance + ', OCE'].copy('deep')
-                        df.loc[:, 'Elem flow name'] = substance + ', UN-OCEANIA'
-                        self.master_db = clean_up_dataframe(pd.concat([self.master_db, df]))
-
-                        df = self.master_db.loc[self.master_db.loc[:, 'Impact category'] == indicator].loc[
-                            self.master_db.loc[:, 'Elem flow name'] == substance + ', PR'].copy('deep')
-                        df.loc[:, 'Elem flow name'] = substance + ', US-PR'
+                        else:
+                            df.loc[:, 'Native geographical resolution scale'] = 'Other region'
                         self.master_db = clean_up_dataframe(pd.concat([self.master_db, df]))
 
     def apply_rules(self):
@@ -4135,6 +4194,24 @@ class Parse:
 
         :return: updated master_db
         """
+
+        # ---------------- Biogenic carbon ------------------
+        co2_bio_release = self.master_db.loc[self.master_db.loc[:, 'Elem flow name'].str.contains('Carbon dioxide')].copy()
+        co2_bio_release.loc[:, 'Elem flow name'] = 'Carbon dioxide, biogenic, release'
+
+        co2_bio_uptake = self.master_db.loc[self.master_db.loc[:, 'Elem flow name'].str.contains('Carbon dioxide')].copy()
+        co2_bio_uptake.loc[:, 'Elem flow name'] = 'Carbon dioxide, biogenic, uptake'
+        co2_bio_uptake.loc[:, 'CF value'] = -co2_bio_uptake.loc[:, 'CF value']
+
+        co_bio_release = self.master_db.loc[self.master_db.loc[:, 'Elem flow name'].str.contains('Carbon monoxide')].copy()
+        co_bio_release.loc[:, 'Elem flow name'] = 'Carbon monoxide, biogenic, release'
+
+        co_bio_uptake = self.master_db.loc[self.master_db.loc[:, 'Elem flow name'].str.contains('Carbon monoxide')].copy()
+        co_bio_uptake.loc[:, 'Elem flow name'] = 'Carbon monoxide, biogenic, uptake'
+        co_bio_uptake.loc[:, 'CF value'] = -co_bio_uptake.loc[:, 'CF value']
+
+        self.master_db = clean_up_dataframe(pd.concat([self.master_db, co2_bio_release, co2_bio_uptake,
+                                                       co_bio_release, co_bio_uptake]))
 
         # ---------------- Equal to unspecified -------------
 
