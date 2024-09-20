@@ -43,10 +43,11 @@ import sqlite3
 import math
 import molmass
 from scipy.stats import gmean
+from tqdm import tqdm
 
 
 class Parse:
-    def __init__(self, path_access_db, version, bw2_project=None):
+    def __init__(self, path_access_db, version, bw2_projects):
         """
         :param path_access_db: path to the Microsoft access database (source version)
         :param version: the version of IW+ to parse
@@ -110,7 +111,7 @@ class Parse:
 
         self.path_access_db = path_access_db
         self.version = str(version)
-        self.bw2_project = bw2_project
+        self.bw2_projects = bw2_projects
 
         # OUTPUTs
         self.master_db = pd.DataFrame()
@@ -153,7 +154,6 @@ class Parse:
         :return: updated master_db
         """
 
-        self.logger.info("Loading basic characterization factors...")
         self.load_basic_cfs()
         self.logger.info("Loading climate change characterization factors...")
         self.load_climate_change_cfs()
@@ -179,7 +179,7 @@ class Parse:
         self.load_water_availability_terr_cfs()
         self.logger.info("Loading thermally polluted water characterization factors...")
         self.load_thermally_polluted_water_cfs()
-        self.logger.info("Loading physical effect on biota characterization factors...")
+        self.logger.info("Loading plastic physical effects on biota characterization factors...")
         self.load_plastic_cfs()
         self.logger.info("Loading fisheries impact characterization factors...")
         self.load_fisheries_cfs()
@@ -213,7 +213,7 @@ class Parse:
 
         self.get_total_hh_and_eq()
 
-    def export_to_bw2(self, ei_flows_version=None):
+    def export_to_bw2(self):
         """
         This method creates a brightway2 method with the IW+ characterization factors.
         :param ei_flows_version: [str] Provide a specific ei version (e.g., 3.6) to be used to determine the elementary flows
@@ -224,115 +224,112 @@ class Parse:
 
         self.logger.info("Exporting to brightway2...")
 
-        bw2.projects.set_current(self.bw2_project)
+        for project in self.bw2_projects:
+            bw2.projects.set_current(project)
+            bio = bw2.Database('biosphere3')
+            ei_version = project.split('ecoinvent')[1]
+            bw_flows_with_codes = (
+                pd.DataFrame(
+                    [(i.as_dict()['name'], i.as_dict()['categories'][0], i.as_dict()['categories'][1],
+                      i.as_dict()['code'])
+                     if len(i.as_dict()['categories']) == 2
+                     else (i.as_dict()['name'], i.as_dict()['categories'][0], 'unspecified', i.as_dict()['code'])
+                     for i in bio],
+                    columns=['Elem flow name', 'Compartment', 'Sub-compartment', 'code'])
+            )
+            if project == 'ecoinvent3.8':
+                ei_in_bw = self.ei38_iw.merge(bw_flows_with_codes)
+                ei_in_bw_simple = self.simplified_version_ei38.merge(bw_flows_with_codes)
+            elif project == 'ecoinvent3.9':
+                ei_in_bw = self.ei39_iw.merge(bw_flows_with_codes)
+                ei_in_bw_simple = self.simplified_version_ei39.merge(bw_flows_with_codes)
+            elif project == 'ecoinvent3.10':
+                ei_in_bw = self.ei310_iw.merge(bw_flows_with_codes)
+                ei_in_bw_simple = self.simplified_version_ei310.merge(bw_flows_with_codes)
 
-        bio = bw2.Database('biosphere3')
+            # create total HH and EQ categories
+            ei_in_bw.set_index(['Impact category', 'CF unit', 'code'], inplace=True)
+            total_hh = ei_in_bw.loc(axis=0)[:, 'DALY'].copy('deep')
+            total_hh = total_hh.groupby('code').agg({'Compartment': 'first',
+                                                     'Sub-compartment': 'first',
+                                                     'Elem flow name': 'first',
+                                                     'CAS number': 'first',
+                                                     'CF value': sum,
+                                                     'Elem flow unit': 'first',
+                                                     'MP or Damage': 'first',
+                                                     'Native geographical resolution scale': 'first'})
+            total_hh.index = pd.MultiIndex.from_product([['Total human health'], ['DALY'], total_hh.index])
+            total_eq = ei_in_bw.loc(axis=0)[:, 'PDF.m2.yr'].copy('deep')
+            total_eq = total_eq.groupby('code').agg({'Compartment': 'first',
+                                                     'Sub-compartment': 'first',
+                                                     'Elem flow name': 'first',
+                                                     'CAS number': 'first',
+                                                     'CF value': sum,
+                                                     'Elem flow unit': 'first',
+                                                     'MP or Damage': 'first',
+                                                     'Native geographical resolution scale': 'first'})
+            total_eq.index = pd.MultiIndex.from_product([['Total ecosystem quality'], ['PDF.m2.yr'], total_eq.index])
+            ei_in_bw = pd.concat([ei_in_bw, total_hh, total_eq])
+            ei_in_bw.index.names = ['Impact category', 'CF unit', 'code']
+            ei_in_bw = ei_in_bw.reset_index()
 
-        # extract the uuid codes for biosphere flows
-        bw_flows_with_codes = (
-            pd.DataFrame(
-                [(i.as_dict()['name'], i.as_dict()['categories'][0], i.as_dict()['categories'][1], i.as_dict()['code'])
-                 if len(i.as_dict()['categories']) == 2
-                 else (i.as_dict()['name'], i.as_dict()['categories'][0], 'unspecified', i.as_dict()['code'])
-                 for i in bio],
-                columns=['Elem flow name', 'Compartment', 'Sub-compartment', 'code'])
-        )
+            ei_in_bw.set_index(['Impact category', 'CF unit'], inplace=True)
+            ei_in_bw_simple.set_index(['Impact category', 'CF unit'], inplace=True)
+            impact_categories = ei_in_bw.index.drop_duplicates()
+            impact_categories_simple = ei_in_bw_simple.index.drop_duplicates()
 
-        # merge with CF df to have the uuid codes and the corresponding CFs
-        if ei_flows_version == '3.5':
-            ei_in_bw = self.ei35_iw.merge(bw_flows_with_codes)
-        elif ei_flows_version == '3.6':
-            ei_in_bw = self.ei36_iw.merge(bw_flows_with_codes)
-        elif ei_flows_version == '3.7.1':
-            ei_in_bw = self.ei371_iw.merge(bw_flows_with_codes)
-        elif ei_flows_version == '3.8':
-            ei_in_bw = self.ei38_iw.merge(bw_flows_with_codes)
-        elif ei_flows_version == '3.9.1':
-            ei_in_bw = self.ei38_iw.merge(bw_flows_with_codes)
-        else:
-            ei_in_bw = self.ei39_iw.merge(bw_flows_with_codes)
-        ei_in_bw_simple = self.simplified_version_bw.merge(bw_flows_with_codes)
-
-        # create total HH and EQ categories
-        ei_in_bw.set_index(['Impact category', 'CF unit', 'code'], inplace=True)
-        total_hh = ei_in_bw.loc(axis=0)[:, 'DALY'].copy('deep')
-        total_hh = total_hh.groupby('code').agg({'Compartment': 'first',
-                                                 'Sub-compartment': 'first',
-                                                 'Elem flow name': 'first',
-                                                 'CAS number': 'first',
-                                                 'CF value': sum,
-                                                 'Elem flow unit': 'first',
-                                                 'MP or Damage': 'first',
-                                                 'Native geographical resolution scale': 'first'})
-        total_hh.index = pd.MultiIndex.from_product([['Total human health'], ['DALY'], total_hh.index])
-        total_eq = ei_in_bw.loc(axis=0)[:, 'PDF.m2.yr'].copy('deep')
-        total_eq = total_eq.groupby('code').agg({'Compartment': 'first',
-                                                 'Sub-compartment': 'first',
-                                                 'Elem flow name': 'first',
-                                                 'CAS number': 'first',
-                                                 'CF value': sum,
-                                                 'Elem flow unit': 'first',
-                                                 'MP or Damage': 'first',
-                                                 'Native geographical resolution scale': 'first'})
-        total_eq.index = pd.MultiIndex.from_product([['Total ecosystem quality'], ['PDF.m2.yr'], total_eq.index])
-        ei_in_bw = pd.concat([ei_in_bw, total_hh, total_eq])
-        ei_in_bw.index.names = ['Impact category', 'CF unit', 'code']
-        ei_in_bw = ei_in_bw.reset_index()
-
-        ei_in_bw.set_index(['Impact category', 'CF unit'], inplace=True)
-        ei_in_bw_simple.set_index(['Impact category', 'CF unit'], inplace=True)
-        impact_categories = ei_in_bw.index.drop_duplicates()
-        impact_categories_simple = ei_in_bw_simple.index.drop_duplicates()
-
-        # -------------- For complete version of IW+ ----------------
-        for ic in impact_categories:
-
-            if ei_in_bw.loc[[ic], 'MP or Damage'].iloc[0] == 'Midpoint':
-                mid_end = 'Midpoint'
-                # create the name of the method
-                name = ('IMPACT World+ ' + mid_end + ' ' + self.version, 'Midpoint', ic[0])
-            else:
-                mid_end = 'Damage'
-                # create the name of the method
-                if ic[1] == 'DALY':
-                    name = ('IMPACT World+ ' + mid_end + ' ' + self.version, 'Human health', ic[0])
+            # -------------- For complete version of IW+ ----------------
+            for ic in impact_categories:
+                if ei_in_bw.loc[[ic], 'MP or Damage'].iloc[0] == 'Midpoint':
+                    mid_end = 'Midpoint'
+                    # create the name of the method
+                    name = (
+                    'IMPACT World+ ' + mid_end + ' ' + self.version + ' for ecoinvent v' + ei_version, 'Midpoint',
+                    ic[0])
                 else:
-                    name = ('IMPACT World+ ' + mid_end + ' ' + self.version, 'Ecosystem quality', ic[0])
+                    mid_end = 'Damage'
+                    # create the name of the method
+                    if ic[1] == 'DALY':
+                        name = ('IMPACT World+ ' + mid_end + ' ' + self.version + ' for ecoinvent v' + ei_version,
+                                'Human health', ic[0])
+                    else:
+                        name = ('IMPACT World+ ' + mid_end + ' ' + self.version + ' for ecoinvent v' + ei_version,
+                                'Ecosystem quality', ic[0])
 
-            # initialize the "Method" method
-            new_method = bw2.Method(name)
-            # register the new method
-            new_method.register()
-            # set its unit
-            new_method.metadata["unit"] = ic[1]
+                # initialize the "Method" method
+                new_method = bw2.Method(name)
+                # register the new method
+                new_method.register()
+                # set its unit
+                new_method.metadata["unit"] = ic[1]
 
-            df = ei_in_bw.loc[[ic], ['code', 'CF value']].copy()
-            df.set_index('code', inplace=True)
+                df = ei_in_bw.loc[[ic], ['code', 'CF value']].copy()
+                df.set_index('code', inplace=True)
 
-            data = []
-            for stressor in df.index:
-                data.append((('biosphere3', stressor), df.loc[stressor, 'CF value']))
-            new_method.write(data)
+                data = []
+                for stressor in df.index:
+                    data.append((('biosphere3', stressor), df.loc[stressor, 'CF value']))
+                new_method.write(data)
 
-        # -------------- For simplified version of IW+ ----------------
-        for ic in impact_categories_simple:
+            # -------------- For simplified version of IW+ ----------------
+            for ic in impact_categories_simple:
 
-            name = ('IMPACT World+ Footprint ' + self.version, ic[0])
+                name = ('IMPACT World+ Footprint ' + self.version + ' for ecoinvent v' + ei_version, ic[0])
 
-            # initialize the "Method" method
-            new_method = bw2.Method(name)
-            # register the new method
-            new_method.register()
-            # set its unit
-            new_method.metadata["unit"] = ic[1]
+                # initialize the "Method" method
+                new_method = bw2.Method(name)
+                # register the new method
+                new_method.register()
+                # set its unit
+                new_method.metadata["unit"] = ic[1]
 
-            df = ei_in_bw_simple.loc[[ic], ['code', 'CF value']].copy()
-            df.set_index('code', inplace=True)
+                df = ei_in_bw_simple.loc[[ic], ['code', 'CF value']].copy()
+                df.set_index('code', inplace=True)
 
-            data = []
-            for stressor in df.index:
-                data.append((('biosphere3', stressor), df.loc[stressor, 'CF value']))
-            new_method.write(data)
+                data = []
+                for stressor in df.index:
+                    data.append((('biosphere3', stressor), df.loc[stressor, 'CF value']))
+                new_method.write(data)
 
     def export_to_sp(self):
         """
@@ -347,7 +344,7 @@ class Parse:
         self.simplified_version_sp.loc[:, 'CF value'] = self.simplified_version_sp.loc[:, 'CF value'].astype(str)
 
         # Metadata
-        l = ['SimaPro 9.3.0.3', 'methods', 'Date: ' + datetime.now().strftime("%D"),
+        l = ['SimaPro 9.6', 'methods', 'Date: ' + datetime.now().strftime("%D"),
              'Time: ' + datetime.now().strftime("%H:%M:%S"),
              'Project: Methods', 'CSV Format version: 8.0.5', 'CSV separator: Semicolon',
              'Decimal separator: .', 'Date separator: -', 'Short date format: yyyy-MM-dd', 'Selection: Selection (1)',
@@ -365,7 +362,7 @@ class Parse:
                                     ['', '', '', '', '', ''], ['Version', '', '', '', '', ''],
                                     [self.version.split('.')[0],self.version.split('.')[1], '', '', '', ''],
                                     ['', '', '', '', '', ''], ['Comment', '', '', '', '', ''],
-                                    ['For more information on IMPACT World+: https://www.impactworldplus.org/en/.\n'
+                                    ['For more information on IMPACT World+: https://www.impactworldplus.org.\n'
                                      'Full list of changes available here: https://github.com/CIRAIG/IWP_Reborn/tree/master/Report_changes', '', '', '', '', ''], ['', '', '', '', '', ''],
                                     ['Category', '', '', '', '', ''], ['Others', '', '', '', '', ''],
                                     ['', '', '', '', '', ''],
@@ -383,7 +380,7 @@ class Parse:
                                   ['', '', '', '', '', ''], ['Version', '', '', '', '', ''],
                                   [self.version.split('.')[0],self.version.split('.')[1], '', '', '', ''],
                                   ['', '', '', '', '', ''], ['Comment', '', '', '', '', ''],
-                                  ['For more information on IMPACT World+: https://www.impactworldplus.org/en/.\n'
+                                  ['For more information on IMPACT World+: https://www.impactworldplus.org.\n'
                                      'Full list of changes available here: https://github.com/CIRAIG/IWP_Reborn/tree/master/Report_changes', '', '', '', '', ''], ['', '', '', '', '', ''],
                                   ['Category', '', '', '', '', ''], ['Others', '', '', '', '', ''],
                                   ['', '', '', '', '', ''],
@@ -401,7 +398,7 @@ class Parse:
                                     ['', '', '', '', '', ''], ['Version', '', '', '', '', ''],
                                     [self.version.split('.')[0], self.version.split('.')[1], '', '', '', ''],
                                     ['', '', '', '', '', ''], ['Comment', '', '', '', '', ''],
-                                    ['For more information on IMPACT World+: https://www.impactworldplus.org/en/.\n'
+                                    ['For more information on IMPACT World+: https://www.impactworldplus.org.\n'
                                      'Full list of changes available here: https://github.com/CIRAIG/IWP_Reborn/tree/master/Report_changes', '', '', '', '', ''], ['', '', '', '', '', ''],
                                     ['Category', '', '', '', '', ''], ['Others', '', '', '', '', ''],
                                     ['', '', '', '', '', ''],
@@ -419,7 +416,7 @@ class Parse:
                                     ['', '', '', '', '', ''], ['Version', '', '', '', '', ''],
                                     [self.version.split('.')[0],self.version.split('.')[1], '', '', '', ''],
                                     ['', '', '', '', '', ''], ['Comment', '', '', '', '', ''],
-                                    ['For more information on IMPACT World+: https://www.impactworldplus.org/en/.\n'
+                                    ['For more information on IMPACT World+: https://www.impactworldplus.org.\n'
                                      'Full list of changes available here: https://github.com/CIRAIG/IWP_Reborn/tree/master/Report_changes', '', '', '', '', ''], ['', '', '', '', '', ''],
                                     ['Category', '', '', '', '', ''], ['Others', '', '', '', '', ''],
                                     ['', '', '', '', '', ''],
@@ -436,19 +433,25 @@ class Parse:
             __name__, '/Data/weighting_normalizing/weighting_and_normalization.csv'),
             header=None, delimiter=';').fillna('')
         weighting_info_damage = [[df.loc[i].tolist()[0], df.loc[i].tolist()[1], '', '', '', ''] for i in df.index]
-        weighting_info_damage.insert(36, ['Physical effects on biota', '1.00E+00', '', '', '', ''])
+        weighting_info_damage[13] = ['Photochemical ozone formation, human health', '1.00E+00', '', '', '', '']
+        weighting_info_damage.insert(22, ['Fisheries impact', '1.00E+00', '', '', '', ''])
+        weighting_info_damage.insert(32, ['Marine ecotoxicity, long term', '1.00E+00', '', '', '', ''])
+        weighting_info_damage.insert(33, ['Marine ecotoxicity, short term', '1.00E+00', '', '', '', ''])
+        weighting_info_damage.insert(35, ['Photochemical ozone formation, ecosystem quality', '1.00E+00', '', '', '', ''])
+        weighting_info_damage.insert(36, ['Plastics physical effects on biota', '1.00E+00', '', '', '', ''])
+        weighting_info_damage.insert(38, ['Terrestrial ecotoxicity, long term', '1.00E+00', '', '', '', ''])
+        weighting_info_damage.insert(39, ['Terrestrial ecotoxicity, short term', '1.00E+00', '', '', '', ''])
 
         weighting_info_combined = weighting_info_damage.copy()
         weighting_info_combined[11] = ['Ozone layer depletion (damage)', '1.00E+00', '', '', '', '']
         weighting_info_combined[12] = ['Particulate matter formation (damage)', '1.00E+00', '', '', '', '']
-        weighting_info_combined[13] = ['Photochemical oxidant formation (damage)', '1.00E+00', '', '', '', '']
-        weighting_info_combined[22] = ['Freshwater acidification (damage)', '1.00E+00', '', '', '', '']
-        weighting_info_combined[25] = ['Freshwater eutrophication (damage)', '1.00E+00', '', '', '', '']
-        weighting_info_combined[27] = ['Land occupation, biodiversity (damage)', '1.00E+00', '', '', '', '']
-        weighting_info_combined[28] = ['Land transformation, biodiversity (damage)', '1.00E+00', '', '', '', '']
-        weighting_info_combined[31] = ['Marine eutrophication (damage)', '1.00E+00', '', '', '', '']
-        weighting_info_combined[32] = ['Terrestrial acidification (damage)', '1.00E+00', '', '', '', '']
-        weighting_info_combined[36] = ['Physical effects on biota (damage)', '1.00E+00', '', '', '', '']
+        weighting_info_combined[23] = ['Freshwater acidification (damage)', '1.00E+00', '', '', '', '']
+        weighting_info_combined[26] = ['Freshwater eutrophication (damage)', '1.00E+00', '', '', '', '']
+        weighting_info_combined[28] = ['Land occupation, biodiversity (damage)', '1.00E+00', '', '', '', '']
+        weighting_info_combined[29] = ['Land transformation, biodiversity (damage)', '1.00E+00', '', '', '', '']
+        weighting_info_combined[34] = ['Marine eutrophication (damage)', '1.00E+00', '', '', '', '']
+        weighting_info_combined[36] = ['Plastics physical effects on biota (damage)', '1.00E+00', '', '', '', '']
+        weighting_info_combined[37] = ['Terrestrial acidification (damage)', '1.00E+00', '', '', '', '']
 
         # extracting midpoint CFs
         d_ic_unit = self.iw_sp.loc[self.iw_sp['MP or Damage'] == 'Midpoint',
@@ -492,8 +495,8 @@ class Parse:
         ic_unit = self.iw_sp.loc[:, ['Impact category', 'CF unit']].drop_duplicates()
         same_names = ['Freshwater acidification','Freshwater eutrophication','Land occupation, biodiversity',
                       'Land transformation, biodiversity','Marine eutrophication','Ozone layer depletion',
-                      'Particulate matter formation','Photochemical oxidant formation','Terrestrial acidification',
-                      'Physical effects on biota']
+                      'Particulate matter formation','Terrestrial acidification',
+                      'Plastics physical effects on biota']
         combined_values = []
         for j in ic_unit.index:
             combined_values.append(['', '', '', '', '', ''])
@@ -561,18 +564,17 @@ class Parse:
                              "@type": "Category",
                              "@id": id_category,
                              "name": "IMPACT World+",
-                             "version": "0.00.000",
+                             "version": "2.1",
                              "modelType": "IMPACT_METHOD"}
 
         # -----------------------IW+ VERSION METADATA --------------------------
-        category_names = list(set([(i[0], i[1]) for i in self.olca_iw.index]))
-        category_names = [(i[0], i[1], str(uuid.uuid4())) for i in category_names]
-        category_names = {(i[0], i[1]): i[2] for i in category_names}
+        category_names = {(i[0], i[1]): str(uuid.uuid4()) for i in
+                          set(list(zip(self.olca_iw.loc[:, 'Impact category'], self.olca_iw.loc[:, 'CF unit'])))}
         category_names_damage = {k: v for k, v in category_names.items() if k[1] in ['DALY', 'PDF.m2.yr']}
         category_names_midpoint = {k: v for k, v in category_names.items() if k[1] not in ['DALY', 'PDF.m2.yr']}
-        category_names_footprint = list(set([(i[0], i[1]) for i in self.simplified_version_olca.index]))
-        category_names_footprint = {(category_names_footprint[i][0], category_names_footprint[i][1]): str(uuid.uuid4())
-                                    for i in range(len(category_names_footprint))}
+        category_names_footprint = {(i[0], i[1]): str(uuid.uuid4()) for i in set(list(
+            zip(self.simplified_version_olca.loc[:, 'Impact category'],
+                self.simplified_version_olca.loc[:, 'CF unit'])))}
         # need to differentiate midpoint from endpoint with the names of the categories
         category_names_combined = {}
         for category in category_names:
@@ -592,7 +594,7 @@ class Parse:
             "@type": "ImpactMethod",
             "@id": id_iw_damage,
             "name": "IMPACT World+ Expert v" + self.version,
-            "lastChange": "2022-09-15T17:25:43.725-05:00",
+            "lastChange": "2024-09-15T17:25:43.725-05:00",
             "category": {
                 "@type": "Category",
                 "@id": id_category,
@@ -611,7 +613,7 @@ class Parse:
             "@type": "ImpactMethod",
             "@id": id_iw_midpoint,
             "name": "IMPACT World+ Midpoint v" + self.version,
-            "lastChange": "2022-09-15T17:25:43.725-05:00",
+            "lastChange": "2024-09-15T17:25:43.725-05:00",
             "category": {
                 "@type": "Category",
                 "@id": id_category,
@@ -625,7 +627,7 @@ class Parse:
             "@type": "ImpactMethod",
             "@id": id_iw_footprint,
             "name": "IMPACT World+ Footprint v" + self.version,
-            "lastChange": "2022-09-15T17:25:43.725-05:00",
+            "lastChange": "2024-09-15T17:25:43.725-05:00",
             "category": {
                 "@type": "Category",
                 "@id": id_category,
@@ -639,7 +641,7 @@ class Parse:
             "@type": "ImpactMethod",
             "@id": id_iw_combined,
             "name": "IMPACT World+ Combined v" + self.version,
-            "lastChange": "2022-09-15T17:25:43.725-05:00",
+            "lastChange": "2024-09-15T17:25:43.725-05:00",
             "category": {
                 "@type": "Category",
                 "@id": id_category,
@@ -694,7 +696,8 @@ class Parse:
             'm2': '93a60a57-a3c8-18da-a746-0800200c9a66',
             'kBq': '93a60a57-a3c8-16da-a746-0800200c9a66',
             'm3': '93a60a57-a3c8-12da-a746-0800200c9a66',
-            'MJ': '93a60a57-a3c8-11da-a746-0800200c9a66'
+            'MJ': '93a60a57-a3c8-11da-a746-0800200c9a66',
+            'kg*a': '59f191d6-5dd3-4553-af88-1a32accfe308'
         }
         flow_properties = {
             'm3': '93a60a56-a3c8-22da-a746-0800200c9a66',
@@ -702,7 +705,8 @@ class Parse:
             'm2': '93a60a56-a3c8-19da-a746-0800200c9a66',
             'kBq': '93a60a56-a3c8-17da-a746-0800200c9a66',
             'kg': '93a60a56-a3c8-11da-a746-0800200b9a66',
-            'MJ': 'f6811440-ee37-11de-8a39-0800200c9a66'
+            'MJ': 'f6811440-ee37-11de-8a39-0800200c9a66',
+            'kg*a': '4e10f566-0358-489a-8e3a-d687b66c50e6'
         }
 
         # ------------------------- INTEGRATE CHARACTERIZATION FACTORS -----------------
@@ -714,35 +718,37 @@ class Parse:
                 "@id": category_names_damage[cat],
                 "name": cat[0],
                 "category": metadata_iw_damage["name"],
-                "version": "0" + ''.join(self.version.split('.')) + "0.000",
+                "version": '2.1',
                 "refUnit": cat[1],
                 "impactFactors": []
             }
 
-            dff = self.olca_iw.loc[cat].copy()
+            dff = self.olca_iw.loc[self.olca_iw.loc[:, 'Impact category'] == cat[0]].loc[
+                self.olca_iw.loc[:, 'CF unit'] == cat[1]].copy()
 
-            for flow_id in dff.index:
+            for i in dff.index:
                 cf_values["impactFactors"].append({
                     "@type": "ImpactFactor",
-                    "value": dff.loc[flow_id, 'CF value'],
+                    "value": dff.loc[i, 'CF value'],
                     "flow": {
                         "@type": "Flow",
-                        "@id": flow_id,
-                        "name": dff.loc[flow_id, 'flow_name'],
-                        "category": "Elementary flows/"+eval(dff.loc[flow_id, 'comp'])[0]+'/'+eval(dff.loc[flow_id, 'comp'])[1],
+                        "@id": dff.loc[i, 'flow_id'],
+                        "name": dff.loc[i, 'Elem flow name'],
+                        "category": "Elementary flows/" + dff.loc[i, 'Compartment'] + '/' + dff.loc[
+                            i, 'Sub-compartment'],
                         "flowType": "ELEMENTARY_FLOW",
-                        "refUnit": dff.loc[flow_id, 'unit']
+                        "refUnit": dff.loc[i, 'Elem flow unit']
                     },
                     "unit": {
                         "@type": "Unit",
-                        "@id": unit_groups[dff.loc[flow_id, 'unit']],
-                        "name": dff.loc[flow_id, 'unit']
+                        "@id": unit_groups[dff.loc[i, 'Elem flow unit']],
+                        "name": dff.loc[i, 'Elem flow unit']
                     },
                     "flowProperty": {
                         "@type": "FlowProperty",
-                        "@id": flow_properties[dff.loc[flow_id, 'unit']],
+                        "@id": flow_properties[dff.loc[i, 'Elem flow unit']],
                         "category": "Technical flow properties",
-                        "refUnit": dff.loc[flow_id, 'unit']
+                        "refUnit": dff.loc[i, 'Elem flow unit']
                     }
                 })
 
@@ -756,35 +762,37 @@ class Parse:
                 "@id": category_names_midpoint[cat],
                 "name": cat[0],
                 "category": metadata_iw_midpoint["name"],
-                "version": "0" + ''.join(self.version.split('.')) + "0.000",
+                "version": '2.1',
                 "refUnit": cat[1],
                 "impactFactors": []
             }
 
-            dff = self.olca_iw.loc[cat].copy()
+            dff = self.olca_iw.loc[self.olca_iw.loc[:, 'Impact category'] == cat[0]].loc[
+                self.olca_iw.loc[:, 'CF unit'] == cat[1]].copy()
 
-            for flow_id in dff.index:
+            for i in dff.index:
                 cf_values["impactFactors"].append({
                     "@type": "ImpactFactor",
-                    "value": dff.loc[flow_id, 'CF value'],
+                    "value": dff.loc[i, 'CF value'],
                     "flow": {
                         "@type": "Flow",
-                        "@id": flow_id,
-                        "name": dff.loc[flow_id, 'flow_name'],
-                        "category": "Elementary flows/"+eval(dff.loc[flow_id, 'comp'])[0]+'/'+eval(dff.loc[flow_id, 'comp'])[1],
+                        "@id": dff.loc[i, 'flow_id'],
+                        "name": dff.loc[i, 'Elem flow name'],
+                        "category": "Elementary flows/" + dff.loc[i, 'Compartment'] + '/' + dff.loc[
+                            i, 'Sub-compartment'],
                         "flowType": "ELEMENTARY_FLOW",
-                        "refUnit": dff.loc[flow_id, 'unit']
+                        "refUnit": dff.loc[i, 'Elem flow unit']
                     },
                     "unit": {
                         "@type": "Unit",
-                        "@id": unit_groups[dff.loc[flow_id, 'unit']],
-                        "name": dff.loc[flow_id, 'unit']
+                        "@id": unit_groups[dff.loc[i, 'Elem flow unit']],
+                        "name": dff.loc[i, 'Elem flow unit']
                     },
                     "flowProperty": {
                         "@type": "FlowProperty",
-                        "@id": flow_properties[dff.loc[flow_id, 'unit']],
+                        "@id": flow_properties[dff.loc[i, 'Elem flow unit']],
                         "category": "Technical flow properties",
-                        "refUnit": dff.loc[flow_id, 'unit']
+                        "refUnit": dff.loc[i, 'Elem flow unit']
                     }
                 })
 
@@ -798,35 +806,37 @@ class Parse:
                 "@id": category_names_footprint[cat],
                 "name": cat[0],
                 "category": metadata_iw_footprint["name"],
-                "version": "0" + ''.join(self.version.split('.')) + "0.000",
+                "version": '2.1',
                 "refUnit": cat[1],
                 "impactFactors": []
             }
 
-            dff = self.simplified_version_olca.loc[cat].copy()
+            dff = self.simplified_version_olca.loc[self.simplified_version_olca.loc[:, 'Impact category'] == cat[0]].loc[
+                self.simplified_version_olca.loc[:, 'CF unit'] == cat[1]].copy()
 
-            for flow_id in dff.index:
+            for i in dff.index:
                 cf_values["impactFactors"].append({
                     "@type": "ImpactFactor",
-                    "value": dff.loc[flow_id, 'CF value'],
+                    "value": dff.loc[i, 'CF value'],
                     "flow": {
                         "@type": "Flow",
-                        "@id": flow_id,
-                        "name": dff.loc[flow_id, 'flow_name'],
-                        "category": "Elementary flows/"+eval(dff.loc[flow_id, 'comp'])[0]+'/'+eval(dff.loc[flow_id, 'comp'])[1],
+                        "@id": dff.loc[i, 'flow_id'],
+                        "name": dff.loc[i, 'Elem flow name'],
+                        "category": "Elementary flows/" + dff.loc[i, 'Compartment'] + '/' + dff.loc[
+                            i, 'Sub-compartment'],
                         "flowType": "ELEMENTARY_FLOW",
-                        "refUnit": dff.loc[flow_id, 'unit']
+                        "refUnit": dff.loc[i, 'Elem flow unit']
                     },
                     "unit": {
                         "@type": "Unit",
-                        "@id": unit_groups[dff.loc[flow_id, 'unit']],
-                        "name": dff.loc[flow_id, 'unit']
+                        "@id": unit_groups[dff.loc[i, 'Elem flow unit']],
+                        "name": dff.loc[i, 'Elem flow unit']
                     },
                     "flowProperty": {
                         "@type": "FlowProperty",
-                        "@id": flow_properties[dff.loc[flow_id, 'unit']],
+                        "@id": flow_properties[dff.loc[i, 'Elem flow unit']],
                         "category": "Technical flow properties",
-                        "refUnit": dff.loc[flow_id, 'unit']
+                        "refUnit": dff.loc[i, 'Elem flow unit']
                     }
                 })
 
@@ -840,35 +850,37 @@ class Parse:
                 "@id": category_names_combined[cat],
                 "name": cat[0],
                 "category": metadata_iw_combined["name"],
-                "version": "0" + ''.join(self.version.split('.')) + "0.000",
+                "version": '2.1',
                 "refUnit": cat[1],
                 "impactFactors": []
             }
 
-            dff = self.olca_iw.loc[(cat[0].split(' (')[0], cat[1])].copy()
+            dff = self.olca_iw.loc[self.olca_iw.loc[:, 'Impact category'] == cat[0].split(' (')[0]].loc[
+                self.olca_iw.loc[:, 'CF unit'] == cat[1]].copy()
 
-            for flow_id in dff.index:
+            for i in dff.index:
                 cf_values["impactFactors"].append({
                     "@type": "ImpactFactor",
-                    "value": dff.loc[flow_id, 'CF value'],
+                    "value": dff.loc[i, 'CF value'],
                     "flow": {
                         "@type": "Flow",
-                        "@id": flow_id,
-                        "name": dff.loc[flow_id, 'flow_name'],
-                        "category": "Elementary flows/"+eval(dff.loc[flow_id, 'comp'])[0]+'/'+eval(dff.loc[flow_id, 'comp'])[1],
+                        "@id": dff.loc[i, 'flow_id'],
+                        "name": dff.loc[i, 'Elem flow name'],
+                        "category": "Elementary flows/" + dff.loc[i, 'Compartment'] + '/' + dff.loc[
+                            i, 'Sub-compartment'],
                         "flowType": "ELEMENTARY_FLOW",
-                        "refUnit": dff.loc[flow_id, 'unit']
+                        "refUnit": dff.loc[i, 'Elem flow unit']
                     },
                     "unit": {
                         "@type": "Unit",
-                        "@id": unit_groups[dff.loc[flow_id, 'unit']],
-                        "name": dff.loc[flow_id, 'unit']
+                        "@id": unit_groups[dff.loc[i, 'Elem flow unit']],
+                        "name": dff.loc[i, 'Elem flow unit']
                     },
                     "flowProperty": {
                         "@type": "FlowProperty",
-                        "@id": flow_properties[dff.loc[flow_id, 'unit']],
+                        "@id": flow_properties[dff.loc[i, 'Elem flow unit']],
                         "category": "Technical flow properties",
-                        "refUnit": dff.loc[flow_id, 'unit']
+                        "refUnit": dff.loc[i, 'Elem flow unit']
                     }
                 })
 
@@ -887,7 +899,7 @@ class Parse:
             "@type": "NwSet",
             "@id": norm_weight_id,
             "name": "IMPACT World+ (Stepwise 2006 values)",
-            "version": "00.00.000",
+            "version": "0.00.000",
             "weightedScoreUnit": "EUR2003",
             "factors": []}
 
@@ -946,25 +958,16 @@ class Parse:
         self.master_db.to_excel(path + '/Dev/impact_world_plus_' + self.version + '_dev.xlsx')
 
         # ecoinvent versions in Excel format
-        self.ei35_iw.to_excel(path + '/ecoinvent/impact_world_plus_' + self.version + '_expert_version_ecoinvent_v35.xlsx')
-        self.ei36_iw.to_excel(path + '/ecoinvent/impact_world_plus_' + self.version + '_expert_version_ecoinvent_v36.xlsx')
-        self.ei371_iw.to_excel(path + '/ecoinvent/impact_world_plus_' + self.version + '_expert_version_ecoinvent_v371.xlsx')
         self.ei38_iw.to_excel(path + '/ecoinvent/impact_world_plus_' + self.version + '_expert_version_ecoinvent_v38.xlsx')
         self.ei39_iw.to_excel(path + '/ecoinvent/impact_world_plus_' + self.version + '_expert_version_ecoinvent_v39.xlsx')
         self.ei310_iw.to_excel(path + '/ecoinvent/impact_world_plus_' + self.version + '_expert_version_ecoinvent_v310.xlsx')
 
         # ecoinvent version in DataFrame format
-        self.ei35_iw_as_matrix.to_excel(path + '/ecoinvent/impact_world_plus_' + self.version + '_expert_version_ecoinvent_v35_as_df.xlsx')
-        self.ei36_iw_as_matrix.to_excel(path + '/ecoinvent/impact_world_plus_' + self.version + '_expert_version_ecoinvent_v36_as_df.xlsx')
-        self.ei371_iw_as_matrix.to_excel(path + '/ecoinvent/impact_world_plus_' + self.version + '_expert_version_ecoinvent_v371_as_df.xlsx')
         self.ei38_iw_as_matrix.to_excel(path + '/ecoinvent/impact_world_plus_' + self.version + '_expert_version_ecoinvent_v38_as_df.xlsx')
         self.ei39_iw_as_matrix.to_excel(path + '/ecoinvent/impact_world_plus_' + self.version + '_expert_version_ecoinvent_v39_as_df.xlsx')
         self.ei310_iw_as_matrix.to_excel(path + '/ecoinvent/impact_world_plus_' + self.version + '_expert_version_ecoinvent_v310_as_df.xlsx')
 
         # ecoinvent version in DataFrame format
-        self.simplified_version_ei35.to_excel(path + '/ecoinvent/impact_world_plus_' + self.version + '_footprint_version_ecoinvent_v35.xlsx')
-        self.simplified_version_ei36.to_excel(path + '/ecoinvent/impact_world_plus_' + self.version + '_footprint_version_ecoinvent_v36.xlsx')
-        self.simplified_version_ei371.to_excel(path + '/ecoinvent/impact_world_plus_' + self.version + '_footprint_version_ecoinvent_v371.xlsx')
         self.simplified_version_ei38.to_excel(path + '/ecoinvent/impact_world_plus_' + self.version + '_footprint_version_ecoinvent_v38.xlsx')
         self.simplified_version_ei39.to_excel(path + '/ecoinvent/impact_world_plus_' + self.version + '_footprint_version_ecoinvent_v39.xlsx')
         self.simplified_version_ei310.to_excel(path + '/ecoinvent/impact_world_plus_' + self.version + '_footprint_version_ecoinvent_v310.xlsx')
@@ -973,15 +976,35 @@ class Parse:
         self.exio_iw.to_excel(path + '/exiobase/impact_world_plus_' + self.version + '_expert_version_exiobase.xlsx')
 
         # brightway2 versions in bw2package format
-        IW_ic = [bw2.Method(ic) for ic in list(bw2.methods) if ('IMPACT World+' in ic[0] and 'Footprint' not in ic[0] and
-                                                                self.version in ic[0])]
-        bw2io.package.BW2Package.export_objs(IW_ic, filename='impact_world_plus_' + self.version +
-                                                             '_brightway2_expert_version', folder=path+'/bw2/')
-        # bw2 footprint version
-        IW_ic = [bw2.Method(ic) for ic in list(bw2.methods) if ('IMPACT World+' in ic[0] and 'Footprint' in ic[0] and
-                                                                self.version in ic[0])]
-        bw2io.package.BW2Package.export_objs(IW_ic, filename='impact_world_plus_' + self.version +
-                                                             '_brightway2_footprint_version', folder=path+'/bw2/')
+        for project in self.bw2_projects:
+            bw2.projects.set_current(project)
+            if '3.8' in project:
+                IW_ic = [bw2.Method(ic) for ic in list(bw2.methods) if ('IMPACT World+' in ic[0] and 'Footprint' not in ic[0] and
+                                                                        self.version in ic[0] and "for ecoinvent" in ic[0])]
+                bw2io.package.BW2Package.export_objs(IW_ic, filename='impact_world_plus_' + self.version +
+                                                                     '_brightway2_expert_version_ei38', folder=path+'/bw2/')
+                IW_ic = [bw2.Method(ic) for ic in list(bw2.methods) if ('IMPACT World+' in ic[0] and 'Footprint' in ic[0] and
+                                                                        self.version in ic[0] and "for ecoinvent" in ic[0])]
+                bw2io.package.BW2Package.export_objs(IW_ic, filename='impact_world_plus_' + self.version +
+                                                                     '_brightway2_footprint_version_ei38', folder=path+'/bw2/')
+            elif '3.9' in project:
+                IW_ic = [bw2.Method(ic) for ic in list(bw2.methods) if ('IMPACT World+' in ic[0] and 'Footprint' not in ic[0] and
+                                                                        self.version in ic[0] and "for ecoinvent" in ic[0])]
+                bw2io.package.BW2Package.export_objs(IW_ic, filename='impact_world_plus_' + self.version +
+                                                                     '_brightway2_expert_version_ei39', folder=path+'/bw2/')
+                IW_ic = [bw2.Method(ic) for ic in list(bw2.methods) if ('IMPACT World+' in ic[0] and 'Footprint' in ic[0] and
+                                                                        self.version in ic[0] and "for ecoinvent" in ic[0])]
+                bw2io.package.BW2Package.export_objs(IW_ic, filename='impact_world_plus_' + self.version +
+                                                                     '_brightway2_footprint_version_ei39', folder=path+'/bw2/')
+            elif '3.10' in project:
+                IW_ic = [bw2.Method(ic) for ic in list(bw2.methods) if ('IMPACT World+' in ic[0] and 'Footprint' not in ic[0] and
+                                                                        self.version in ic[0] and "for ecoinvent" in ic[0])]
+                bw2io.package.BW2Package.export_objs(IW_ic, filename='impact_world_plus_' + self.version +
+                                                                     '_brightway2_expert_version_ei310', folder=path+'/bw2/')
+                IW_ic = [bw2.Method(ic) for ic in list(bw2.methods) if ('IMPACT World+' in ic[0] and 'Footprint' in ic[0] and
+                                                                        self.version in ic[0] and "for ecoinvent" in ic[0])]
+                bw2io.package.BW2Package.export_objs(IW_ic, filename='impact_world_plus_' + self.version +
+                                                                     '_brightway2_footprint_version_ei310', folder=path+'/bw2/')
 
         # SimaPro version in csv format
         with open(path+'/SimaPro/impact_world_plus_'+self.version+'_midpoint_version_simapro_.csv', 'w', newline='') as f:
@@ -1217,6 +1240,10 @@ class Parse:
             - Freshwater ecotoxicity
             - Freshwater ecotoxicity, long term
             - Freshwater ecotoxicity, short term
+            - Marine ecotoxicity, short term
+            - Marine ecotoxicity, long term
+            - Terrestrial ecotoxicity, short term
+            - Terrestrial ecotoxicity, long term
             - Human toxicity cancer
             - Human toxicity cancer, long term
             - Human toxicity cancer, short term
@@ -1229,24 +1256,58 @@ class Parse:
             - Marine acidification, short term
             = Marine acidification, long term
             - Mineral resources use
-            - Ozone layer depletion
-            - Photochemical oxidant formation
 
         :return: updated master_db
         """
 
-        self.master_db = pd.concat([pd.read_sql(sql='SELECT * FROM [CF - not regionalized - IonizingRadiations]',
-                                                con=self.conn),
-                                    pd.read_sql(sql='SELECT * FROM [CF - not regionalized - MarineAcidification]',
-                                                con=self.conn),
-                                    pd.read_sql(sql='SELECT * FROM [CF - not regionalized - FossilResources]',
-                                                con=self.conn),
-                                    pd.read_sql(sql='SELECT * FROM [CF - not regionalized - MineralResources]',
-                                                con=self.conn),
-                                    pd.read_sql(sql='SELECT * FROM [CF - not regionalized - HumanTox]',
-                                                con=self.conn),
-                                    pd.read_sql(sql='SELECT * FROM [CF - not regionalized - EcotoxFW]',
-                                                con=self.conn)])
+        self.logger.info("Loading ionizing radiations characterization factors...")
+        ionizing = pd.read_sql(sql='SELECT * FROM [CF - not regionalized - IonizingRadiations]', con=self.conn)
+
+        self.logger.info("Loading marine acidification characterization factors...")
+        mar_acid = pd.read_sql(sql='SELECT * FROM [CF - not regionalized - MarineAcidification]', con=self.conn)
+
+        self.logger.info("Loading fossil resources characterization factors...")
+        fossils = pd.read_sql(sql='SELECT * FROM [CF - not regionalized - FossilResources]', con=self.conn)
+
+        self.logger.info("Loading mineral resources characterization factors...")
+        minerals = pd.read_sql(sql='SELECT * FROM [CF - not regionalized - MineralResources]', con=self.conn)
+
+        elem_flow_list = pd.read_sql(sql='SELECT * FROM [SI - Mapping with elementary flows]', con=self.conn)
+
+        self.logger.info("Loading toxicity characterization factors...")
+        toxicity = pd.read_sql(sql='SELECT * FROM [CF - not regionalized - HumanTox]', con=self.conn)
+        toxicity = toxicity.merge(elem_flow_list.loc[:, ['Name IW+', 'CAS-Usetox2_FW']], left_on=['CAS number'],
+                                  right_on=['CAS-Usetox2_FW'], how='left').drop_duplicates()
+        toxicity = toxicity.drop(['Elem flow name', 'CAS number'], axis=1)
+        toxicity = toxicity.rename(columns={'Name IW+': 'Elem flow name', 'CAS-Usetox2_FW': 'CAS number'})
+
+        self.logger.info("Loading freshwater ecotoxicity characterization factors...")
+        fw_ecotoxicity = pd.read_sql(sql='SELECT * FROM [CF - not regionalized - FreshwaterEcotox]', con=self.conn)
+        fw_ecotoxicity = fw_ecotoxicity.merge(elem_flow_list.loc[:, ['Name IW+', 'CAS-Usetox2_FW']], left_on=['CAS number'],
+                                        right_on=['CAS-Usetox2_FW'], how='left').drop_duplicates()
+        fw_ecotoxicity = fw_ecotoxicity.drop(['Elem flow name', 'CAS number'], axis=1)
+        fw_ecotoxicity = fw_ecotoxicity.rename(columns={'Name IW+': 'Elem flow name', 'CAS-Usetox2_FW': 'CAS number'})
+
+        self.logger.info("Loading marine ecotoxicity characterization factors...")
+        mar_ecotoxicity = pd.read_sql('SELECT * FROM [CF - not regionalized - MarineEcotox]', self.conn)
+        mar_ecotoxicity = mar_ecotoxicity.merge(elem_flow_list.loc[:, ['Name IW+', 'CAS-Usetox2_Mar_Terr']],
+                                                left_on=['CAS number'],
+                                                right_on=['CAS-Usetox2_Mar_Terr'], how='left').drop_duplicates()
+        mar_ecotoxicity = mar_ecotoxicity.drop(['Elem flow name', 'CAS number'], axis=1)
+        mar_ecotoxicity = mar_ecotoxicity.rename(
+            columns={'Name IW+': 'Elem flow name', 'CAS-Usetox2_Mar_Terr': 'CAS number'})
+
+        self.logger.info("Loading terrestrial ecotoxicity characterization factors...")
+        terr_ecotoxicity = pd.read_sql('SELECT * FROM [CF - not regionalized - TerrestrialEcotox]', self.conn)
+        terr_ecotoxicity = terr_ecotoxicity.merge(elem_flow_list.loc[:, ['Name IW+', 'CAS-Usetox2_Mar_Terr']],
+                                                left_on=['CAS number'],
+                                                right_on=['CAS-Usetox2_Mar_Terr'], how='left').drop_duplicates()
+        terr_ecotoxicity = terr_ecotoxicity.drop(['Elem flow name', 'CAS number'], axis=1)
+        terr_ecotoxicity = terr_ecotoxicity.rename(
+            columns={'Name IW+': 'Elem flow name', 'CAS-Usetox2_Mar_Terr': 'CAS number'})
+
+        self.master_db = pd.concat([ionizing, mar_acid, fossils, minerals, toxicity,
+                                    fw_ecotoxicity, mar_ecotoxicity, terr_ecotoxicity])
 
         self.master_db = clean_up_dataframe(self.master_db)
 
@@ -1408,7 +1469,7 @@ class Parse:
 
         # get effect factors
         effect_factors = pd.read_sql('SELECT * FROM "SI - Climate change - effect factors"', con=self.conn).set_index('index')
-        HH_effect_factor = effect_factors.loc['Total', 'DALY/K/yr']
+        HH_effect_factor = effect_factors.loc['Total', 'DALY/°C/yr']
         EQ_effect_factor = effect_factors.loc['Total', 'PDF.m2.yr/K/yr']
 
         # Climate change, human health, short term
@@ -1464,6 +1525,12 @@ class Parse:
         GWP_damage_EQ_long.loc[:, 'CF value'] = (GWP_damage_EQ_long.loc[:,'AGTP cumulative 500 years'] -
                                                  GWP_damage_EQ_long.loc[:,'AGTP cumulative 100 years']) * EQ_effect_factor
         GWP_damage_EQ_long = GWP_damage_EQ_long.drop(['AGTP cumulative 100 years', 'AGTP cumulative 500 years'], axis=1)
+
+        # IW+ expert version follows the +/-1 approach for biogenic carbon -> Methane, biogenic = Methane, fossil
+        for df in [GWP_midpoint, GTP_midpoint, GWP_damage_HH_short, GWP_damage_HH_long, GWP_damage_EQ_short,
+                   GWP_damage_EQ_long]:
+            df.loc[df.loc[:, 'Elem flow name'] == 'Methane, biogenic', 'CF value'] = \
+            df.loc[df.loc[:, 'Elem flow name'] == 'Methane, fossil', 'CF value'].iloc[0]
 
         self.master_db = pd.concat([self.master_db, GWP_midpoint, GTP_midpoint, GWP_damage_EQ_short, GWP_damage_EQ_long,
                                     GWP_damage_HH_short, GWP_damage_HH_long])
@@ -1522,7 +1589,7 @@ class Parse:
 
         data = pd.read_sql(sql='SELECT * FROM [CF - not regionalized - PhotochemOxid]', con=self.conn)
         mapping = pd.read_sql('SELECT * FROM "SI - Mapping with elementary flows"', con=self.conn)
-        effect_factor = pd.read_sql(sql='SELECT * FROM [SI - Photochemical Ozone Formation - effect factors]',
+        effect_factor = pd.read_sql(sql='SELECT * FROM [SI - Photochemical ozone formation - effect factors]',
                                     con=self.conn)
         data = data.merge(mapping, left_on=['Substance name'], right_on=['Name-photochem'])
 
@@ -1532,7 +1599,7 @@ class Parse:
                                                                   'Name IW+': 'Elem flow name',
                                                                   'CAS IW+': 'CAS number'})
         photochem_damage_hh.loc[:, 'CF value'] *= effect_factor.loc[0, 'HH (DALY/kg NOx-eq)']
-        photochem_damage_hh.loc[:, 'Impact category'] = 'Photochemical Ozone Formation, human health'
+        photochem_damage_hh.loc[:, 'Impact category'] = 'Photochemical ozone formation, human health'
         photochem_damage_hh.loc[:, 'CF unit'] = 'DALY'
         photochem_damage_hh.loc[:, 'Compartment'] = 'Air'
         photochem_damage_hh.loc[:, 'Sub-compartment'] = '(unspecified)'
@@ -1547,7 +1614,7 @@ class Parse:
                                                                   'CAS IW+': 'CAS number'})
         photochem_damage_eq.loc[:, 'CF value'] *= (effect_factor.loc[0, 'EQ (species.yr/kg NOx-eq)'] /
                                                    effect_factor.loc[0, 'species density in ReCiPe (species/m2)'])
-        photochem_damage_eq.loc[:, 'Impact category'] = 'Photochemical Ozone Formation, ecosystem quality'
+        photochem_damage_eq.loc[:, 'Impact category'] = 'Photochemical ozone formation, ecosystem quality'
         photochem_damage_eq.loc[:, 'CF unit'] = 'PDF.m2.yr'
         photochem_damage_eq.loc[:, 'Compartment'] = 'Air'
         photochem_damage_eq.loc[:, 'Sub-compartment'] = '(unspecified)'
@@ -1561,7 +1628,7 @@ class Parse:
         photochem_midpoint = photochem_midpoint.rename(columns={'Name IW+': 'Elem flow name',
                                                                 'CAS IW+': 'CAS number'})
         photochem_midpoint = photochem_midpoint.loc[:, ['CF value', 'Elem flow name', 'CAS number']]
-        photochem_midpoint.loc[:, 'Impact category'] = 'Photochemical Ozone Formation'
+        photochem_midpoint.loc[:, 'Impact category'] = 'Photochemical ozone formation'
         photochem_midpoint.loc[:, 'CF unit'] = 'kgNOxeq'
         photochem_midpoint.loc[:, 'Compartment'] = 'Air'
         photochem_midpoint.loc[:, 'Sub-compartment'] = '(unspecified)'
@@ -3461,6 +3528,9 @@ class Parse:
 
         all_data = clean_up_dataframe(pd.concat([all_data, df_lake, df_river, df_unspe, df_well, df_cooling]))
 
+        # for missing CFs, forced value to zero
+        all_data.loc[:, 'CF value'] = all_data.loc[:, 'CF value'].fillna(0)
+
         self.master_db = pd.concat([self.master_db, all_data])
         self.master_db = clean_up_dataframe(self.master_db)
 
@@ -3919,7 +3989,7 @@ class Parse:
         :return: update master_db
         """
 
-        original_cfs = pd.read_sql('SELECT * from "CF - not regionalized - PhysicalImpactonBiota"',
+        original_cfs = pd.read_sql('SELECT * from "CF - not regionalized - PlasticPhysicalImpactonBiota"',
                                    con=self.conn)
 
         original_cfs.drop(['Geometric st.dev.', 'Lower limit 95% CI (calculated)',
@@ -3928,23 +3998,10 @@ class Parse:
         original_cfs.loc[:, 'Native geographical resolution scale'] = 'Global'
         original_cfs.loc[:, 'MP or Damage'] = ['Midpoint' if original_cfs.loc[i, 'CF unit'] == 'CTUe' else 'Damage' for
                                                i in original_cfs.index]
-        name_changes = {'EPS': 'EPS',
-                        'HDPE': 'HDPE',
-                        'LDPE': 'LDPE',
-                        'PA (Nylon)': 'PA/Nylon',
-                        'PET': 'PET',
-                        'PHA': 'PHA',
-                        'PLA': 'PLA',
-                        'PP': 'PP',
-                        'PS': 'PS',
-                        'PVC': 'PVC',
-                        'TRWP': 'TRWP',
-                        'PU/Spandex': 'PU/Spandex',
-                        'Acrylic': 'Acrylic'}
         CAS = {'EPS': '9003-53-6',
                'HDPE': '9002-88-4',
                'LDPE': '9002-88-4',
-               'PA (Nylon)': '25038-54-4',
+               'PA/Nylon': '25038-54-4',
                'PET': '25038-59-9',
                'PHA': '117068-64-1',
                'PLA': '26100-51-6',
@@ -3958,7 +4015,6 @@ class Parse:
                        'Film fragments': 'Microplastic film fragments',
                        'Microfibers/cylinders': 'Plastic microfibers'}
         original_cfs.loc[:, 'CAS number'] = [CAS[i] for i in original_cfs.loc[:, 'Polymer type']]
-        original_cfs.loc[:, 'Polymer type'] = [name_changes[i] for i in original_cfs.loc[:, 'Polymer type']]
         original_cfs.loc[:, 'Shape'] = [shape_names[i] for i in original_cfs.loc[:, 'Shape']]
         original_cfs = original_cfs.rename(columns={'Recommended CF (geometric mean)': 'CF value'})
         original_cfs.loc[:, 'Elem flow name'] = [
@@ -4213,6 +4269,44 @@ class Parse:
         self.master_db = clean_up_dataframe(pd.concat([self.master_db, co2_bio_release, co2_bio_uptake,
                                                        co_bio_release, co_bio_uptake]))
 
+        # ----------- Temporary storage of carbon -----------
+
+        def temporary_storage_ghg_cf(origin_flow, name_storage_flow):
+            """Function takes in the origin GHG flow name (e.g., Carbon dioxide, fossil) and a new name for the
+            storage flow (e.g., Correction flow for delayed emission of biogenic carbon dioxide). It then creates CFs
+            for the temporary storage flows."""
+            df = self.master_db.loc[self.master_db.loc[:, 'Elem flow name'] == origin_flow].loc[
+                self.master_db.loc[:, 'Impact category'] != 'Fossil and nuclear energy use'].copy()
+            df.loc[:, 'Elem flow name'] = name_storage_flow
+            df.loc[:, 'Elem flow unit'] = 'kgy'
+            df.loc[:, 'CF value'] /= -100
+            df.loc[df.loc[:, 'Impact category'] == 'Climate change, long term', 'CF value'] = 0
+            df.loc[df.loc[:, 'Impact category'] == 'Climate change, ecosystem quality, long term', 'CF value'] = -(
+                df.loc[df.loc[:, 'Impact category'] == 'Climate change, ecosystem quality, short term', 'CF value']
+            ).iloc[0]
+            df.loc[df.loc[:, 'Impact category'] == 'Climate change, human health, long term', 'CF value'] = -(
+                df.loc[df.loc[:, 'Impact category'] == 'Climate change, human health, short term', 'CF value']
+            ).iloc[0]
+            if origin_flow in ['Carbon dioxide, fossil', 'Methane, fossil', 'Carbon monoxide, fossil']:
+                df.loc[df.loc[:, 'Impact category'] == 'Marine acidification, long term', 'CF value'] = -(
+                    df.loc[df.loc[:, 'Impact category'] == 'Marine acidification, short term', 'CF value']
+                ).iloc[0]
+            return df
+
+        self.master_db = clean_up_dataframe(pd.concat([self.master_db,
+                   temporary_storage_ghg_cf('Carbon dioxide, fossil',
+                                            'Correction flow for delayed emission of biogenic carbon dioxide'),
+                   temporary_storage_ghg_cf('Carbon dioxide, fossil',
+                                            'Correction flow for delayed emission of fossil carbon dioxide'),
+                   temporary_storage_ghg_cf('Methane, fossil',
+                                            'Correction flow for delayed emission of biogenic methane'),
+                   temporary_storage_ghg_cf('Methane, fossil',
+                                            'Correction flow for delayed emission of fossil methane'),
+                   temporary_storage_ghg_cf('Dinitrogen monoxide',
+                                            'Correction flow for delayed emission of nitrous oxide'),
+                   temporary_storage_ghg_cf('Sulfur hexafluoride',
+                                            'Correction flow for delayed emission of sulphur hexafluoride')]))
+
         # ---------------- Equal to unspecified -------------
 
         subcomps = {'Air': ['high. pop.', 'low. pop.', 'stratosphere + troposphere', 'indoor'],
@@ -4296,6 +4390,10 @@ class Parse:
         to_zero = {'groundwater': ['Freshwater ecotoxicity',
                                    'Freshwater ecotoxicity, long term',
                                    'Freshwater ecotoxicity, short term',
+                                   'Marine ecotoxicity, long term',
+                                   'Marine ecotoxicity, short term',
+                                   'Terrestrial ecotoxicity, long term',
+                                   'Terrestrial ecotoxicity, short term',
                                    'Freshwater eutrophication',
                                    'Human toxicity cancer',
                                    'Human toxicity cancer, long term',
@@ -4310,6 +4408,10 @@ class Parse:
                    'groundwater, long-term': ['Freshwater ecotoxicity',
                                               'Freshwater ecotoxicity, long term',
                                               'Freshwater ecotoxicity, short term',
+                                              'Marine ecotoxicity, long term',
+                                              'Marine ecotoxicity, short term',
+                                              'Terrestrial ecotoxicity, long term',
+                                              'Terrestrial ecotoxicity, short term',
                                               'Freshwater eutrophication',
                                               'Human toxicity cancer',
                                               'Human toxicity cancer, long term',
@@ -4324,6 +4426,10 @@ class Parse:
                    'ocean': ['Freshwater ecotoxicity',
                              'Freshwater ecotoxicity, long term',
                              'Freshwater ecotoxicity, short term',
+                             'Marine ecotoxicity, long term',
+                             'Marine ecotoxicity, short term',
+                             'Terrestrial ecotoxicity, long term',
+                             'Terrestrial ecotoxicity, short term',
                              'Freshwater eutrophication',
                              'Ionizing radiation, ecosystem quality',
                              'Human toxicity cancer',
@@ -4381,8 +4487,8 @@ class Parse:
 
         long_term_subcomps = {'low. pop., long-term': 'low. pop.'}
 
-        long_term_cats = ['Climate change, ecosystem quality', 'Climate change, human health',
-                          'Freshwater ecotoxicity', 'Human toxicity cancer',
+        long_term_cats = ['Climate change, ecosystem quality', 'Climate change, human health', 'Freshwater ecotoxicity',
+                          'Marine ecotoxicity', 'Terrestrial ecotoxicity', 'Human toxicity cancer',
                           'Human toxicity non-cancer', 'Marine acidification']
 
         for subcomp in long_term_subcomps.keys():
@@ -4435,7 +4541,7 @@ class Parse:
             self.master_db = clean_up_dataframe(self.master_db)
 
         # finally for the endpoint categories that have no long/short term differentiation
-        ics = ['Marine eutrophication', 'Ozone layer depletion', 'Photochemical oxidant formation',
+        ics = ['Marine eutrophication', 'Ozone layer depletion',
                'Terrestrial acidification', 'Particulate matter formation', 'Ionizing radiation, ecosystem quality',
                'Ionizing radiation, human health', 'Freshwater acidification']
         for subcomp in long_term_subcomps.keys():
@@ -4598,7 +4704,7 @@ class Parse:
 
         # for not_one_for_one it's harder, e.g., the "Zinc" substance from iw+ must be linked to multiple elementary flows in ecoinvent
         unique_not_one_for_one = set(not_one_for_one.loc[:, 'iw name'])
-        for subst in unique_not_one_for_one:
+        for subst in tqdm(unique_not_one_for_one, leave=True):
             ei_df = not_one_for_one.loc[[i for i in not_one_for_one.index if not_one_for_one.loc[i, 'iw name'] == subst]]
             iw_df = ei_iw_db.loc[[i for i in ei_iw_db.index if ei_iw_db.loc[i, 'Elem flow name'] == subst]]
             new_df = pd.concat([iw_df] * len(ei_df))
@@ -4815,6 +4921,62 @@ class Parse:
         # copy to not make changes on the original
         self.iw_sp = self.master_db.copy()
 
+        # -------------------------------- MAPPING -------------------------------------
+
+        # now apply the mapping with the different SP flow names
+        sp = pd.read_excel(pkg_resources.resource_filename(__name__, '/Data/mappings/SP/sp_mapping.xlsx'), None)
+        sp = clean_up_dataframe(pd.concat([sp['Non regionalized'], sp['Regionalized']]))
+        sp = sp.drop('Unnamed: 0', axis=1).loc[:, ['Name', 'Name IW+']].dropna()
+        differences = sp.loc[sp.Name != sp.loc[:, 'Name IW+']].set_index('Name IW+')
+        double_iw_flow = sp.loc[sp.loc[:, 'Name IW+'].duplicated(), 'Name IW+'].tolist()
+        sp = sp.set_index('Name IW+')
+
+        # go to dictionaries because it's waaaay faster to process than dataframes
+        iw_sp_dict = dict(zip(list(zip(self.iw_sp.loc[:, 'Elem flow name'],
+                                       self.iw_sp.loc[:, 'Impact category'],
+                                       self.iw_sp.loc[:, 'CF unit'],
+                                       self.iw_sp.loc[:, 'Compartment'],
+                                       self.iw_sp.loc[:, 'Sub-compartment'],
+                                       self.iw_sp.loc[:, 'CAS number'],
+                                       self.iw_sp.loc[:, 'Elem flow unit'],
+                                       self.iw_sp.loc[:, 'MP or Damage'],
+                                       self.iw_sp.loc[:, 'Native geographical resolution scale'],
+                                       )),
+                              self.iw_sp.loc[:, 'CF value']))
+
+        for diff in tqdm(differences.index, leave=True):
+            if diff not in double_iw_flow:
+                # simply rename the key
+                for k in list(iw_sp_dict.keys()):
+                    if k[0] == diff:
+                        new_key = (differences.loc[diff, 'Name'],) + k[1:]
+                        iw_sp_dict[new_key] = iw_sp_dict.pop(k)
+            else:
+                for i in range(len(sp.loc[diff, 'Name'])):
+                    # here we loop through the multiple SP names connected to one IW+ name
+                    if i == len(sp.loc[diff, 'Name']):
+                        # if it's the final SP name, we pop the original key
+                        for k in list(iw_sp_dict.keys()):
+                            if k[0] == diff:
+                                new_key = (sp.loc[diff, 'Name'].iloc[i],) + k[1:]
+                                iw_sp_dict[new_key] = iw_sp_dict.pop(k)
+                    else:
+                        for k in list(iw_sp_dict.keys()):
+                            # otherwise we just add a new key to the dict
+                            if k[0] == diff:
+                                new_key = (sp.loc[diff, 'Name'].iloc[i],) + k[1:]
+                                iw_sp_dict[new_key] = iw_sp_dict[k]
+
+        # create the dataframe from the dictionary
+        self.iw_sp = pd.DataFrame.from_dict(iw_sp_dict, orient='index')
+        self.iw_sp.index = pd.MultiIndex.from_tuples(self.iw_sp.index)
+        self.iw_sp = self.iw_sp.reset_index()
+        self.iw_sp.columns = ['Elem flow name', 'Impact category', 'CF unit', 'Compartment', 'Sub-compartment',
+                              'CAS number', 'Elem flow unit', 'MP or Damage', 'Native geographical resolution scale',
+                              'CF value']
+
+        # ------------------------------- SUBCOMPS ----------------------------------
+
         # need to change the unit of land occupation flows to match SP nomenclature
         self.iw_sp.loc[self.iw_sp.loc[:, 'Elem flow unit'] == 'm2.yr', 'Elem flow unit'] = 'm2a'
 
@@ -4823,81 +4985,26 @@ class Parse:
         self.iw_sp.loc[self.iw_sp['Elem flow name'] == 'Water, agri', 'Elem flow name'] = 'Water/m3, agri'
         self.iw_sp.loc[self.iw_sp['Elem flow name'] == 'Water, non-agri', 'Elem flow name'] = 'Water/m3, non-agri'
 
-        # now apply the mapping with the different SP flow names
-        sp = pd.read_excel(pkg_resources.resource_filename(__name__, '/Data/mappings/SP/new_mapping.xlsx'), None)
-        sp = clean_up_dataframe(pd.concat([sp['Non regionalized'], sp['Regionalized']]))
-        sp = sp.drop('Unnamed: 0', axis=1).loc[:, ['Name', 'Name IW+']].dropna()
-        differences = sp.loc[sp.Name != sp.loc[:, 'Name IW+']].set_index('Name IW+')
-        double_iw_flow = sp.loc[sp.loc[:, 'Name IW+'].duplicated(), 'Name IW+']
-        sp = sp.set_index('Name IW+')
-
-        for diff in differences.index:
-            if diff in list(self.iw_sp.loc[:, 'Elem flow name']):
-                if diff not in list(double_iw_flow):
-                    # just rename
-                    self.iw_sp.loc[self.iw_sp.loc[:, 'Elem flow name'] == diff, 'Elem flow name'] = differences.loc[
-                        diff, 'Name']
-                else:
-                    # here we cannot just replace because otherwise we lose one SP flow
-                    # also we do not look into differences also because one of the doubles could be one that is not different from IW+
-                    for i in range(len(sp.loc[diff, 'Name'])):
-                        # we concat over the df except for the last element where we directly replace within the df
-                        if i == len(sp.loc[diff, 'Name']):
-                            self.iw_sp.loc[self.iw_sp.loc[:, 'Elem flow name'] == diff, 'Elem flow name'] = \
-                            sp.loc[diff, 'Name'].iloc[i]
-                        else:
-                            df = self.iw_sp.loc[self.iw_sp.loc[:, 'Elem flow name'] == diff].copy()
-                            df.loc[:, 'Elem flow name'] = sp.loc[diff, 'Name'].iloc[i]
-                            self.iw_sp = clean_up_dataframe(pd.concat([self.iw_sp, df]))
-
         # need an unspecified subcomp for mineral resource uses, for some databases in SP (e.g., Industry2.0)
         df = self.iw_sp.loc[
             [i for i in self.iw_sp.index if self.iw_sp.loc[i, 'Impact category'] == 'Mineral resources use']].copy()
         df['Sub-compartment'] = '(unspecified)'
         self.iw_sp = clean_up_dataframe(pd.concat([self.iw_sp, df]))
 
-        # flows from SP that require conversions because of units
-        mj_flows = sp.loc[[i for i in sp.index if 'MJ' in sp.loc[i, 'Name']], 'Name']
+        # --------------------------- UNIT CONVERSIONS ----------------------------------
+
+        mj_flows = sp.loc[sp.loc[:, 'Name'].str.contains('MJ'), 'Name']
         for flow in mj_flows:
-            if 'per kg' in flow:
-                to_add = pd.DataFrame(['Fossil and nuclear energy use',
-                                       'MJ deprived',
-                                       'Raw',
-                                       'in ground',
-                                       flow,
-                                       '',
-                                       float(flow.split(' MJ')[0].split(', ')[-1]),
-                                       'kg',
-                                       'Midpoint',
-                                       'Global'], index=self.iw_sp.columns)
-                self.iw_sp = pd.concat([self.iw_sp, to_add.T], axis=0)
-            elif 'per m3' in flow:
-                to_add = pd.DataFrame(['Fossil and nuclear energy use',
-                                       'MJ deprived',
-                                       'Raw',
-                                       'in ground',
-                                       flow,
-                                       '',
-                                       float(flow.split(' MJ')[0].split(', ')[-1]),
-                                       'm3',
-                                       'Midpoint',
-                                       'Global'], index=self.iw_sp.columns)
-                self.iw_sp = pd.concat([self.iw_sp, to_add.T], axis=0)
-        self.iw_sp = clean_up_dataframe(self.iw_sp)
-        gj_flows = sp.loc[[i for i in sp.index if 'GJ per kg' in sp.loc[i, 'Name']], 'Name']
+            self.iw_sp.loc[self.iw_sp.loc[:, 'Elem flow name'] == flow, 'CF value'] = float(
+                flow.split(' MJ')[0].split(', ')[-1])
+
+        gj_flows = sp.loc[sp.loc[:, 'Name'].str.contains('GJ'), 'Name']
         for flow in gj_flows:
-            to_add = pd.DataFrame(['Fossil and nuclear energy use',
-                                   'MJ deprived',
-                                   'Raw',
-                                   'in ground',
-                                   flow,
-                                   '',
-                                   float(flow.split(' GJ per kg')[0].split(', ')[-1]),
-                                   'kg',
-                                   'Midpoint',
-                                   'Global'], index=self.iw_sp.columns)
-            self.iw_sp = pd.concat([self.iw_sp, to_add.T], axis=0)
-        self.iw_sp = clean_up_dataframe(self.iw_sp)
+            if 'IN-GJ' not in flow:
+                self.iw_sp.loc[[i for i in self.iw_sp.index if self.iw_sp.loc[i, 'Elem flow name'] == flow and
+                                self.iw_sp.loc[
+                                    i, 'Impact category'] == 'Fossil and nuclear energy use'], 'CF value'] = float(
+                    flow.split(' GJ')[0].split(', ')[-1]) * 1000
 
         # some other flows from SP that require conversions because of units
         new_flows = {
@@ -4946,145 +5053,208 @@ class Parse:
             self.iw_sp.loc[self.iw_sp['Elem flow name'] == problem_child, 'Elem flow unit'] = 'kg'
             self.iw_sp.loc[self.iw_sp['Elem flow name'] == problem_child, 'CF value'] /= 1000
 
+        # finally, SimaPro limits to 12 characters the size of the CF unit. We rename some to avoid issues
+        self.iw_sp.loc[self.iw_sp.loc[:, 'CF unit'] == 'kg CFC-11 eq', 'CF unit'] = 'kg CFC11 eq'
+        self.iw_sp.loc[self.iw_sp.loc[:, 'CF unit'] == 'm2 arable land eq', 'CF unit'] = 'm2 ar ld eq'
+        self.iw_sp.loc[self.iw_sp.loc[:, 'CF unit'] == 'm2 arable land eq .yr', 'CF unit'] = 'm2 ar ld.yr eq'
+
+        # ------------------------------ DOING SIMAPRO'S JOB ----------------------------
+
+        # Préconsultants can't seem to be able to harmonize their own substance list therefore some pollutants do not
+        # have the same spelling depending on the compartment. We "fix" that here by hardcoding the necessary changes.
+        self.iw_sp.loc[[i for i in self.iw_sp.index if
+                        self.iw_sp.loc[i, 'Elem flow name'] == '2-(Chloromethyl)-3-Chloro-1-Propene' and
+                        self.iw_sp.Compartment[i] in ['Water', 'Soil']], 'Elem flow name'] = '2-(Chloromethyl)-3-chloro-1-propene'
+        self.iw_sp.loc[[i for i in self.iw_sp.index if
+                        self.iw_sp.loc[i, 'Elem flow name'] == '2-Methyl-2,4-Pentanediol' and
+                        self.iw_sp.Compartment[i] in ['Water', 'Soil']], 'Elem flow name'] = '2-Methyl-2,4-pentanediol'
+        self.iw_sp.loc[[i for i in self.iw_sp.index if
+                        self.iw_sp.loc[i, 'Elem flow name'] == 'Alpha-Naphthylamine' and
+                        self.iw_sp.Compartment[i] == 'Air'], 'Elem flow name'] = 'alpha-Naphthylamine'
+        self.iw_sp.loc[[i for i in self.iw_sp.index if
+                        self.iw_sp.loc[i, 'Elem flow name'] == 'Alpha-pinene' and
+                        self.iw_sp.Compartment[i] == 'Air'], 'Elem flow name'] = 'alpha-Pinene'
+        self.iw_sp.loc[[i for i in self.iw_sp.index if
+                        self.iw_sp.loc[i, 'Elem flow name'] == 'Phosphorodithioic acid, O,O-diethyl ester' and
+                        self.iw_sp.Compartment[i] == 'Air'], 'Elem flow name'] = 'Phosphorodithioic acid, o,o-diethyl ester'
+        self.iw_sp.loc[[i for i in self.iw_sp.index if
+                        self.iw_sp.loc[i, 'Elem flow name'] == 'Phosphorodithioic acid, O,O-dimethyl ester' and
+                        self.iw_sp.Compartment[i] == 'Air'], 'Elem flow name'] = 'Phosphorodithioic acid, o,o-dimethyl ester'
+        self.iw_sp.loc[[i for i in self.iw_sp.index if
+                        self.iw_sp.loc[i, 'Elem flow name'] == 't-Butyl acetate' and
+                        self.iw_sp.Compartment[i] in ['Water', 'Soil']], 'Elem flow name'] = 'T-butyl acetate'
+
     def link_to_olca(self):
         """
         This method creates an openLCA method with the IW+ characterization factors.
         :return:
         """
 
+        # copy to not make changes on the original
         self.olca_iw = self.master_db.copy()
 
-        olca_mapping = pd.read_excel(pkg_resources.resource_filename(__name__, '/Data/mappings/oLCA/v1.10/oLCA_mapping.xlsx'))
-        olca_flows = pd.read_excel(pkg_resources.resource_filename(__name__, '/Data/mappings/oLCA/v1.10/all_stressors.xlsx'))
+        # -------------------------------- MAPPING -------------------------------------
 
-        # before removing flows that are not matched, keep those related to energy that are treated later
-        energy_flows = olca_mapping.loc[[i for i in olca_mapping.index if 'MJ' in olca_mapping.loc[i, 'oLCA name']],
-                                        'oLCA name'].values.tolist()
-        energy_flows = olca_flows.loc[[i for i in olca_flows.index if olca_flows.loc[i, 'flow_name'] in energy_flows]]
+        olca = pd.read_excel(pkg_resources.resource_filename(__name__, '/Data/mappings/oLCA/v2.1.1/oLCA_mapping.xlsx'),
+                             None)
+        olca = clean_up_dataframe(pd.concat([olca['Non regionalized'], olca['Regionalized']]))
+        olca = olca.drop('Unnamed: 0', axis=1).loc[:, ['Name', 'Name IW+']].dropna()
+        differences = olca.loc[olca.Name != olca.loc[:, 'Name IW+']].set_index('Name IW+')
+        double_iw_flow = olca.loc[olca.loc[:, 'Name IW+'].duplicated(), 'Name IW+'].tolist()
+        olca = olca.set_index('Name IW+')
 
-        # before removing flows that are not matched, keep those related to different units used
-        flows_to_convert = {
+        # go to dictionaries because it's waaaay faster to process than dataframes
+        iw_olca_dict = dict(zip(list(zip(self.olca_iw.loc[:, 'Elem flow name'],
+                                         self.olca_iw.loc[:, 'Impact category'],
+                                         self.olca_iw.loc[:, 'CF unit'],
+                                         self.olca_iw.loc[:, 'Compartment'],
+                                         self.olca_iw.loc[:, 'Sub-compartment'],
+                                         self.olca_iw.loc[:, 'CAS number'],
+                                         self.olca_iw.loc[:, 'Elem flow unit'],
+                                         self.olca_iw.loc[:, 'MP or Damage'],
+                                         self.olca_iw.loc[:, 'Native geographical resolution scale'],
+                                         )),
+                                self.olca_iw.loc[:, 'CF value']))
+
+        for diff in tqdm(differences.index, leave=True):
+            if diff not in double_iw_flow:
+                # simply rename the key
+                for k in list(iw_olca_dict.keys()):
+                    if k[0] == diff:
+                        new_key = (differences.loc[diff, 'Name'],) + k[1:]
+                        iw_olca_dict[new_key] = iw_olca_dict.pop(k)
+            else:
+                for i in range(len(olca.loc[diff, 'Name'])):
+                    # here we loop through the multiple oLCA names connected to one IW+ name
+                    if i == len(olca.loc[diff, 'Name']):
+                        # if it's the final oLCA name, we pop the original key
+                        for k in list(iw_olca_dict.keys()):
+                            if k[0] == diff:
+                                new_key = (olca.loc[diff, 'Name'].iloc[i],) + k[1:]
+                                iw_olca_dict[new_key] = iw_olca_dict.pop(k)
+                    else:
+                        for k in list(iw_olca_dict.keys()):
+                            # otherwise we just add a new key to the dict
+                            if k[0] == diff:
+                                new_key = (olca.loc[diff, 'Name'].iloc[i],) + k[1:]
+                                iw_olca_dict[new_key] = iw_olca_dict[k]
+
+        # create the dataframe from the dictionary
+        self.olca_iw = pd.DataFrame.from_dict(iw_olca_dict, orient='index')
+        self.olca_iw.index = pd.MultiIndex.from_tuples(self.olca_iw.index)
+        self.olca_iw = self.olca_iw.reset_index()
+        self.olca_iw.columns = ['Elem flow name', 'Impact category', 'CF unit', 'Compartment', 'Sub-compartment',
+                                'CAS number', 'Elem flow unit', 'MP or Damage', 'Native geographical resolution scale',
+                                'CF value']
+
+        # ------------------------------------ UNITS --------------------------------
+
+        # Unit name changes and others
+        self.olca_iw.loc[self.olca_iw.loc[:, 'Elem flow unit'] == 'Bq', 'CF value'] *= 1000
+        self.olca_iw.loc[self.olca_iw.loc[:, 'Elem flow unit'] == 'Bq', 'Elem flow unit'] = 'kBq'
+        self.olca_iw.loc[self.olca_iw.loc[:, 'Elem flow unit'] == 'm2.yr', 'Elem flow unit'] = 'm2*a'
+        self.olca_iw.loc[self.olca_iw.loc[:, 'Elem flow unit'] == 'kgy', 'Elem flow unit'] = 'kg*a'
+
+        mj_flows = olca.loc[olca.loc[:, 'Name'].str.contains('MJ'), 'Name']
+        for flow in mj_flows:
+            self.olca_iw.loc[self.olca_iw.loc[:, 'Elem flow name'] == flow, 'CF value'] = float(
+                flow.split(' MJ')[0].split(', ')[-1])
+
+        gj_flows = olca.loc[olca.loc[:, 'Name'].str.contains('GJ'), 'Name']
+        for flow in gj_flows:
+            if 'IN-GJ' not in flow:
+                self.olca_iw.loc[[i for i in self.olca_iw.index if self.olca_iw.loc[i, 'Elem flow name'] == flow and
+                                self.olca_iw.loc[
+                                    i, 'Impact category'] == 'Fossil and nuclear energy use'], 'CF value'] = float(
+                    flow.split(' GJ')[0].split(', ')[-1]) * 1000
+
+        # some other flows from oLCA that require conversions because of units
+        new_flows = {
             'Gas, natural/kg': 'Gas, natural/m3',
-            'Gas, mine, off-gas, process, coal mining/kg': 'Gas, mine, off-gas, process, coal mining/m3',
-            'Water, cooling, unspecified natural origin/kg': 'Water, cooling, unspecified natural origin',
-            'Water, process, unspecified natural origin/kg': 'Water, cooling, unspecified natural origin',
-            'Water, unspecified natural origin/kg': 'Water, unspecified natural origin',
-            'Wood, unspecified, standing/kg': 'Wood, unspecified, standing/m3'
+            'Gas, mine, off-gas, process, coal mining/kg': 'Gas, mine, off-gas, process, coal mining/m3'
         }
-        converting = olca_flows.loc[
-            [i for i in olca_flows.index if olca_flows.loc[i, 'flow_name'] in flows_to_convert.keys()]]
-        converting['reference'] = [flows_to_convert[i] for i in converting['flow_name']]
-        assert converting.loc[31546, 'flow_name'] == 'Gas, mine, off-gas, process, coal mining/kg'
-        converting.loc[31546, 'reference'] = 'Gas, mine, off-gas, process, coal mining'
-        assert converting.loc[31563, 'flow_name'] == 'Gas, natural/kg'
-        converting.loc[31563, 'reference'] = 'Gas, natural, in ground'
-        assert converting.loc[60453, 'flow_name'] == 'Water, unspecified natural origin/kg'
-        converting.loc[60453, 'reference'] = 'Water, unspecified natural origin/m3'
+        for flow in new_flows:
+            if 'Gas' in flow:
+                density = 0.8  # kg/m3 (https://www.engineeringtoolbox.com/gas-density-d_158.html)
 
-        # map oLCA and IW flow names + drop oLCA flows not linked to IW
-        olca_flows = olca_flows.merge(olca_mapping, left_on=['flow_name'],
-                                      right_on=['oLCA name'], how='left').dropna(subset=['iw name'])
-        # split comp and subcomp
-        olca_flows['Sub-compartment'] = [eval(i)[1] for i in olca_flows['comp']]
-        olca_flows['Compartment'] = [eval(i)[0] for i in olca_flows['comp']]
+            df = self.olca_iw[self.olca_iw['Elem flow name'] == new_flows[flow]].copy()
+            df.loc[:, 'Elem flow name'] = flow
+            df.loc[:, 'Elem flow unit'] = 'kg'
+            df.loc[:, 'CF value'] /= density
+            self.olca_iw = pd.concat([self.olca_iw, df])
+        self.olca_iw = clean_up_dataframe(self.olca_iw)
 
-        # map compartments between oLCA and IW
-        with open(pkg_resources.resource_filename(__name__, '/Data/mappings/oLCA/v1.10/comps.json'), 'r') as f:
+        # some water flows are in kilograms instead of cubic meters...
+        problems = ['Water',
+                    'Water/kg',
+                    'Water (fresh water)',
+                    'Water (river water from technosphere turbined)',
+                    'Water (river water from technosphere, turbined)',
+                    'Water (with river silt)',
+                    'Water, with river silt',
+                    'Water, barrage',
+                    'Water, cooling, drinking',
+                    'Water, cooling, salt, ocean',
+                    'Water, cooling, surface',
+                    'Water, cooling, well',
+                    'Water, cooling, well, in ground',
+                    'Water, groundwater consumption',
+                    'Water, process, drinking',
+                    'Water, process, salt, ocean',
+                    'Water, process, surface',
+                    'Water, process, well',
+                    'Water, Saline water consumption',
+                    'Water, surface',
+                    'Water, surface water consumption',
+                    'Water, Surface water consumption',
+                    'Water, thermoelectric groundwater consumption',
+                    'Water, thermoelectric saline water consumption',
+                    'Water, thermoelectric surface water consumption',
+                    'Water, cooling, unspecified natural origin/kg',
+                    'Water, process, unspecified natural origin/kg',
+                    'Water, unspecified natural origin/kg',
+                    'Thermally polluted water'
+                    ]
+
+        for problem_child in problems:
+            self.olca_iw.loc[self.olca_iw['Elem flow name'] == problem_child, 'Elem flow unit'] = 'kg'
+            self.olca_iw.loc[self.olca_iw['Elem flow name'] == problem_child, 'CF value'] /= 1000
+
+        # --------------------------- COMPS AND SUBCOMPS --------------------------------
+        with open(pkg_resources.resource_filename(__name__, '/Data/mappings/oLCA/v2.1.1/comps.json'), 'r') as f:
             comps = json.load(f)
-        olca_flows['Compartment'] = [comps[i] for i in olca_flows['Compartment']]
+        self.olca_iw.Compartment = [{v: k for k, v in comps.items()}[i] for i in self.olca_iw.Compartment]
 
-        # map sub-compartments between oLCA and IW
-        with open(pkg_resources.resource_filename(__name__, '/Data/mappings/oLCA/v1.10/subcomps.json'), 'r') as f:
-            subcomps = json.load(f)
+        self.olca_iw.loc[self.olca_iw.loc[:, 'Sub-compartment'] == '(unspecified)', 'Sub-compartment'] = 'unspecified'
+        self.olca_iw.loc[self.olca_iw.loc[:, 'Sub-compartment'] == 'groundwater', 'Sub-compartment'] = 'ground water'
+        self.olca_iw.loc[self.olca_iw.loc[:,
+                         'Sub-compartment'] == 'groundwater, long-term', 'Sub-compartment'] = 'ground water, long-term'
+        self.olca_iw.loc[
+            self.olca_iw.loc[:, 'Sub-compartment'] == 'high. pop.', 'Sub-compartment'] = 'high population density'
+        self.olca_iw.loc[
+            self.olca_iw.loc[:, 'Sub-compartment'] == 'low. pop.', 'Sub-compartment'] = 'low population density'
+        self.olca_iw.loc[self.olca_iw.loc[:, 'Sub-compartment'] == 'low. pop., long-term',
+                         'Sub-compartment'] = 'low population density, long-term'
+        self.olca_iw.loc[self.olca_iw.loc[:, 'Sub-compartment'] == 'stratosphere + troposphere',
+                         'Sub-compartment'] = 'lower stratosphere + upper troposphere'
 
-        # remove weird LT subcomps that only exist in openLCA flows
-        olca_flows = olca_flows.drop([i for i in olca_flows.index if eval(olca_flows.loc[i, 'comp'])[1] in [
-            'river, long-term', 'fresh water, long-term']])
-        olca_flows['Sub-compartment'] = [subcomps[i] for i in olca_flows['Sub-compartment']]
+        # --------------------------- ADD OLCA UUIDS ------------------------------------
+        olca_flows = pd.read_excel(pkg_resources.resource_filename(
+            __name__, '/Data/mappings/oLCA/v2.1.1/all_stressors.xlsx'))
 
-        # switch iw names for olca names
-        merge = olca_flows.merge(self.olca_iw, how='left',
-                                 left_on=['iw name', 'Sub-compartment', 'Compartment'],
-                                 right_on=['Elem flow name', 'Sub-compartment', 'Compartment'])
-        # store flows of oLCA not linked yet
-        only_in_olca = merge[merge.drop(['cas', 'CAS number'], axis=1).isna().any(axis=1)].copy('deep')
-        # delete from original (full of NaNs)
-        merge = merge.drop(merge[merge.drop(['cas', 'CAS number'], axis=1).isna().any(axis=1)].index)
-        only_in_olca = only_in_olca.drop(['Impact category', 'CF unit', 'Elem flow name', 'CAS number', 'CF value',
-                                          'Elem flow unit', 'MP or Damage', 'Native geographical resolution scale'],
-                                         axis=1)
-        # merge without the subcomp (that's what bothering)
-        only_in_olca = only_in_olca.merge(self.olca_iw, how='left',
-                                          left_on=['iw name', 'Compartment'],
-                                          right_on=['Elem flow name', 'Compartment'])
-        only_in_olca = only_in_olca.dropna(subset=['Impact category', 'CF unit', 'Elem flow name', 'CF value',
-                                                   'Elem flow unit', 'MP or Damage',
-                                                   'Native geographical resolution scale'])
-
-        # specific case for radiative flows (should have proper values for ocean subcomp)
-        only_in_olca = only_in_olca.drop(only_in_olca.loc[only_in_olca.unit == 'kBq'].loc[
-                                             only_in_olca.comp == "('Emission to water', 'ocean')"].index)
-        only_in_olca.drop('Sub-compartment_y', axis=1, inplace=True)
-        only_in_olca.rename(columns={'Sub-compartment_x': 'Sub-compartment'}, inplace=True)
-        self.olca_iw = clean_up_dataframe(pd.concat([merge, only_in_olca]))
-
-        # CFs for water flows in kilograms to be converted
-        self.olca_iw.loc[[i for i in self.olca_iw.index if (self.olca_iw.loc[i, 'unit'] == 'kg' and
-                                                            'Water' in self.olca_iw.loc[i, 'flow_name'] and
-                                                            '/kg' not in self.olca_iw.loc[
-                                                                i, 'flow_name'])], 'CF value'] /= 1000
-
-        # remove information from IW+ / only keep information relevant for oLCA
-        self.olca_iw = self.olca_iw.drop(
-            ['oLCA name', 'iw name', 'Sub-compartment', 'Compartment', 'Elem flow name', 'CAS number', 'Elem flow unit',
-             'Native geographical resolution scale'], axis=1)
-        # define unique index
-        self.olca_iw = self.olca_iw.set_index(['Impact category', 'CF unit', 'flow_id'])
-        # sort the multi-index
-        self.olca_iw = self.olca_iw.sort_index()
-
-        # oLCA flows are in kBq and iw+ flows in Bq. We convert CF values accordingly.
-        self.olca_iw.loc[['Ionizing radiations',
-                          'Ionizing radiation, ecosystem quality',
-                          'Ionizing radiation, human health'], 'CF value'] *= 1000
-
-        # flows which CF values change depending on their names, e.g., "Coal, 18MJ/kg"
-        for id_ in energy_flows.index:
-            if 'Wood' not in energy_flows.loc[id_, 'flow_name']:
-                to_add = pd.DataFrame(['Fossil and nuclear energy use',
-                                       'MJ deprived',
-                                       energy_flows.loc[id_, 'flow_id'],
-                                       energy_flows.loc[id_, 'flow_name'],
-                                       energy_flows.loc[id_, 'comp'],
-                                       energy_flows.loc[id_, 'cas'],
-                                       energy_flows.loc[id_, 'unit'],
-                                       energy_flows.loc[id_, 'flow_name'].split(' MJ')[0].split(', ')[-1],
-                                       'Midpoint'],
-                                      index=['Impact category', 'CF unit', 'flow_id', 'flow_name', 'comp', 'cas',
-                                             'unit', 'CF value', 'MP or Damage'])
-                to_add = to_add.T
-                to_add.index = pd.MultiIndex.from_product([['Fossil and nuclear energy use'], ['MJ deprived'],
-                                                           [energy_flows.loc[id_, 'flow_id']]])
-                to_add.drop(['Impact category', 'CF unit', 'flow_id'], axis=1, inplace=True)
-
-                self.olca_iw = pd.concat([self.olca_iw, to_add], axis=0)
-
-        # flows which require conversions because of their unit, e.g., "Gas, natural/kg"
-        for i in converting.index:
-            df = self.olca_iw.loc[self.olca_iw['flow_name'] == converting.loc[i, 'reference']].copy()
-            df.index.names = ['Impact category', 'CF unit', 'flow_id']
-            df = df.loc[df['comp'] == converting.loc[i, 'comp']]
-            df = df.reset_index()
-            df['flow_id'] = converting.loc[i, 'flow_id']
-            df['flow_name'] = converting.loc[i, 'flow_name']
-            df = df.set_index(['Impact category', 'CF unit', 'flow_id'])
-            if 'Gas' in converting.loc[i, 'flow_name']:
-                df.loc[:, 'CF value'] /= 0.8  # kg/m3 (https://www.engineeringtoolbox.com/gas-density-d_158.html)
-            elif 'Water' in converting.loc[i, 'flow_name']:
-                df.loc[:, 'CF value'] /= 1000  # kg/m3
-            self.olca_iw.update(df)
-
-        self.olca_iw.index.names = ['Impact category', 'CF unit', 'flow_id']
+        # split comps and subcomps in two columns for matching with self.olca_iw
+        olca_flows['Compartment'] = [i.split('/')[1] for i in olca_flows['comp']]
+        olca_flows['Sub-compartment'] = [i.split('/')[2] for i in olca_flows['comp']]
+        # only keep relevant columns
+        olca_flows = olca_flows.loc[:, ['flow_id', 'flow_name', 'unit', 'Compartment', 'Sub-compartment']]
+        # merge with olca_iw, it basically adds the uuids of oLCA
+        self.olca_iw = olca_flows.merge(self.olca_iw, left_on=['flow_name', 'unit', 'Compartment', 'Sub-compartment'],
+                                        right_on=['Elem flow name', 'Elem flow unit', 'Compartment', 'Sub-compartment'],
+                                        how='left')
+        # remove flows of IW+ with no link to oLCA flows
+        self.olca_iw = self.olca_iw.drop(self.olca_iw.loc[self.olca_iw.loc[:, 'CF value'].isna()].index)
+        # remove irrelevant columns
+        self.olca_iw = self.olca_iw.drop(['flow_name', 'unit'], axis=1)
 
     def link_to_exiobase(self):
         """
@@ -5148,6 +5318,8 @@ class Parse:
         # HFC and PFC linked to "carbon dioxide" but should not impact marine acidification
         self.exio_iw.loc[['Marine acidification, long term (PDF.m2.yr)', 'Marine acidification, short term (PDF.m2.yr)'], [
             'HFC - air', 'PFC - air']] = 0
+        # cannot use +/-1 carbon biogenic approach with IO, so put back CFs from carbon neutrality approach
+        self.exio_iw.loc[:, 'CO2 - waste - biogenic - air'] = 0
 
         self.special_case_minerals_exiobase()
 
@@ -5345,48 +5517,34 @@ class Parse:
         self.exio_iw.loc[ 'Mineral resources use (kg deprived)',
                           'Unused Domestic Extraction - Non-Metallic Minerals - Other minerals'] = new_CF * 1000000
 
-    def get_simplified_versions(self, ei_flows_version=None):
+    def get_simplified_versions(self):
 
         # SimaPro
-        self.simplified_version_sp = clean_up_dataframe(produce_simplified_version(self.iw_sp).reindex(
+        self.simplified_version_sp = clean_up_dataframe(produce_simplified_version(self.iw_sp, 'SimaPro').reindex(
             self.iw_sp.columns, axis=1))
 
         # openLCA
-        self.simplified_version_olca = produce_simplified_version_olca(self.olca_iw)
-        assert not self.simplified_version_olca.index.duplicated().any()
+        self.simplified_version_olca = clean_up_dataframe(produce_simplified_version(self.olca_iw, 'openLCA').reindex(
+            self.olca_iw.columns, axis=1))
 
         # ecoinvent
-        self.simplified_version_ei35 = clean_up_dataframe(produce_simplified_version(self.ei35_iw).reindex(
+        self.simplified_version_ei35 = clean_up_dataframe(produce_simplified_version(self.ei35_iw, 'brightway2').reindex(
             self.ei35_iw.columns, axis=1))
 
-        self.simplified_version_ei36 = clean_up_dataframe(produce_simplified_version(self.ei36_iw).reindex(
+        self.simplified_version_ei36 = clean_up_dataframe(produce_simplified_version(self.ei36_iw, 'brightway2').reindex(
             self.ei36_iw.columns, axis=1))
 
-        self.simplified_version_ei371 = clean_up_dataframe(produce_simplified_version(self.ei371_iw).reindex(
+        self.simplified_version_ei371 = clean_up_dataframe(produce_simplified_version(self.ei371_iw, 'brightway2').reindex(
             self.ei371_iw.columns, axis=1))
 
-        self.simplified_version_ei38 = clean_up_dataframe(produce_simplified_version(self.ei38_iw).reindex(
+        self.simplified_version_ei38 = clean_up_dataframe(produce_simplified_version(self.ei38_iw, 'brightway2').reindex(
             self.ei38_iw.columns, axis=1))
 
-        self.simplified_version_ei39 = clean_up_dataframe(produce_simplified_version(self.ei39_iw).reindex(
+        self.simplified_version_ei39 = clean_up_dataframe(produce_simplified_version(self.ei39_iw, 'brightway2').reindex(
             self.ei39_iw.columns, axis=1))
 
-        self.simplified_version_ei310 = clean_up_dataframe(produce_simplified_version(self.ei310_iw).reindex(
+        self.simplified_version_ei310 = clean_up_dataframe(produce_simplified_version(self.ei310_iw, 'brightway2').reindex(
             self.ei310_iw.columns, axis=1))
-
-        # brightway2
-        if ei_flows_version == '3.5':
-            self.simplified_version_bw = self.simplified_version_ei35.copy('deep')
-        elif ei_flows_version == '3.6':
-            self.simplified_version_bw = self.simplified_version_ei36.copy('deep')
-        elif ei_flows_version == '3.7.1':
-            self.simplified_version_bw = self.simplified_version_ei371.copy('deep')
-        elif ei_flows_version == '3.8':
-            self.simplified_version_bw = self.simplified_version_ei38.copy('deep')
-        elif ei_flows_version == '3.9.1':
-            self.simplified_version_bw = self.simplified_version_ei39.copy('deep')
-        else:
-            self.simplified_version_bw = self.simplified_version_ei39.copy('deep')
 
     def get_total_hh_and_eq(self):
         """
@@ -5395,24 +5553,22 @@ class Parse:
         :return:
         """
 
-        total_hh = self.olca_iw.loc(axis=0)[:, 'DALY'].groupby(axis=0, level=2).agg({'flow_name': 'first',
-                                                                                     'comp': 'first',
-                                                                                     'cas': 'first',
-                                                                                     'unit': 'first',
-                                                                                     'CF value': sum,
-                                                                                     'MP or Damage': 'first'})
-        total_hh.index = pd.MultiIndex.from_tuples([('Total human health', 'DALY', i) for i in total_hh.index])
+        total_hh = self.olca_iw.loc[self.olca_iw.loc[:, 'CF unit'] == 'DALY'].drop('Impact category', axis=1).groupby(
+            by=['Elem flow name', 'CAS number', 'Compartment', 'Sub-compartment', 'Elem flow unit', 'CF unit',
+                'MP or Damage', 'flow_id']).agg({
+            'CF value': sum
+        }).reset_index()
+        total_hh.loc[:, 'Impact category'] = 'Total human health'
 
-        total_eq = self.olca_iw.loc(axis=0)[:, 'PDF.m2.yr'].groupby(axis=0, level=2).agg({'flow_name': 'first',
-                                                                                          'comp': 'first',
-                                                                                          'cas': 'first',
-                                                                                          'unit': 'first',
-                                                                                          'CF value': sum,
-                                                                                          'MP or Damage': 'first'})
-        total_eq.index = pd.MultiIndex.from_tuples([('Total ecosystem quality', 'PDF.m2.yr', i) for i in total_eq.index])
+        total_eq = self.olca_iw.loc[self.olca_iw.loc[:, 'CF unit'] == 'PDF.m2.yr'].drop('Impact category',
+                                                                                        axis=1).groupby(
+            by=['Elem flow name', 'CAS number', 'Compartment', 'Sub-compartment', 'Elem flow unit', 'CF unit',
+                'MP or Damage', 'flow_id']).agg({
+            'CF value': sum
+        }).reset_index()
+        total_eq.loc[:, 'Impact category'] = 'Total ecosystem quality'
 
-        self.olca_iw = pd.concat([self.olca_iw, total_hh, total_eq])
-
+        self.olca_iw = clean_up_dataframe(pd.concat([self.olca_iw, total_hh, total_eq]))
 
 # -------------- Support modules -------------------
 
@@ -6633,9 +6789,9 @@ def AGTPCH4NonFossil_Final(t, tauNonCO2, kPulseT, aT1, tauT1, aT2, tauT2, AANonC
     return AGTPNonCO2_Final(t, tauNonCO2, kPulseT, aT1, tauT1, aT2, tauT2, AANonCO2, aC1, aC2, aC3, aC4, tauC1, tauC2, tauC3, AACO2, gamma, aS1, aS2, aS3, tauS1, tauS2, tauS3) + DAGTPCH4toCO2(t, aC1, aC2, aC3, aC4, tauC1, tauC2, tauC3, kPulseT, aT1, tauT1, aT2, tauT2, AACO2) - (MCO2/MCH4)*AGTPCO2(t, aC1, aC2, aC3, aC4, tauC1, tauC2, tauC3, kPulseT, aT1, tauT1, aT2, tauT2, AACO2)
 
 
-def produce_simplified_version(complete_dataframe):
+def produce_simplified_version(complete_dataframe, software):
     """
-    Method producing the simplified version of IW+ in which there are only 6 indicators:
+    Method producing the simplified version of IW+ in which there are only 5 indicators:
     - Climate change, short term (=GWP100)
     - Water scarcity
     - Fossil resources
@@ -6644,26 +6800,29 @@ def produce_simplified_version(complete_dataframe):
     The damage impacts of climate change and water use on the Human health and Ecosystem quality area of protections
     are removed, hence only leaving "Remaining [...] damage". These are removed to avoid potential misuse by users
     where the impact of climate change and water use would be double-counted. Once as a midpoint category, and
-    another time as a damage category.
-    :return:
+    another time as a damage category. The simplified version relies on the carbon neutrality assumption.
+    :return: a simplified version of the full "expert" database version
     """
 
     simplified_version = complete_dataframe.copy('deep')
 
     # midpoint categories excluded from simplified version
     midpoint_drop = ['Climate change, long term', 'Freshwater acidification', 'Freshwater ecotoxicity',
-                     'Freshwater eutrophication', 'Mineral resources use', 'Human toxicity cancer',
-                     'Human toxicity non-cancer', 'Ionizing radiations', 'Land occupation, biodiversity',
-                     'Land transformation, biodiversity', 'Marine eutrophication', 'Ozone layer depletion',
-                     'Particulate matter formation', 'Photochemical oxidant formation', 'Terrestrial acidification']
+                     'Freshwater eutrophication', 'Human toxicity cancer', 'Human toxicity non-cancer',
+                     'Ionizing radiations', 'Land occupation, biodiversity', 'Land transformation, biodiversity',
+                     'Marine eutrophication', 'Mineral resources use', 'Ozone layer depletion',
+                     'Particulate matter formation', 'Photochemical ozone formation',
+                     'Plastics physical effects on biota', 'Terrestrial acidification']
     # endpoint categories excluded from simplified version
     endpoint_drop = ['Climate change, ecosystem quality, long term',
                      'Climate change, ecosystem quality, short term',
                      'Climate change, human health, long term', 'Climate change, human health, short term',
                      'Water availability, freshwater ecosystem', 'Water availability, human health',
-                     'Water availability, terrestrial ecosystem',
+                     'Water availability, terrestrial ecosystem', 'Marine ecotoxicity, long term'
                      'Human toxicity cancer, long term', 'Human toxicity non-cancer, long term',
-                     'Freshwater ecotoxicity, long term', 'Marine acidification, long term']
+                     'Freshwater ecotoxicity, long term', 'Marine acidification, long term',
+                     'Terrestrial ecotoxicity, long term']
+
     # dropping midpoint_drop
     simplified_version.drop([i for i in simplified_version.index if (
             simplified_version.loc[i, 'Impact category'] in midpoint_drop and
@@ -6696,16 +6855,18 @@ def produce_simplified_version(complete_dataframe):
     simplified_version = simplified_version.reset_index()
     # make hh_simplified respect the format of self.simplified_version_sp for concatenation
     hh_simplified = hh_simplified.reset_index()
-    hh_simplified.columns = ['Compartment', 'Sub-compartment', 'Elem flow name', 'Elem flow unit',
-                             'MP or Damage', 'CF value']
+    hh_simplified = hh_simplified.rename(
+        columns={'level_0': 'Compartment', 'level_1': 'Sub-compartment', 'level_2': 'Elem flow name',
+                 'level_3': 'Elem flow unit', 'level_4': 'MP or Damage'})
     hh_simplified.loc[:, 'CF unit'] = 'DALY'
-    hh_simplified.loc[:, 'Impact category'] = 'Remaining Human health damage'
+    hh_simplified.loc[:, 'Impact category'] = 'Human health (residual)'
     # make eq_simplified respect the format of self.simplified_version_sp for concatenation
     eq_simplified = eq_simplified.reset_index()
-    eq_simplified.columns = ['Compartment', 'Sub-compartment', 'Elem flow name', 'Elem flow unit',
-                             'MP or Damage', 'CF value']
+    eq_simplified = hh_simplified.rename(
+        columns={'level_0': 'Compartment', 'level_1': 'Sub-compartment', 'level_2': 'Elem flow name',
+                 'level_3': 'Elem flow unit', 'level_4': 'MP or Damage'})
     eq_simplified.loc[:, 'CF unit'] = 'PDF.m2.yr'
-    eq_simplified.loc[:, 'Impact category'] = 'Remaining Ecosystem quality damage'
+    eq_simplified.loc[:, 'Impact category'] = 'Ecosystem quality (residual)'
     # concat
     simplified_version = pd.concat([simplified_version, hh_simplified, eq_simplified])
     # put back the CAS numbers
@@ -6716,63 +6877,55 @@ def produce_simplified_version(complete_dataframe):
     simplified_version.loc[[i for i in simplified_version.index if simplified_version.loc[i, 'Impact category'] ==
                             'Climate change, short term'], 'Impact category'] = 'Carbon footprint'
     simplified_version.loc[[i for i in simplified_version.index if simplified_version.loc[i, 'Impact category'] ==
-                            'Water scarcity'], 'Impact category'] = 'Water scarcity footprint'
+                            'Water scarcity'], 'Impact category'] = 'Water footprint - Scarcity'
+    simplified_version.loc[[i for i in simplified_version.index if simplified_version.loc[i, 'Impact category'] ==
+                            'Fossil and nuclear energy use'], 'Impact category'] = 'Energetic resource depletion'
+
+    # the simplified version relies on the carbon neutrality assumption
+    if software == 'SimaPro':
+        simplified_version.loc[[i for i in simplified_version.index if simplified_version.loc[i, 'Elem flow name'] ==
+                                'Methane, biogenic' and simplified_version.loc[i,'Impact category'] == 'Carbon footprint'],
+                               'CF value'] = 27
+        simplified_version.loc[[i for i in simplified_version.index if simplified_version.loc[i, 'Elem flow name'] in
+                                ['Carbon dioxide, biogenic, uptake', 'Carbon dioxide, in air', 'Carbon dioxide, non-fossil, resource correction'] and
+                                simplified_version.loc[i,'Impact category'] == 'Carbon footprint'], 'CF value'] = 0
+        simplified_version.loc[[i for i in simplified_version.index if simplified_version.loc[i, 'Elem flow name'] in
+                                ['Carbon dioxide, biogenic, uptake', 'Carbon dioxide, in air', 'Carbon dioxide, non-fossil, resource correction'] and
+                                simplified_version.loc[i,'Impact category'] == 'Remaining Ecosystem quality damage'], 'CF value'] *= -1
+        simplified_version.loc[[i for i in simplified_version.index if simplified_version.loc[i, 'Elem flow name'] in
+                                ['Carbon dioxide, biogenic', 'Carbon monoxide, biogenic'] and simplified_version.loc[i,'Impact category'] ==
+                                'Carbon footprint'], 'CF value'] = 0
+
+    elif software == 'openLCA':
+        simplified_version.loc[[i for i in simplified_version.index if simplified_version.loc[i, 'Elem flow name'] in
+                                ['Methane, biogenic', 'Methane, non-fossil'] and simplified_version.loc[i,'Impact category'] == 'Carbon footprint'],
+                               'CF value'] = 27
+        simplified_version.loc[[i for i in simplified_version.index if simplified_version.loc[i, 'Elem flow name'] in
+                                ['Carbon dioxide, biogenic, uptake', 'Carbon dioxide, in air', 'Carbon dioxide, non-fossil, resource correction'] and
+                                simplified_version.loc[i,'Impact category'] == 'Carbon footprint'], 'CF value'] = 0
+        simplified_version.loc[[i for i in simplified_version.index if simplified_version.loc[i, 'Elem flow name'] in
+                                ['Carbon dioxide, biogenic, uptake', 'Carbon dioxide, in air', 'Carbon dioxide, non-fossil, resource correction'] and
+                                simplified_version.loc[i,'Impact category'] == 'Remaining Ecosystem quality damage'], 'CF value'] *= -1
+        simplified_version.loc[[i for i in simplified_version.index if simplified_version.loc[i, 'Elem flow name'] in
+                                ['Carbon dioxide, biogenic', 'Carbon dioxide, non-fossil', 'Carbon dioxide, biogenic, release',
+                                 'Carbon monoxide, biogenic', 'Carbon monoxide, non-fossil'] and simplified_version.loc[i,'Impact category'] ==
+                                'Carbon footprint'], 'CF value'] = 0
+
+    elif software == 'brightway2':
+        simplified_version.loc[[i for i in simplified_version.index if simplified_version.loc[i, 'Elem flow name'] ==
+                                'Methane, non-fossil' and simplified_version.loc[i,'Impact category'] == 'Carbon footprint'],
+                               'CF value'] = 27
+        simplified_version.loc[[i for i in simplified_version.index if simplified_version.loc[i, 'Elem flow name'] in
+                                ['Carbon dioxide, in air', 'Carbon dioxide, non-fossil, resource correction'] and
+                                simplified_version.loc[i,'Impact category'] == 'Carbon footprint'], 'CF value'] = 0
+        simplified_version.loc[[i for i in simplified_version.index if simplified_version.loc[i, 'Elem flow name'] in
+                                ['Carbon dioxide, in air', 'Carbon dioxide, non-fossil, resource correction'] and
+                                simplified_version.loc[i,'Impact category'] == 'Remaining Ecosystem quality damage'], 'CF value'] *= -1
+        simplified_version.loc[[i for i in simplified_version.index if simplified_version.loc[i, 'Elem flow name'] in
+                                ['Carbon dioxide, non-fossil', 'Carbon monoxide, non-fossil'] and simplified_version.loc[i,'Impact category'] ==
+                                'Carbon footprint'], 'CF value'] = 0
 
     return simplified_version
-
-
-def produce_simplified_version_olca(complete_dataframe):
-
-    simplified = complete_dataframe.copy('deep')
-
-    # midpoint categories excluded from simplified version
-    midpoint_drop = ['Climate change, long term', 'Freshwater acidification', 'Freshwater ecotoxicity',
-                     'Freshwater eutrophication', 'Mineral resources use', 'Human toxicity cancer',
-                     'Human toxicity non-cancer', 'Ionizing radiations', 'Land occupation, biodiversity',
-                     'Land transformation, biodiversity', 'Marine eutrophication', 'Ozone layer depletion',
-                     'Particulate matter formation', 'Photochemical oxidant formation', 'Terrestrial acidification']
-    # endpoint categories excluded from simplified version
-    endpoint_drop = ['Climate change, ecosystem quality, long term',
-                     'Climate change, ecosystem quality, short term',
-                     'Climate change, human health, long term', 'Climate change, human health, short term',
-                     'Water availability, freshwater ecosystem', 'Water availability, human health',
-                     'Water availability, terrestrial ecosystem',
-                     'Human toxicity cancer, long term', 'Human toxicity non-cancer, long term',
-                     'Freshwater ecotoxicity, long term', 'Marine acidification, long term']
-
-    simplified = simplified.drop([ic for ic in simplified.index if (ic[0] in midpoint_drop and
-                                                                    ic[1] not in ['DALY', 'PDF.m2.yr'])])
-    simplified = simplified.drop([ic for ic in simplified.index if (ic[0] in endpoint_drop and
-                                                                    ic[1] in ['DALY', 'PDF.m2.yr'])])
-    hh_simplified = simplified.loc(axis=0)[:, 'DALY'].groupby(axis=0, level=2).agg({'flow_name': 'first',
-                                                                                    'comp': 'first',
-                                                                                    'cas': 'first',
-                                                                                    'unit': 'first',
-                                                                                    'CF value': sum,
-                                                                                    'MP or Damage': 'first'})
-    hh_simplified.index = pd.MultiIndex.from_product([['Remaining Human health damage'], ['DALY'], hh_simplified.index])
-
-    eq_simplified = simplified.loc(axis=0)[:, 'PDF.m2.yr'].groupby(axis=0, level=2).agg({'flow_name': 'first',
-                                                                                         'comp': 'first',
-                                                                                         'cas': 'first',
-                                                                                         'unit': 'first',
-                                                                                         'CF value': sum,
-                                                                                         'MP or Damage': 'first'})
-    eq_simplified.index = pd.MultiIndex.from_product(
-        [['Remaining Ecosystem quality damage'], ['PDF.m2.yr'], eq_simplified.index])
-
-    simplified = simplified.drop('DALY', axis=0, level=1)
-    simplified = simplified.drop('PDF.m2.yr', axis=0, level=1)
-
-    simplified = pd.concat([simplified, hh_simplified, eq_simplified])
-
-    simplified.index = [('Carbon footprint', i[1], i[2]) if i[0] == 'Climate change, short term' else i
-                        for i in simplified.index]
-    simplified.index = [('Water scarcity footprint', i[1], i[2]) if i[0] == 'Water scarcity' else i
-                        for i in simplified.index]
-    simplified.index = pd.MultiIndex.from_tuples(simplified.index)
-
-    return simplified
 
 
 def clean_up_dataframe(df):
