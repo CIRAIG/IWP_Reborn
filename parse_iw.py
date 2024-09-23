@@ -360,7 +360,7 @@ class Parse:
                                     ['Name', '', '', '', '', ''],
                                     ['IMPACTWorld+ Midpoint ' + self.version, '', '', '', '', ''],
                                     ['', '', '', '', '', ''], ['Version', '', '', '', '', ''],
-                                    [self.version.split('.')[0],self.version.split('.')[1], '', '', '', ''],
+                                    ['2','1', '', '', '', ''],
                                     ['', '', '', '', '', ''], ['Comment', '', '', '', '', ''],
                                     ['For more information on IMPACT World+: https://www.impactworldplus.org.\n'
                                      'Full list of changes available here: https://github.com/CIRAIG/IWP_Reborn/tree/master/Report_changes', '', '', '', '', ''], ['', '', '', '', '', ''],
@@ -378,7 +378,7 @@ class Parse:
                                   ['Name', '', '', '', '', ''],
                                   ['IMPACTWorld+ Expert ' + self.version, '', '', '', '', ''],
                                   ['', '', '', '', '', ''], ['Version', '', '', '', '', ''],
-                                  [self.version.split('.')[0],self.version.split('.')[1], '', '', '', ''],
+                                  ['2','1', '', '', '', ''],
                                   ['', '', '', '', '', ''], ['Comment', '', '', '', '', ''],
                                   ['For more information on IMPACT World+: https://www.impactworldplus.org.\n'
                                      'Full list of changes available here: https://github.com/CIRAIG/IWP_Reborn/tree/master/Report_changes', '', '', '', '', ''], ['', '', '', '', '', ''],
@@ -396,7 +396,7 @@ class Parse:
                                     ['Name', '', '', '', '', ''],
                                     ['IMPACTWorld+ ' + self.version, '', '', '', '', ''],
                                     ['', '', '', '', '', ''], ['Version', '', '', '', '', ''],
-                                    [self.version.split('.')[0], self.version.split('.')[1], '', '', '', ''],
+                                    ['2','1', '', '', '', ''],
                                     ['', '', '', '', '', ''], ['Comment', '', '', '', '', ''],
                                     ['For more information on IMPACT World+: https://www.impactworldplus.org.\n'
                                      'Full list of changes available here: https://github.com/CIRAIG/IWP_Reborn/tree/master/Report_changes', '', '', '', '', ''], ['', '', '', '', '', ''],
@@ -414,7 +414,7 @@ class Parse:
                                     ['Name', '', '', '', '', ''],
                                     ['IMPACTWorld+ Footprint ' + self.version, '', '', '', '', ''],
                                     ['', '', '', '', '', ''], ['Version', '', '', '', '', ''],
-                                    [self.version.split('.')[0],self.version.split('.')[1], '', '', '', ''],
+                                    ['2','1', '', '', '', ''],
                                     ['', '', '', '', '', ''], ['Comment', '', '', '', '', ''],
                                     ['For more information on IMPACT World+: https://www.impactworldplus.org.\n'
                                      'Full list of changes available here: https://github.com/CIRAIG/IWP_Reborn/tree/master/Report_changes', '', '', '', '', ''], ['', '', '', '', '', ''],
@@ -433,8 +433,10 @@ class Parse:
             __name__, '/Data/weighting_normalizing/weighting_and_normalization.csv'),
             header=None, delimiter=';').fillna('')
         weighting_info_damage = [[df.loc[i].tolist()[0], df.loc[i].tolist()[1], '', '', '', ''] for i in df.index]
+        weighting_info_damage[10] = ['Ionizing radiations, human health', '1.00E+00', '', '', '', '']
         weighting_info_damage[13] = ['Photochemical ozone formation, human health', '1.00E+00', '', '', '', '']
         weighting_info_damage.insert(22, ['Fisheries impact', '1.00E+00', '', '', '', ''])
+        weighting_info_damage[27] = ['Ionizing radiations, ecosystem quality', '1.00E+00', '', '', '', '']
         weighting_info_damage.insert(32, ['Marine ecotoxicity, long term', '1.00E+00', '', '', '', ''])
         weighting_info_damage.insert(33, ['Marine ecotoxicity, short term', '1.00E+00', '', '', '', ''])
         weighting_info_damage.insert(35, ['Photochemical ozone formation, ecosystem quality', '1.00E+00', '', '', '', ''])
@@ -1250,8 +1252,8 @@ class Parse:
             - Human toxicity non cancer
             - Human toxicity non cancer, long term
             - Human toxicity non cancer, short term
-            - Ionizing radiation, ecosystem quality
-            - Ionizing radiation, human health
+            - Ionizing radiations, ecosystem quality
+            - Ionizing radiations, human health
             - Ionizing radiations
             - Marine acidification, short term
             = Marine acidification, long term
@@ -4401,8 +4403,8 @@ class Parse:
                                    'Human toxicity non-cancer',
                                    'Human toxicity non-cancer, long term',
                                    'Human toxicity non-cancer, short term',
-                                   'Ionizing radiation, ecosystem quality',
-                                   'Ionizing radiation, human health',
+                                   'Ionizing radiations, ecosystem quality',
+                                   'Ionizing radiations, human health',
                                    'Ionizing radiations',
                                    'Marine eutrophication'],
                    'groundwater, long-term': ['Freshwater ecotoxicity',
@@ -4419,8 +4421,8 @@ class Parse:
                                               'Human toxicity non-cancer',
                                               'Human toxicity non-cancer, long term',
                                               'Human toxicity non-cancer, short term',
-                                              'Ionizing radiation, ecosystem quality',
-                                              'Ionizing radiation, human health',
+                                              'Ionizing radiations, ecosystem quality',
+                                              'Ionizing radiations, human health',
                                               'Ionizing radiations',
                                               'Marine eutrophication'],
                    'ocean': ['Freshwater ecotoxicity',
@@ -4431,7 +4433,7 @@ class Parse:
                              'Terrestrial ecotoxicity, long term',
                              'Terrestrial ecotoxicity, short term',
                              'Freshwater eutrophication',
-                             'Ionizing radiation, ecosystem quality',
+                             'Ionizing radiations, ecosystem quality',
                              'Human toxicity cancer',
                              'Human toxicity cancer, long term',
                              'Human toxicity cancer, short term',
@@ -4542,8 +4544,8 @@ class Parse:
 
         # finally for the endpoint categories that have no long/short term differentiation
         ics = ['Marine eutrophication', 'Ozone layer depletion',
-               'Terrestrial acidification', 'Particulate matter formation', 'Ionizing radiation, ecosystem quality',
-               'Ionizing radiation, human health', 'Freshwater acidification']
+               'Terrestrial acidification', 'Particulate matter formation', 'Ionizing radiations, ecosystem quality',
+               'Ionizing radiations, human health', 'Freshwater acidification']
         for subcomp in long_term_subcomps.keys():
             data = self.master_db.loc[[i for i in self.master_db.index if (self.master_db.loc[i, 'Sub-compartment']
                                                                            == long_term_subcomps[subcomp] and
@@ -5006,6 +5008,12 @@ class Parse:
                                     i, 'Impact category'] == 'Fossil and nuclear energy use'], 'CF value'] = float(
                     flow.split(' GJ')[0].split(', ')[-1]) * 1000
 
+        # ensure units are coherent for energy flows
+        self.iw_sp.loc[
+            self.iw_sp.loc[:, 'Elem flow name'].isin([i for i in mj_flows if 'per kg' in i]), 'Elem flow unit'] = 'kg'
+        self.iw_sp.loc[
+            self.iw_sp.loc[:, 'Elem flow name'].isin([i for i in mj_flows if 'per m3' in i]), 'Elem flow unit'] = 'm3'
+
         # some other flows from SP that require conversions because of units
         new_flows = {
             'Gas, natural/kg': 'Gas, natural/m3',
@@ -5237,6 +5245,10 @@ class Parse:
                          'Sub-compartment'] = 'low population density, long-term'
         self.olca_iw.loc[self.olca_iw.loc[:, 'Sub-compartment'] == 'stratosphere + troposphere',
                          'Sub-compartment'] = 'lower stratosphere + upper troposphere'
+
+        df = self.olca_iw.loc[self.olca_iw.loc[:, 'Sub-compartment'] == 'lake'].copy()
+        df.loc[:, 'Sub-compartment'] = 'surface water'
+        self.olca_iw = clean_up_dataframe(pd.concat([self.olca_iw, df]))
 
         # --------------------------- ADD OLCA UUIDS ------------------------------------
         olca_flows = pd.read_excel(pkg_resources.resource_filename(
