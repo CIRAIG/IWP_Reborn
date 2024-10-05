@@ -1527,7 +1527,7 @@ class Parse:
 
         if not os.path.exists(path + '/openLCA/expert_version (incl. CO2 uptake)/oLCA_folders/nw_sets/'):
             os.makedirs(path + '/openLCA/expert_version (incl. CO2 uptake)/oLCA_folders/nw_sets/')
-        with open(path + '/openLCA/expert_version/oLCA_folders (incl. CO2 uptake)/nw_sets/' +
+        with open(path + '/openLCA/expert_version (incl. CO2 uptake)/oLCA_folders/nw_sets/' +
                   self.olca_data['normalization']['@id'] + '.json', 'w') as f:
             json.dump(self.olca_data['normalization'], f)
         zipObj.write(path + '/openLCA/expert_version (incl. CO2 uptake)/oLCA_folders/nw_sets/' +
