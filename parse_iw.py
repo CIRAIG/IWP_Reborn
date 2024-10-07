@@ -376,7 +376,7 @@ class Parse:
         # metadata on the midpoint method
         midpoint_method_metadata = [['Method', '', '', '', '', ''], ['', '', '', '', '', ''],
                                     ['Name', '', '', '', '', ''],
-                                    ['IMPACT World+ Midpoint ' + self.version, '', '', '', '', ''],
+                                    ['IMPACT World+ Midpoint ' + self.version + ' (incl. CO2 uptake)', '', '', '', '', ''],
                                     ['', '', '', '', '', ''], ['Version', '', '', '', '', ''],
                                     ['2','1', '', '', '', ''],
                                     ['', '', '', '', '', ''], ['Comment', '', '', '', '', ''],
@@ -394,7 +394,7 @@ class Parse:
         # metadata on the damage method
         damage_method_metadata = [['Method', '', '', '', '', ''], ['', '', '', '', '', ''],
                                   ['Name', '', '', '', '', ''],
-                                  ['IMPACT World+ Expert ' + self.version, '', '', '', '', ''],
+                                  ['IMPACT World+ Expert ' + self.version + ' (incl. CO2 uptake)', '', '', '', '', ''],
                                   ['', '', '', '', '', ''], ['Version', '', '', '', '', ''],
                                   ['2','1', '', '', '', ''],
                                   ['', '', '', '', '', ''], ['Comment', '', '', '', '', ''],
@@ -412,7 +412,7 @@ class Parse:
         # metadata on the combined method
         combined_method_metadata = [['Method', '', '', '', '', ''], ['', '', '', '', '', ''],
                                     ['Name', '', '', '', '', ''],
-                                    ['IMPACT World+ ' + self.version, '', '', '', '', ''],
+                                    ['IMPACT World+ ' + self.version + ' (incl. CO2 uptake)', '', '', '', '', ''],
                                     ['', '', '', '', '', ''], ['Version', '', '', '', '', ''],
                                     ['2','1', '', '', '', ''],
                                     ['', '', '', '', '', ''], ['Comment', '', '', '', '', ''],
@@ -430,7 +430,7 @@ class Parse:
         # metadata on the midpoint method
         midpoint_method_metadata_carboneutrality = [['Method', '', '', '', '', ''], ['', '', '', '', '', ''],
                                     ['Name', '', '', '', '', ''],
-                                    ['IMPACT World+ Midpoint ' + self.version + ' (incl. CO2 uptake)', '', '', '', '', ''],
+                                    ['IMPACT World+ Midpoint ' + self.version, '', '', '', '', ''],
                                     ['', '', '', '', '', ''], ['Version', '', '', '', '', ''],
                                     ['2','1', '', '', '', ''],
                                     ['', '', '', '', '', ''], ['Comment', '', '', '', '', ''],
@@ -448,7 +448,7 @@ class Parse:
         # metadata on the damage method
         damage_method_metadata_carboneutrality = [['Method', '', '', '', '', ''], ['', '', '', '', '', ''],
                                   ['Name', '', '', '', '', ''],
-                                  ['IMPACT World+ Expert ' + self.version + ' (incl. CO2 uptake)', '', '', '', '', ''],
+                                  ['IMPACT World+ Expert ' + self.version, '', '', '', '', ''],
                                   ['', '', '', '', '', ''], ['Version', '', '', '', '', ''],
                                   ['2','1', '', '', '', ''],
                                   ['', '', '', '', '', ''], ['Comment', '', '', '', '', ''],
@@ -466,7 +466,7 @@ class Parse:
         # metadata on the combined method
         combined_method_metadata_carboneutrality = [['Method', '', '', '', '', ''], ['', '', '', '', '', ''],
                                     ['Name', '', '', '', '', ''],
-                                    ['IMPACT World+ ' + self.version + ' (incl. CO2 uptake)', '', '', '', '', ''],
+                                    ['IMPACT World+ ' + self.version, '', '', '', '', ''],
                                     ['', '', '', '', '', ''], ['Version', '', '', '', '', ''],
                                     ['2','1', '', '', '', ''],
                                     ['', '', '', '', '', ''], ['Comment', '', '', '', '', ''],
