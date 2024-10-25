@@ -1,4 +1,4 @@
-## Fossil and nuclear energy use indicators
+## Fossil and nuclear energy use indicator
 
 Concerned impact categories:
 - Fossil and nuclear energy use (midpoint)

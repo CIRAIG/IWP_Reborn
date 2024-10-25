@@ -198,22 +198,22 @@ class Parse:
         self.logger.info("Create non-regionalized version for ecoinvent...")
         self.separate_regio_cfs()
 
-        self.logger.info("Linking to ecoinvent elementary flows...")
-        self.link_to_ecoinvent()
-
-        self.logger.info("Linking to SimaPro elementary flows...")
-        self.link_to_sp()
-
-        self.logger.info("Linking to openLCA elementary flows...")
-        self.link_to_olca()
+        # self.logger.info("Linking to ecoinvent elementary flows...")
+        # self.link_to_ecoinvent()
+        #
+        # self.logger.info("Linking to SimaPro elementary flows...")
+        # self.link_to_sp()
+        #
+        # self.logger.info("Linking to openLCA elementary flows...")
+        # self.link_to_olca()
 
         self.logger.info("Linking to exiobase environmental extensions...")
         self.link_to_exiobase()
 
-        self.logger.info("Prepare the footprint version...")
-        self.get_simplified_versions()
-
-        self.get_total_hh_and_eq()
+        # self.logger.info("Prepare the footprint version...")
+        # self.get_simplified_versions()
+        #
+        # self.get_total_hh_and_eq()
 
     def export_to_bw2(self):
         """
@@ -6149,15 +6149,16 @@ class Parse:
             __name__, 'Data/mappings/exiobase/EXIO_IW_concordance.xlsx'))
         EXIO_IW_concordance.set_index('EXIOBASE', inplace=True)
 
-        self.exio_iw = pd.DataFrame(0, EXIO_IW_concordance.index, list(set(list(zip(self.master_db.loc[:, 'Impact category'],
-                                                                         self.master_db.loc[:, 'CF unit'])))))
+        self.exio_iw = pd.DataFrame(0, EXIO_IW_concordance.index, list(set(list(zip(self.master_db_carbon_neutrality.loc[:, 'Impact category'],
+                                                                         self.master_db_carbon_neutrality.loc[:, 'CF unit'])))))
         self.exio_iw.columns = pd.MultiIndex.from_tuples(self.exio_iw.columns, names=['Impact category', 'CF unit'])
         self.exio_iw = self.exio_iw.T.sort_index().T
 
         for flow in EXIO_IW_concordance.index:
             if not EXIO_IW_concordance.loc[flow].isna().iloc[0]:
                 # identify all entries (any impact category, compartment, etc.) for given flow
-                CF_flow = self.master_db.loc[self.master_db['Elem flow name'] == EXIO_IW_concordance.loc[flow, 'IW']].loc[:,
+                CF_flow = self.master_db_carbon_neutrality.loc[self.master_db_carbon_neutrality['Elem flow name'] ==
+                                                               EXIO_IW_concordance.loc[flow, 'IW']].loc[:,
                           ['Impact category', 'CF unit', 'CF value', 'Compartment', 'Sub-compartment']]
                 # name of the comp in lower case to match exiobase easily
                 CF_flow.Compartment = [i.lower() for i in CF_flow.Compartment]
@@ -6249,7 +6250,7 @@ class Parse:
              'Platinum-group (PGM)' in metal_concentration_exiobase.CommodityName[i] and
              'By-products of other ore' in metal_concentration_exiobase.UsedComment[i]]].UsedFactor.mean()
 
-        df = self.master_db.copy()
+        df = self.master_db_carbon_neutrality.copy()
         df = df.set_index(['Elem flow name', 'Compartment', 'Sub-compartment'])
 
         self.exio_iw.loc['Mineral resources use (kg deprived)', 'Domestic Extraction Used - Metal Ores - Gold ores'] = (
@@ -6341,7 +6342,8 @@ class Parse:
         other_metal_concordance.dropna(inplace=True)
 
         for flow in other_metal_concordance.index:
-            CF_flow = self.master_db.loc[self.master_db['Elem flow name'] == other_metal_concordance.loc[flow].iloc[0]].loc[:,
+            CF_flow = self.master_db_carbon_neutrality.loc[self.master_db_carbon_neutrality['Elem flow name'] ==
+                                                           other_metal_concordance.loc[flow].iloc[0]].loc[:,
                       ['Impact category', 'CF unit', 'CF value', 'Compartment', 'Sub-compartment']]
             CFs = pd.pivot(CF_flow, values='CF value', index=['Compartment', 'Sub-compartment'],
                            columns=['Impact category', 'CF unit']).loc[('Raw', 'in ground')].fillna(0)
@@ -6397,7 +6399,7 @@ class Parse:
 
         self.exio_iw.loc['Mineral resources use (kg deprived)',
                          'Domestic Extraction Used - Non-Metallic Minerals - Other minerals'] = new_CF * 1000000
-        self.exio_iw.loc[ 'Mineral resources use (kg deprived)',
+        self.exio_iw.loc['Mineral resources use (kg deprived)',
                           'Unused Domestic Extraction - Non-Metallic Minerals - Other minerals'] = new_CF * 1000000
 
     def get_simplified_versions(self):
