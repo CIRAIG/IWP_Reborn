@@ -198,22 +198,22 @@ class Parse:
         self.logger.info("Create non-regionalized version for ecoinvent...")
         self.separate_regio_cfs()
 
-        # self.logger.info("Linking to ecoinvent elementary flows...")
-        # self.link_to_ecoinvent()
-        #
-        # self.logger.info("Linking to SimaPro elementary flows...")
-        # self.link_to_sp()
-        #
-        # self.logger.info("Linking to openLCA elementary flows...")
-        # self.link_to_olca()
+        self.logger.info("Linking to ecoinvent elementary flows...")
+        self.link_to_ecoinvent()
+
+        self.logger.info("Linking to SimaPro elementary flows...")
+        self.link_to_sp()
+
+        self.logger.info("Linking to openLCA elementary flows...")
+        self.link_to_olca()
 
         self.logger.info("Linking to exiobase environmental extensions...")
         self.link_to_exiobase()
 
-        # self.logger.info("Prepare the footprint version...")
-        # self.get_simplified_versions()
-        #
-        # self.get_total_hh_and_eq()
+        self.logger.info("Prepare the footprint version...")
+        self.get_simplified_versions()
+
+        self.get_total_hh_and_eq()
 
     def export_to_bw2(self):
         """
@@ -5268,6 +5268,12 @@ class Parse:
             self.master_db.loc[:, 'Elem flow name'].str.contains('Carbon monoxide')].copy()
         co_bio_release.loc[:, 'Elem flow name'] = 'Carbon monoxide, biogenic'
 
+        self.master_db = self.master_db.drop(
+            self.master_db.loc[self.master_db.loc[:, 'Elem flow name'].str.contains('Methane, biogenic')].index)
+        ch4_bio_release = self.master_db.loc[
+            self.master_db.loc[:, 'Elem flow name'].str.contains('Methane, fossil')].copy()
+        ch4_bio_release.loc[:, 'Elem flow name'] = 'Methane, biogenic'
+
         co2_to_soil = self.master_db.loc[
             self.master_db.loc[:, 'Elem flow name'].str.contains('Carbon dioxide')].loc[
             self.master_db.loc[:, 'Sub-compartment'] == '(unspecified)'].copy()
@@ -5285,7 +5291,7 @@ class Parse:
         co2_to_soil = clean_up_dataframe(pd.concat([co2_to_soil, df]))
 
         self.master_db = clean_up_dataframe(pd.concat([self.master_db, co2_bio_release, co2_bio_uptake,
-                                                       co_bio_release, co2_to_soil]))
+                                                       co_bio_release, co2_to_soil, ch4_bio_release]))
 
         co2_bio_release = self.master_db_carbon_neutrality.loc[
             self.master_db_carbon_neutrality.loc[:, 'Elem flow name'].str.contains('Carbon dioxide')].copy()
@@ -5795,6 +5801,7 @@ class Parse:
                                                      'Carbon dioxide, in air']), 'Compartment'] = 'Raw'
             db.loc[db.loc[:, 'Elem flow name'].isin(['Carbon dioxide, non-fossil, resource correction',
                                                      'Carbon dioxide, in air']), 'Sub-compartment'] = 'in air'
+            df = db.drop(db.loc[db.loc[:,'Elem flow name'] == 'Carbon dioxide, biogenic, uptake'].index)
 
             # --------------------------- UNIT CONVERSIONS ----------------------------------
 
@@ -6097,6 +6104,7 @@ class Parse:
                                                      'Carbon dioxide, in air']), 'Compartment'] = 'Resource'
             db.loc[db.loc[:, 'Elem flow name'].isin(['Carbon dioxide, non-fossil, resource correction',
                                                      'Carbon dioxide, in air']), 'Sub-compartment'] = 'in air'
+            df = db.drop(db.loc[db.loc[:, 'Elem flow name'] == 'Carbon dioxide, biogenic, uptake'].index)
 
             # ------------------------------ SUB-CATEGORIES SHENANIGANS ----------------------------
 
