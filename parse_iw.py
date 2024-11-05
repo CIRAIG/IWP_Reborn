@@ -383,8 +383,21 @@ class Parse:
                                     ['', '', '', '', '', ''], ['Version', '', '', '', '', ''],
                                     ['2','1', '', '', '', ''],
                                     ['', '', '', '', '', ''], ['Comment', '', '', '', '', ''],
-                                    ['For more information on IMPACT World+: https://www.impactworldplus.org.\n'
-                                     'Full list of changes available here: https://github.com/CIRAIG/IWP_Reborn/tree/master/Report_changes', '', '', '', '', ''], ['', '', '', '', '', ''],
+                                    ['IMPACT World+ Midpoint ' + self.version + ' (incl. CO2 uptake)' + chr(int("007F", 16)) + chr(int("007F", 16)) +
+                                     'New category:' + chr(int("007F", 16)) +
+                                     '- Plastics physical effect on biota' + chr(int("007F", 16)) +
+                                     chr(int("007F", 16)) +
+                                     'Updated categories:' + chr(int("007F", 16)) +
+                                     '- Climate change indicators with -1/+1 approach biogenic carbon' + chr(int("007F", 16)) +
+                                     '- Fossil and nuclear energy use'+chr(int("007F", 16)) +
+                                     '- Ozone layer depletion' + chr(int("007F", 16)) +
+                                     '- Particulate matter formation' + chr(int("007F", 16)) +
+                                     '- Photochemical ozone formation' + chr(int("007F", 16)) +
+                                     '- Water scarcity' + chr(int("007F", 16)) +
+                                     chr(int("007F", 16)) +
+                                     'For more information on IMPACT World+ and its methodology: https://www.impactworldplus.org.' + chr(int("007F", 16)) +
+                                     'Full list of changes available here: https://github.com/CIRAIG/IWP_Reborn/tree/master/Report_changes',
+                                     '', '', '', '', ''], ['', '', '', '', '', ''],
                                     ['Category', '', '', '', '', ''], ['Others', '', '', '', '', ''],
                                     ['', '', '', '', '', ''],
                                     ['Use Damage Assessment', '', '', '', '', ''], ['No', '', '', '', '', ''],
@@ -401,8 +414,23 @@ class Parse:
                                   ['', '', '', '', '', ''], ['Version', '', '', '', '', ''],
                                   ['2','1', '', '', '', ''],
                                   ['', '', '', '', '', ''], ['Comment', '', '', '', '', ''],
-                                  ['For more information on IMPACT World+: https://www.impactworldplus.org.\n'
-                                     'Full list of changes available here: https://github.com/CIRAIG/IWP_Reborn/tree/master/Report_changes', '', '', '', '', ''], ['', '', '', '', '', ''],
+                                  ['IMPACT World+ Expert ' + self.version + ' (incl. CO2 uptake)' + chr(int("007F", 16)) + chr(int("007F", 16)) +
+                                   'New categories:' + chr(int("007F", 16)) + '- Marine ecotoxicity' + chr(int("007F", 16)) +
+                                   '- Terrestrial ecotoxicity' + chr(int("007F", 16)) + '- Fisheries' + chr(int("007F", 16)) +
+                                   '- Plastics physical effect on biota' + chr(int("007F", 16)) +
+                                   '- Phochemical ozone formation, ecosystem quality' + chr(int("007F", 16)) + chr(int("007F", 16)) +
+                                   'Updated categories:' + chr(int("007F", 16)) +
+                                   '- Climate change indicators with -1/+1 approach biogenic carbon' + chr(int("007F", 16)) +
+                                   '- Climate change damage indicators' + chr(int("007F", 16)) +
+                                   '- Ozone layer depletion' + chr(int("007F", 16)) +
+                                   '- Particulate matter formation' + chr(int("007F", 16)) +
+                                   '- Photochemical ozone formation' + chr(int("007F", 16)) +
+                                   '- Water availability, human health' + chr(int("007F", 16)) +
+                                   '- Water availability, terrestrial ecosystems' + chr(int("007F", 16))
+                                   + chr(int("007F", 16)) +
+                                   'For more information on IMPACT World+ and its methodology: https://www.impactworldplus.org.' + chr(int("007F", 16)) +
+                                   'Full list of changes available here: https://github.com/CIRAIG/IWP_Reborn/tree/master/Report_changes',
+                                   '', '', '', '', ''], ['', '', '', '', '', ''],
                                   ['Category', '', '', '', '', ''], ['Others', '', '', '', '', ''],
                                   ['', '', '', '', '', ''],
                                   ['Use Damage Assessment', '', '', '', '', ''], ['Yes', '', '', '', '', ''],
@@ -419,8 +447,28 @@ class Parse:
                                     ['', '', '', '', '', ''], ['Version', '', '', '', '', ''],
                                     ['2','1', '', '', '', ''],
                                     ['', '', '', '', '', ''], ['Comment', '', '', '', '', ''],
-                                    ['For more information on IMPACT World+: https://www.impactworldplus.org.\n'
-                                     'Full list of changes available here: https://github.com/CIRAIG/IWP_Reborn/tree/master/Report_changes', '', '', '', '', ''], ['', '', '', '', '', ''],
+                                    ['IMPACT World+ ' + self.version  + ' (incl. CO2 uptake)' + chr(int("007F", 16)) +
+                                     'New categories:' + chr(int("007F", 16)) +
+                                     '- Marine ecotoxicity' + chr(int("007F", 16)) +
+                                     '- Terrestrial ecotoxicity' + chr(int("007F", 16)) +
+                                     '- Fisheries' + chr(int("007F", 16)) +
+                                     '- Plastics physical effect on biota' + chr(int("007F", 16)) +
+                                     '- Phochemical ozone formation, ecosystem quality' + chr(int("007F", 16)) +
+                                     chr(int("007F", 16)) +
+                                     'Updated categories:' + chr(int("007F", 16)) +
+                                     '- Climate change indicators with -1/+1 approach biogenic carbon' + chr(int("007F", 16)) +
+                                     '- Climate change damage indicators' + chr(int("007F", 16)) +
+                                     '- Fossil and nuclear energy use' + chr(int("007F", 16)) +
+                                     '- Ozone layer depletion' + chr(int("007F", 16)) +
+                                     '- Particulate matter formation' + chr(int("007F", 16)) +
+                                     '- Photochemical ozone formation' + chr(int("007F", 16)) +
+                                     '- Water availability, human health' + chr(int("007F", 16)) +
+                                     '- Water availability, terrestrial ecosystems' + chr(int("007F", 16)) +
+                                     '- Water scarcity' + chr(int("007F", 16)) +
+                                     chr(int("007F", 16)) +
+                                     'For more information on IMPACT World+ and its methodology: https://www.impactworldplus.org.' + chr(int("007F", 16)) +
+                                     'Full list of changes available here: https://github.com/CIRAIG/IWP_Reborn/tree/master/Report_changes',
+                                     '', '', '', '', ''], ['', '', '', '', '', ''],
                                     ['Category', '', '', '', '', ''], ['Others', '', '', '', '', ''],
                                     ['', '', '', '', '', ''],
                                     ['Use Damage Assessment', '', '', '', '', ''], ['Yes', '', '', '', '', ''],
@@ -436,9 +484,20 @@ class Parse:
                                     ['IMPACT World+ Midpoint ' + self.version, '', '', '', '', ''],
                                     ['', '', '', '', '', ''], ['Version', '', '', '', '', ''],
                                     ['2','1', '', '', '', ''],
-                                    ['', '', '', '', '', ''], ['Comment', '', '', '', '', ''],
-                                    ['For more information on IMPACT World+: https://www.impactworldplus.org.\n'
-                                     'Full list of changes available here: https://github.com/CIRAIG/IWP_Reborn/tree/master/Report_changes', '', '', '', '', ''], ['', '', '', '', '', ''],
+                                    ['IMPACT World+ Midpoint ' + self.version + chr(int("007F", 16)) + chr(int("007F", 16)) +
+                                     'New category:' + chr(int("007F", 16)) +
+                                     '- Plastics physical effect on biota' + chr(int("007F", 16)) +
+                                     chr(int("007F", 16)) +
+                                     'Updated categories:' + chr(int("007F", 16)) +
+                                     '- Fossil and nuclear energy use'+chr(int("007F", 16)) +
+                                     '- Ozone layer depletion' + chr(int("007F", 16)) +
+                                     '- Particulate matter formation' + chr(int("007F", 16)) +
+                                     '- Photochemical ozone formation' + chr(int("007F", 16)) +
+                                     '- Water scarcity' + chr(int("007F", 16)) +
+                                     chr(int("007F", 16)) +
+                                     'For more information on IMPACT World+ and its methodology: https://www.impactworldplus.org.' + chr(int("007F", 16)) +
+                                     'Full list of changes available here: https://github.com/CIRAIG/IWP_Reborn/tree/master/Report_changes',
+                                     '', '', '', '', ''], ['', '', '', '', '', ''],
                                     ['Category', '', '', '', '', ''], ['Others', '', '', '', '', ''],
                                     ['', '', '', '', '', ''],
                                     ['Use Damage Assessment', '', '', '', '', ''], ['No', '', '', '', '', ''],
@@ -455,8 +514,22 @@ class Parse:
                                   ['', '', '', '', '', ''], ['Version', '', '', '', '', ''],
                                   ['2','1', '', '', '', ''],
                                   ['', '', '', '', '', ''], ['Comment', '', '', '', '', ''],
-                                  ['For more information on IMPACT World+: https://www.impactworldplus.org.\n'
-                                     'Full list of changes available here: https://github.com/CIRAIG/IWP_Reborn/tree/master/Report_changes', '', '', '', '', ''], ['', '', '', '', '', ''],
+                                  ['IMPACT World+ Expert ' + self.version + chr(int("007F", 16)) + chr(int("007F", 16)) +
+                                   'New categories:' + chr(int("007F", 16)) + '- Marine ecotoxicity' + chr(int("007F", 16)) +
+                                   '- Terrestrial ecotoxicity' + chr(int("007F", 16)) + '- Fisheries' + chr(int("007F", 16)) +
+                                   '- Plastics physical effect on biota' + chr(int("007F", 16)) +
+                                   '- Phochemical ozone formation, ecosystem quality' + chr(int("007F", 16)) + chr(int("007F", 16)) +
+                                   'Updated categories:' + chr(int("007F", 16)) +
+                                   '- Climate change damage indicators' + chr(int("007F", 16)) +
+                                   '- Ozone layer depletion' + chr(int("007F", 16)) +
+                                   '- Particulate matter formation' + chr(int("007F", 16)) +
+                                   '- Photochemical ozone formation' + chr(int("007F", 16)) +
+                                   '- Water availability, human health' + chr(int("007F", 16)) +
+                                   '- Water availability, terrestrial ecosystems' + chr(int("007F", 16))
+                                   + chr(int("007F", 16)) +
+                                   'For more information on IMPACT World+ and its methodology: https://www.impactworldplus.org.' + chr(int("007F", 16)) +
+                                   'Full list of changes available here: https://github.com/CIRAIG/IWP_Reborn/tree/master/Report_changes',
+                                   '', '', '', '', ''], ['', '', '', '', '', ''],
                                   ['Category', '', '', '', '', ''], ['Others', '', '', '', '', ''],
                                   ['', '', '', '', '', ''],
                                   ['Use Damage Assessment', '', '', '', '', ''], ['Yes', '', '', '', '', ''],
@@ -473,8 +546,27 @@ class Parse:
                                     ['', '', '', '', '', ''], ['Version', '', '', '', '', ''],
                                     ['2','1', '', '', '', ''],
                                     ['', '', '', '', '', ''], ['Comment', '', '', '', '', ''],
-                                    ['For more information on IMPACT World+: https://www.impactworldplus.org.\n'
-                                     'Full list of changes available here: https://github.com/CIRAIG/IWP_Reborn/tree/master/Report_changes', '', '', '', '', ''], ['', '', '', '', '', ''],
+                                    ['IMPACT World+ ' + self.version + chr(int("007F", 16)) +
+                                     'New categories:' + chr(int("007F", 16)) +
+                                     '- Marine ecotoxicity' + chr(int("007F", 16)) +
+                                     '- Terrestrial ecotoxicity' + chr(int("007F", 16)) +
+                                     '- Fisheries' + chr(int("007F", 16)) +
+                                     '- Plastics physical effect on biota' + chr(int("007F", 16)) +
+                                     '- Phochemical ozone formation, ecosystem quality' + chr(int("007F", 16)) +
+                                     chr(int("007F", 16)) +
+                                     'Updated categories:' + chr(int("007F", 16)) +
+                                     '- Climate change damage indicators' + chr(int("007F", 16)) +
+                                     '- Fossil and nuclear energy use' + chr(int("007F", 16)) +
+                                     '- Ozone layer depletion' + chr(int("007F", 16)) +
+                                     '- Particulate matter formation' + chr(int("007F", 16)) +
+                                     '- Photochemical ozone formation' + chr(int("007F", 16)) +
+                                     '- Water availability, human health' + chr(int("007F", 16)) +
+                                     '- Water availability, terrestrial ecosystems' + chr(int("007F", 16)) +
+                                     '- Water scarcity' + chr(int("007F", 16)) +
+                                     chr(int("007F", 16)) +
+                                     'For more information on IMPACT World+ and its methodology: https://www.impactworldplus.org.' + chr(int("007F", 16)) +
+                                     'Full list of changes available here: https://github.com/CIRAIG/IWP_Reborn/tree/master/Report_changes',
+                                     '', '', '', '', ''], ['', '', '', '', '', ''],
                                     ['Category', '', '', '', '', ''], ['Others', '', '', '', '', ''],
                                     ['', '', '', '', '', ''],
                                     ['Use Damage Assessment', '', '', '', '', ''], ['Yes', '', '', '', '', ''],
@@ -491,8 +583,17 @@ class Parse:
                                     ['', '', '', '', '', ''], ['Version', '', '', '', '', ''],
                                     ['2','1', '', '', '', ''],
                                     ['', '', '', '', '', ''], ['Comment', '', '', '', '', ''],
-                                    ['For more information on IMPACT World+: https://www.impactworldplus.org.\n'
-                                     'Full list of changes available here: https://github.com/CIRAIG/IWP_Reborn/tree/master/Report_changes', '', '', '', '', ''], ['', '', '', '', '', ''],
+                                    ['IMPACT World+ Footprint ' + self.version + chr(int("007F", 16)) +
+                                     'Updated categories:' + chr(int("007F", 16)) +
+                                     '- Fossil and nuclear energy use' + chr(int("007F", 16)) +
+                                     '- Water footprint - Scarcity' + chr(int("007F", 16)) +
+                                     '- Human health (residual)' + chr(int("007F", 16)) +
+                                     '- Ecosystem quality (residual)' + chr(int("007F", 16)) +
+                                     'For details on what the footprint version of IW+ entails, please consult this page: '
+                                     'https://www.impactworldplus.org/version-2-0-1/' + chr(int("007F", 16)) +
+                                     'For more information on IMPACT World+ and its methodology: https://www.impactworldplus.org.'  + chr(int("007F", 16)) +
+                                     'Full list of changes available here: https://github.com/CIRAIG/IWP_Reborn/tree/master/Report_changes',
+                                     '', '', '', '', ''], ['', '', '', '', '', ''],
                                     ['Category', '', '', '', '', ''], ['Others', '', '', '', '', ''],
                                     ['', '', '', '', '', ''],
                                     ['Use Damage Assessment', '', '', '', '', ''], ['No', '', '', '', '', ''],
@@ -1420,14 +1521,17 @@ class Parse:
         self.ei38_iw.to_excel(path + '/ecoinvent/impact_world_plus_' + self.version + ' (incl. CO2 uptake)_expert_version_ecoinvent_v38.xlsx')
         self.ei39_iw.to_excel(path + '/ecoinvent/impact_world_plus_' + self.version + ' (incl. CO2 uptake)_expert_version_ecoinvent_v39.xlsx')
         self.ei310_iw.to_excel(path + '/ecoinvent/impact_world_plus_' + self.version + ' (incl. CO2 uptake)_expert_version_ecoinvent_v310.xlsx')
+        self.ei311_iw.to_excel(path + '/ecoinvent/impact_world_plus_' + self.version + ' (incl. CO2 uptake)_expert_version_ecoinvent_v311.xlsx')
         self.ei38_iw_carbon_neutrality.to_excel(path + '/ecoinvent/impact_world_plus_' + self.version + '_expert_version_ecoinvent_v38.xlsx')
         self.ei39_iw_carbon_neutrality.to_excel(path + '/ecoinvent/impact_world_plus_' + self.version + '_expert_version_ecoinvent_v39.xlsx')
         self.ei310_iw_carbon_neutrality.to_excel(path + '/ecoinvent/impact_world_plus_' + self.version + '_expert_version_ecoinvent_v310.xlsx')
+        self.ei311_iw_carbon_neutrality.to_excel(path + '/ecoinvent/impact_world_plus_' + self.version + '_expert_version_ecoinvent_v311.xlsx')
 
         # ecoinvent version in DataFrame format
         self.simplified_version_ei38.to_excel(path + '/ecoinvent/impact_world_plus_' + self.version + '_footprint_version_ecoinvent_v38.xlsx')
         self.simplified_version_ei39.to_excel(path + '/ecoinvent/impact_world_plus_' + self.version + '_footprint_version_ecoinvent_v39.xlsx')
         self.simplified_version_ei310.to_excel(path + '/ecoinvent/impact_world_plus_' + self.version + '_footprint_version_ecoinvent_v310.xlsx')
+        self.simplified_version_ei311.to_excel(path + '/ecoinvent/impact_world_plus_' + self.version + '_footprint_version_ecoinvent_v311.xlsx')
 
         # exiobase version in DataFrame format
         self.exio_iw.to_excel(path + '/exiobase/impact_world_plus_' + self.version + '_expert_version_exiobase.xlsx')
@@ -5343,8 +5447,10 @@ class Parse:
             """Function takes in the origin GHG flow name (e.g., Carbon dioxide, fossil) and a new name for the
             storage flow (e.g., Correction flow for delayed emission of biogenic carbon dioxide). It then creates CFs
             for the temporary storage flows."""
-            df = master_db_format.loc[master_db_format.loc[:, 'Elem flow name'] == origin_flow].loc[
-                master_db_format.loc[:, 'Impact category'] != 'Fossil and nuclear energy use'].copy()
+            df = master_db_format.loc[master_db_format.loc[:, 'Elem flow name'] == origin_flow].loc[~
+            master_db_format.loc[:, 'Impact category'].isin(['Fossil and nuclear energy use',
+                                                             'Climate change, short term',
+                                                             'Climate change, long term'])].copy()
             df.loc[:, 'Elem flow name'] = name_storage_flow
             df.loc[:, 'Elem flow unit'] = 'kgy'
             df.loc[:, 'CF value'] /= -100
@@ -5477,7 +5583,7 @@ class Parse:
         :return: self.ei35_iw, self.ei36_iw, self.ei371_iw, self.ei38_iw
         """
 
-        latest_ei_version = '3.10'
+        latest_ei_version = '3.11'
 
         for db_format in ['normal', 'carbon neutrality']:
             if db_format == 'normal':
@@ -5623,7 +5729,12 @@ class Parse:
                         ei_iw_db['Impact category'].str.contains(', fossil', na=False), 'Impact category']]
 
                 # start with latest available version of ecoinvent
-                self.ei310_iw = ei_iw_db.copy('deep')
+                self.ei311_iw = ei_iw_db.copy('deep')
+                only_in_311 = list(mapping[mapping.loc[:, 'introduced in ei v.'] == '3.11'].dropna(
+                    subset=['iw name']).loc[:, 'ecoinvent name'])
+
+                self.ei310_iw = self.ei311_iw.drop([i for i in self.ei311_iw.index if self.ei311_iw.loc[i, 'Elem flow name'] in
+                                                  only_in_311]).copy('deep')
 
                 only_in_310 = list(mapping[mapping.loc[:, 'introduced in ei v.'] == '3.10'].dropna(
                     subset=['iw name']).loc[:, 'ecoinvent name'])
@@ -5662,12 +5773,20 @@ class Parse:
 
                 # special case for ei3.8, since metal names in ei38 are shared between ions and their metallic form
                 for metal in metals_in_ei38:
-                    df = self.ei310_iw.loc[self.ei310_iw.loc[:, 'Elem flow name'] == metals_in_ei38[metal]].copy()
+                    df = self.ei311_iw.loc[self.ei311_iw.loc[:, 'Elem flow name'] == metals_in_ei38[metal]].copy()
                     df.loc[:, 'Elem flow name'] = metal
                     self.ei38_iw = clean_up_dataframe(pd.concat([self.ei38_iw, df]))
 
             elif db_format == 'carbon neutrality':
-                self.ei310_iw_carbon_neutrality = ei_iw_db.copy('deep')
+
+                self.ei311_iw_carbon_neutrality = ei_iw_db.copy('deep')
+
+                only_in_311 = list(mapping[mapping.loc[:, 'introduced in ei v.'] == '3.11'].dropna(
+                    subset=['iw name']).loc[:, 'ecoinvent name'])
+
+                self.ei310_iw_carbon_neutrality = self.ei311_iw_carbon_neutrality.drop(
+                    [i for i in self.ei311_iw_carbon_neutrality.index if self.ei311_iw_carbon_neutrality.loc[i, 'Elem flow name'] in
+                     only_in_311]).copy('deep')
 
                 only_in_310 = list(mapping[mapping.loc[:, 'introduced in ei v.'] == '3.10'].dropna(
                     subset=['iw name']).loc[:, 'ecoinvent name'])
@@ -5708,7 +5827,7 @@ class Parse:
 
                 # special case for ei3.8, since metal names in ei38 are shared between ions and their metallic form
                 for metal in metals_in_ei38:
-                    df = self.ei310_iw_carbon_neutrality.loc[self.ei310_iw_carbon_neutrality.loc[:, 'Elem flow name'] == metals_in_ei38[metal]].copy()
+                    df = self.ei311_iw_carbon_neutrality.loc[self.ei311_iw_carbon_neutrality.loc[:, 'Elem flow name'] == metals_in_ei38[metal]].copy()
                     df.loc[:, 'Elem flow name'] = metal
                     self.ei38_iw_carbon_neutrality = clean_up_dataframe(pd.concat([self.ei38_iw_carbon_neutrality, df]))
 
@@ -5801,7 +5920,7 @@ class Parse:
                                                      'Carbon dioxide, in air']), 'Compartment'] = 'Raw'
             db.loc[db.loc[:, 'Elem flow name'].isin(['Carbon dioxide, non-fossil, resource correction',
                                                      'Carbon dioxide, in air']), 'Sub-compartment'] = 'in air'
-            df = db.drop(db.loc[db.loc[:,'Elem flow name'] == 'Carbon dioxide, biogenic, uptake'].index)
+            db = db.drop(db.loc[db.loc[:, 'Elem flow name'] == 'Carbon dioxide, biogenic, uptake'].index)
 
             # --------------------------- UNIT CONVERSIONS ----------------------------------
 
@@ -6041,8 +6160,7 @@ class Parse:
             db = clean_up_dataframe(db)
 
             # some water flows are in kilograms instead of cubic meters...
-            problems = ['Water',
-                        'Water/kg',
+            problems = ['Water/kg',
                         'Water (fresh water)',
                         'Water (river water from technosphere turbined)',
                         'Water (river water from technosphere, turbined)',
@@ -6054,6 +6172,7 @@ class Parse:
                         'Water, cooling, surface',
                         'Water, cooling, well',
                         'Water, cooling, well, in ground',
+                        'Water, ground',
                         'Water, groundwater consumption',
                         'Water, process, drinking',
                         'Water, process, salt, ocean',
@@ -6075,6 +6194,12 @@ class Parse:
             for problem_child in problems:
                 db.loc[db['Elem flow name'] == problem_child, 'Elem flow unit'] = 'kg'
                 db.loc[db['Elem flow name'] == problem_child, 'CF value'] /= 1000
+
+            # specific problem for "Water" which is both defined in kg and in m3
+            df = db.loc[db.loc[:, 'Elem flow name'] == 'Water'].copy()
+            df.loc[:, 'Elem flow unit'] = 'kg'
+            df.loc[:, 'CF value'] /= 1000
+            db = clean_up_dataframe(pd.concat([db, df]))
 
             # --------------------------- COMPS AND SUBCOMPS --------------------------------
             with open(pkg_resources.resource_filename(__name__, '/Data/mappings/oLCA/v2.1.1/comps.json'), 'r') as f:
@@ -6104,7 +6229,7 @@ class Parse:
                                                      'Carbon dioxide, in air']), 'Compartment'] = 'Resource'
             db.loc[db.loc[:, 'Elem flow name'].isin(['Carbon dioxide, non-fossil, resource correction',
                                                      'Carbon dioxide, in air']), 'Sub-compartment'] = 'in air'
-            df = db.drop(db.loc[db.loc[:, 'Elem flow name'] == 'Carbon dioxide, biogenic, uptake'].index)
+            db = db.drop(db.loc[db.loc[:, 'Elem flow name'] == 'Carbon dioxide, biogenic, uptake'].index)
 
             # ------------------------------ SUB-CATEGORIES SHENANIGANS ----------------------------
 
@@ -6429,6 +6554,9 @@ class Parse:
 
         self.simplified_version_ei310 = clean_up_dataframe(produce_simplified_version(self.ei310_iw_carbon_neutrality).reindex(
             self.ei310_iw_carbon_neutrality.columns, axis=1))
+
+        self.simplified_version_ei311 = clean_up_dataframe(produce_simplified_version(self.ei311_iw_carbon_neutrality).reindex(
+            self.ei311_iw_carbon_neutrality.columns, axis=1))
 
     def get_total_hh_and_eq(self):
         """
