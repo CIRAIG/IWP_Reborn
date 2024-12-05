@@ -7,4 +7,4 @@ Concerned impact categories:
 The Water availability, human health has no directly associated midpoint indicator.
 
 ### 2. Damage indicator(s)
-The Water availability, human health damage indicator comes from Debarre et al. (2024) [link_to_come].
+The Water availability, human health damage indicator comes from Debarre et al. (2022) https://doi.org/10.1007/s11367-024-02395-7.
