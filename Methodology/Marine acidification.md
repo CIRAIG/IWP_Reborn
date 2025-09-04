@@ -1,4 +1,4 @@
-## Marine eutrophication indicators
+## Marine acidification indicators
 
 Concerned impact categories:
 - Marine acidification, short term (damage)

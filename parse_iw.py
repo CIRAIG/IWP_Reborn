@@ -4,16 +4,15 @@ implementation in the available LCA software (SimaPro, openLCA & brightway2). A 
 and is made available in an Excel format. This version is aimed for entities wishing to integrated IW+ in their
 tools/databases on their own.
 
-In the end, IMPACT World+ will span over 5 different files, in different formats:
-- the original Microsoft access database (referred to as the source version)
+In the end, IMPACT World+ will span over 6 different files, in different formats:
+- the core SQL database (referred to as the source version)
 - the Excel version of IW+ regrouping characterization factors from the source version as well as additional
 extrapolated CFs (referred to as the dev version)
 - the IW+ version directly implementable in the SimaPro LCA software, in a .csv format (referred to as the SimaPro version)
 - the IW+ version directly implementable in the openLCA LCA software, in a .zip format (referred to as the openLCA version)
 - the IW+ version directly implementable in the brightway2 LCA software, in a .bw2package format (referred to as the
 brightway2 version)
-
-All equations modeling the AGTP of GHGs come from the work of Thomas Gasser (gasser@iiasa.ac.at) and Yue He (heyue@iiasa.ac.at)
+- the IW+ version directly usable with the EXIOBASE MRIO database, in a .xlsx format (referred to as the exiobase version)
 
 file name: parse_iw.py
 author: Maxime Agez
@@ -137,7 +136,8 @@ class Parse:
         self.olca_iw_carbon_neutrality = pd.DataFrame()
         self.olca_data = {}
         self.olca_data_custom = {}
-        self.exio_iw = pd.DataFrame()
+        self.exio_iw_38 = pd.DataFrame()
+        self.exio_iw_39 = pd.DataFrame()
 
         self.conn = sqlite3.connect(self.path_access_db)
 
@@ -164,6 +164,8 @@ class Parse:
         self.load_freshwater_eutrophication_cfs()
         self.logger.info("Loading land use characterization factors...")
         self.load_land_use_cfs()
+        self.logger.info("Loading mineral resource use characterization factors...")
+        self.load_mineral_resource_use_cfs()
         self.logger.info("Loading particulate matter characterization factors...")
         self.load_particulates_cfs()
         self.logger.info("Loading water scarcity characterization factors...")
@@ -204,8 +206,8 @@ class Parse:
         self.logger.info("Linking to SimaPro elementary flows...")
         self.link_to_sp()
 
-        self.logger.info("Linking to openLCA elementary flows...")
-        self.link_to_olca()
+        # self.logger.info("Linking to openLCA elementary flows...")
+        # self.link_to_olca()
 
         self.logger.info("Linking to exiobase environmental extensions...")
         self.link_to_exiobase()
@@ -213,7 +215,8 @@ class Parse:
         self.logger.info("Prepare the footprint version...")
         self.get_simplified_versions()
 
-        self.get_total_hh_and_eq()
+        # only relevant for openLCA
+        # self.get_total_hh_and_eq()
 
     def export_to_bw2(self):
         """
@@ -243,11 +246,11 @@ class Parse:
                 ei_in_bw_normal = self.ei38_iw.merge(bw_flows_with_codes)
                 ei_in_bw_carbon_neutrality = self.ei38_iw_carbon_neutrality.merge(bw_flows_with_codes)
                 ei_in_bw_simple = self.simplified_version_ei38.merge(bw_flows_with_codes)
-            elif project == 'ecoinvent3.9':
+            elif project == 'ecoinvent3.9.1':
                 ei_in_bw_normal = self.ei39_iw.merge(bw_flows_with_codes)
                 ei_in_bw_carbon_neutrality = self.ei39_iw_carbon_neutrality.merge(bw_flows_with_codes)
                 ei_in_bw_simple = self.simplified_version_ei39.merge(bw_flows_with_codes)
-            elif project == 'ecoinvent3.10':
+            elif project == 'ecoinvent3.10.1':
                 ei_in_bw_normal = self.ei310_iw.merge(bw_flows_with_codes)
                 ei_in_bw_carbon_neutrality = self.ei310_iw_carbon_neutrality.merge(bw_flows_with_codes)
                 ei_in_bw_simple = self.simplified_version_ei310.merge(bw_flows_with_codes)
@@ -1534,7 +1537,10 @@ class Parse:
         self.simplified_version_ei311.to_excel(path + '/ecoinvent/impact_world_plus_' + self.version + '_footprint_version_ecoinvent_v311.xlsx')
 
         # exiobase version in DataFrame format
-        self.exio_iw.to_excel(path + '/exiobase/impact_world_plus_' + self.version + '_expert_version_exiobase.xlsx')
+        self.exio_iw_38.to_excel(path + '/exiobase/impact_world_plus_' + self.version +
+                                 '_expert_version_exiobase_3.8.2_and_before.xlsx')
+        self.exio_iw_39.to_excel(path + '/exiobase/impact_world_plus_' + self.version +
+                                 '_expert_version_exiobase_3.9_and_after.xlsx')
 
         # brightway2 versions in bw2package format
         for project in self.bw2_projects:
@@ -1636,318 +1642,318 @@ class Parse:
             writer.writerows(self.sp_data['weighting_info_combined_carboneutrality'] + [['', '', '', '', '', '']])
             writer.writerows([['End', '', '', '', '', '']])
 
-        # create the openLCA version expert version (zip file)
-        if not os.path.exists(path + '/openLCA/expert_version (incl. CO2 uptake)/'):
-            os.makedirs(path + '/openLCA/expert_version (incl. CO2 uptake)/')
-        if os.path.exists(path + '/openLCA/expert_version (incl. CO2 uptake)/impact_world_plus'+self.version+
-                          ' (incl. CO2 uptake)_openLCA.zip'):
-            os.remove(path + '/openLCA/expert_version (incl. CO2 uptake)/impact_world_plus'+self.version+
-                      ' (incl. CO2 uptake)_openLCA.zip')
-        if os.path.exists(path + '/openLCA/expert_version (incl. CO2 uptake)/oLCA_folders'):
-            shutil.rmtree(path + '/openLCA/expert_version (incl. CO2 uptake)/oLCA_folders')
-        zipObj = zipfile.ZipFile(path + '/openLCA/expert_version (incl. CO2 uptake)/impact_world_plus_'+self.version+
-                                 ' (incl. CO2 uptake)_openLCA.zip', 'w')
-
-        if not os.path.exists(path + '/openLCA/expert_version (incl. CO2 uptake)/oLCA_folders/categories/'):
-            os.makedirs(path + '/openLCA/expert_version (incl. CO2 uptake)/oLCA_folders/categories/')
-        with open(path + '/openLCA/expert_version (incl. CO2 uptake)/oLCA_folders/categories/' +
-                  self.olca_data['category_metadata']['@id']  + '.json', 'w') as f:
-            json.dump(self.olca_data['category_metadata'], f)
-        zipObj.write(path + '/openLCA/expert_version (incl. CO2 uptake)/oLCA_folders/categories/' +
-                     self.olca_data['category_metadata']['@id'] + '.json')
-
-        if not os.path.exists(path + '/openLCA/expert_version (incl. CO2 uptake)/oLCA_folders/lcia_methods/'):
-            os.makedirs(path + '/openLCA/expert_version (incl. CO2 uptake)/oLCA_folders/lcia_methods/')
-        with open(path + '/openLCA/expert_version (incl. CO2 uptake)/oLCA_folders/lcia_methods/' +
-                  self.olca_data['metadata_iw_damage']['@id'] + '.json', 'w') as f:
-            json.dump(self.olca_data['metadata_iw_damage'], f)
-        zipObj.write(path + '/openLCA/expert_version (incl. CO2 uptake)/oLCA_folders/lcia_methods/' +
-                     self.olca_data['metadata_iw_damage']['@id'] + '.json')
-
-        if not os.path.exists(path + '/openLCA/expert_version (incl. CO2 uptake)/oLCA_folders/lcia_categories/'):
-            os.makedirs(path + '/openLCA/expert_version (incl. CO2 uptake)/oLCA_folders/lcia_categories/')
-        for cat in self.olca_data['cf_dict_damage'].keys():
-            with open(path + '/openLCA/expert_version (incl. CO2 uptake)/oLCA_folders/lcia_categories/' +
-                      self.olca_data['cf_dict_damage'][cat]['@id'] + '.json', 'w') as f:
-                json.dump(self.olca_data['cf_dict_damage'][cat], f)
-            zipObj.write(path + '/openLCA/expert_version (incl. CO2 uptake)/oLCA_folders/lcia_categories/' +
-                         self.olca_data['cf_dict_damage'][cat]['@id'] + '.json')
-
-        if not os.path.exists(path + '/openLCA/expert_version (incl. CO2 uptake)/oLCA_folders/nw_sets/'):
-            os.makedirs(path + '/openLCA/expert_version (incl. CO2 uptake)/oLCA_folders/nw_sets/')
-        with open(path + '/openLCA/expert_version (incl. CO2 uptake)/oLCA_folders/nw_sets/' +
-                  self.olca_data['normalization']['@id'] + '.json', 'w') as f:
-            json.dump(self.olca_data['normalization'], f)
-        zipObj.write(path + '/openLCA/expert_version (incl. CO2 uptake)/oLCA_folders/nw_sets/' +
-                     self.olca_data['normalization']['@id'] + '.json')
-        zipObj.close()
-        # use shutil to simplify the folder structure within the zip file
-        shutil.make_archive(path + '/openLCA/expert_version (incl. CO2 uptake)/impact_world_plus_'+self.version+
-                            ' (incl. CO2 uptake)_expert_version_openLCA', 'zip', path +
-                            '/openLCA/expert_version (incl. CO2 uptake)/oLCA_folders/')
-
-        # create the openLCA version midpoint version (zip file)
-        if not os.path.exists(path + '/openLCA/midpoint_version (incl. CO2 uptake)/'):
-            os.makedirs(path + '/openLCA/midpoint_version (incl. CO2 uptake)/')
-        if os.path.exists(path + '/openLCA/midpoint_version (incl. CO2 uptake)/impact_world_plus'+self.version+
-                          ' (incl. CO2 uptake)_openLCA.zip'):
-            os.remove(path + '/openLCA/midpoint_version (incl. CO2 uptake)/impact_world_plus'+self.version+
-                      ' (incl. CO2 uptake)_openLCA.zip')
-        if os.path.exists(path + '/openLCA/midpoint_version (incl. CO2 uptake)/oLCA_folders'):
-            shutil.rmtree(path + '/openLCA/midpoint_version (incl. CO2 uptake)/oLCA_folders')
-        zipObj = zipfile.ZipFile(path + '/openLCA/midpoint_version (incl. CO2 uptake)/impact_world_plus_'+self.version+
-                                 ' (incl. CO2 uptake)_openLCA.zip', 'w')
-
-        if not os.path.exists(path + '/openLCA/midpoint_version (incl. CO2 uptake)/oLCA_folders/categories/'):
-            os.makedirs(path + '/openLCA/midpoint_version (incl. CO2 uptake)/oLCA_folders/categories/')
-        with open(path + '/openLCA/midpoint_version (incl. CO2 uptake)/oLCA_folders/categories/' +
-                  self.olca_data['category_metadata']['@id'] + '.json', 'w') as f:
-            json.dump(self.olca_data['category_metadata'], f)
-        zipObj.write(path + '/openLCA/midpoint_version (incl. CO2 uptake)/oLCA_folders/categories/' +
-                     self.olca_data['category_metadata']['@id'] + '.json')
-
-        if not os.path.exists(path + '/openLCA/midpoint_version (incl. CO2 uptake)/oLCA_folders/lcia_methods/'):
-            os.makedirs(path + '/openLCA/midpoint_version (incl. CO2 uptake)/oLCA_folders/lcia_methods/')
-        with open(path + '/openLCA/midpoint_version (incl. CO2 uptake)/oLCA_folders/lcia_methods/' +
-                  self.olca_data['metadata_iw_midpoint']['@id'] + '.json', 'w') as f:
-            json.dump(self.olca_data['metadata_iw_midpoint'], f)
-        zipObj.write(path + '/openLCA/midpoint_version (incl. CO2 uptake)/oLCA_folders/lcia_methods/' +
-                     self.olca_data['metadata_iw_midpoint']['@id'] + '.json')
-
-        if not os.path.exists(path + '/openLCA/midpoint_version (incl. CO2 uptake)/oLCA_folders/lcia_categories/'):
-            os.makedirs(path + '/openLCA/midpoint_version (incl. CO2 uptake)/oLCA_folders/lcia_categories/')
-        for cat in self.olca_data['cf_dict_midpoint'].keys():
-            with open(path + '/openLCA/midpoint_version (incl. CO2 uptake)/oLCA_folders/lcia_categories/' +
-                      self.olca_data['cf_dict_midpoint'][cat]['@id'] + '.json', 'w') as f:
-                json.dump(self.olca_data['cf_dict_midpoint'][cat], f)
-            zipObj.write(path + '/openLCA/midpoint_version (incl. CO2 uptake)/oLCA_folders/lcia_categories/' +
-                         self.olca_data['cf_dict_midpoint'][cat]['@id'] + '.json')
-        zipObj.close()
-        # use shutil to simplify the folder structure within the zip file
-        shutil.make_archive(path + '/openLCA/midpoint_version (incl. CO2 uptake)/impact_world_plus_'+self.version+
-                            ' (incl. CO2 uptake)_midpoint_version_openLCA', 'zip', path +
-                            '/openLCA/midpoint_version (incl. CO2 uptake)/oLCA_folders/')
-
-        # create the openLCA version footprint version (zip file)
-        if not os.path.exists(path + '/openLCA/footprint_version/'):
-            os.makedirs(path + '/openLCA/footprint_version/')
-        if os.path.exists(path + '/openLCA/footprint_version/impact_world_plus'+self.version+'_openLCA.zip'):
-            os.remove(path + '/openLCA/footprint_version/impact_world_plus'+self.version+'_openLCA.zip')
-        if os.path.exists(path + '/openLCA/footprint_version/oLCA_folders'):
-            shutil.rmtree(path + '/openLCA/footprint_version/oLCA_folders')
-        zipObj = zipfile.ZipFile(path + '/openLCA/footprint_version/impact_world_plus_'+self.version+'_openLCA.zip', 'w')
-
-        if not os.path.exists(path + '/openLCA/footprint_version/oLCA_folders/categories/'):
-            os.makedirs(path + '/openLCA/footprint_version/oLCA_folders/categories/')
-        with open(path + '/openLCA/footprint_version/oLCA_folders/categories/' + self.olca_data['category_metadata']['@id']
-                  + '.json', 'w') as f:
-            json.dump(self.olca_data['category_metadata'], f)
-        zipObj.write(path + '/openLCA/footprint_version/oLCA_folders/categories/' + self.olca_data['category_metadata'][
-            '@id'] + '.json')
-
-        if not os.path.exists(path + '/openLCA/footprint_version/oLCA_folders/lcia_methods/'):
-            os.makedirs(path + '/openLCA/footprint_version/oLCA_folders/lcia_methods/')
-        with open(path + '/openLCA/footprint_version/oLCA_folders/lcia_methods/' +
-                  self.olca_data['metadata_iw_footprint']['@id'] + '.json', 'w') as f:
-            json.dump(self.olca_data['metadata_iw_footprint'], f)
-        zipObj.write(path + '/openLCA/footprint_version/oLCA_folders/lcia_methods/' +
-                     self.olca_data['metadata_iw_footprint']['@id'] + '.json')
-
-        if not os.path.exists(path + '/openLCA/footprint_version/oLCA_folders/lcia_categories/'):
-            os.makedirs(path + '/openLCA/footprint_version/oLCA_folders/lcia_categories/')
-        for cat in self.olca_data['cf_dict_footprint'].keys():
-            with open(path + '/openLCA/footprint_version/oLCA_folders/lcia_categories/' +
-                      self.olca_data['cf_dict_footprint'][cat]['@id'] + '.json', 'w') as f:
-                json.dump(self.olca_data['cf_dict_footprint'][cat], f)
-            zipObj.write(path + '/openLCA/footprint_version/oLCA_folders/lcia_categories/' +
-                         self.olca_data['cf_dict_footprint'][cat]['@id'] + '.json')
-        zipObj.close()
-        # use shutil to simplify the folder structure within the zip file
-        shutil.make_archive(path + '/openLCA/footprint_version/impact_world_plus_' + self.version +
-                            '_footprint_version_openLCA', 'zip', path + '/openLCA/footprint_version/oLCA_folders/')
-
-        # create the openLCA version combined version (zip file)
-        if not os.path.exists(path + '/openLCA/combined_version (incl. CO2 uptake)/'):
-            os.makedirs(path + '/openLCA/combined_version (incl. CO2 uptake)/')
-        if os.path.exists(path + '/openLCA/combined_version (incl. CO2 uptake)/impact_world_plus'+self.version+
-                          ' (incl. CO2 uptake)_openLCA.zip'):
-            os.remove(path + '/openLCA/combined_version (incl. CO2 uptake)/impact_world_plus'+self.version+
-                      ' (incl. CO2 uptake)_openLCA.zip')
-        if os.path.exists(path + '/openLCA/combined_version (incl. CO2 uptake)/oLCA_folders'):
-            shutil.rmtree(path + '/openLCA/combined_version (incl. CO2 uptake)/oLCA_folders')
-        zipObj = zipfile.ZipFile(path + '/openLCA/combined_version (incl. CO2 uptake)/impact_world_plus_'+self.version+
-                                 ' (incl. CO2 uptake)_openLCA.zip', 'w')
-
-        if not os.path.exists(path + '/openLCA/combined_version (incl. CO2 uptake)/oLCA_folders/categories/'):
-            os.makedirs(path + '/openLCA/combined_version (incl. CO2 uptake)/oLCA_folders/categories/')
-        with open(path + '/openLCA/combined_version (incl. CO2 uptake)/oLCA_folders/categories/' +
-                  self.olca_data['category_metadata']['@id'] + '.json', 'w') as f:
-            json.dump(self.olca_data['category_metadata'], f)
-        zipObj.write(path + '/openLCA/combined_version (incl. CO2 uptake)/oLCA_folders/categories/' +
-                     self.olca_data['category_metadata']['@id'] + '.json')
-
-        if not os.path.exists(path + '/openLCA/combined_version (incl. CO2 uptake)/oLCA_folders/lcia_methods/'):
-            os.makedirs(path + '/openLCA/combined_version (incl. CO2 uptake)/oLCA_folders/lcia_methods/')
-        with open(path + '/openLCA/combined_version (incl. CO2 uptake)/oLCA_folders/lcia_methods/' +
-                  self.olca_data['metadata_iw_combined']['@id'] + '.json', 'w') as f:
-            json.dump(self.olca_data['metadata_iw_combined'], f)
-        zipObj.write(path + '/openLCA/combined_version (incl. CO2 uptake)/oLCA_folders/lcia_methods/' +
-                     self.olca_data['metadata_iw_combined']['@id'] + '.json')
-
-        if not os.path.exists(path + '/openLCA/combined_version (incl. CO2 uptake)/oLCA_folders/lcia_categories/'):
-            os.makedirs(path + '/openLCA/combined_version (incl. CO2 uptake)/oLCA_folders/lcia_categories/')
-        for cat in self.olca_data['cf_dict_combined'].keys():
-            with open(path + '/openLCA/combined_version (incl. CO2 uptake)/oLCA_folders/lcia_categories/' +
-                      self.olca_data['cf_dict_combined'][cat]['@id'] + '.json', 'w') as f:
-                json.dump(self.olca_data['cf_dict_combined'][cat], f)
-            zipObj.write(path + '/openLCA/combined_version (incl. CO2 uptake)/oLCA_folders/lcia_categories/' +
-                         self.olca_data['cf_dict_combined'][cat]['@id'] + '.json')
-
-        if not os.path.exists(path + '/openLCA/combined_version (incl. CO2 uptake)/oLCA_folders/nw_sets/'):
-            os.makedirs(path + '/openLCA/combined_version (incl. CO2 uptake)/oLCA_folders/nw_sets/')
-        with open(path + '/openLCA/combined_version (incl. CO2 uptake)/oLCA_folders/nw_sets/' +
-                  self.olca_data['normalization']['@id'] + '.json', 'w') as f:
-            json.dump(self.olca_data['normalization'], f)
-        zipObj.write(path + '/openLCA/combined_version (incl. CO2 uptake)/oLCA_folders/nw_sets/' +
-                     self.olca_data['normalization']['@id'] + '.json')
-        zipObj.close()
-        # use shutil to simplify the folder structure within the zip file
-        shutil.make_archive(path + '/openLCA/combined_version (incl. CO2 uptake)/impact_world_plus_' + self.version +
-                            ' (incl. CO2 uptake)_combined_version_openLCA', 'zip', path +
-                            '/openLCA/combined_version (incl. CO2 uptake)/oLCA_folders/')
-
-        # create the openLCA version carboneutrality expert version (zip file)
-        if not os.path.exists(path + '/openLCA/expert_version/'):
-            os.makedirs(path + '/openLCA/expert_version/')
-        if os.path.exists(path + '/openLCA/expert_version/impact_world_plus'+self.version+'_openLCA.zip'):
-            os.remove(path + '/openLCA/expert_version/impact_world_plus'+self.version+'_openLCA.zip')
-        if os.path.exists(path + '/openLCA/expert_version/oLCA_folders'):
-            shutil.rmtree(path + '/openLCA/expert_version/oLCA_folders')
-        zipObj = zipfile.ZipFile(path + '/openLCA/expert_version/impact_world_plus_'+self.version+'_openLCA.zip', 'w')
-
-        if not os.path.exists(path + '/openLCA/expert_version/oLCA_folders/categories/'):
-            os.makedirs(path + '/openLCA/expert_version/oLCA_folders/categories/')
-        with open(path + '/openLCA/expert_version/oLCA_folders/categories/' + self.olca_data['category_metadata']['@id']
-                  + '.json', 'w') as f:
-            json.dump(self.olca_data['category_metadata'], f)
-        zipObj.write(path + '/openLCA/expert_version/oLCA_folders/categories/' +
-                     self.olca_data['category_metadata']['@id'] + '.json')
-
-        if not os.path.exists(path + '/openLCA/expert_version/oLCA_folders/lcia_methods/'):
-            os.makedirs(path + '/openLCA/expert_version/oLCA_folders/lcia_methods/')
-        with open(path + '/openLCA/expert_version/oLCA_folders/lcia_methods/' +
-                  self.olca_data['metadata_iw_damage_carboneutrality']['@id'] + '.json', 'w') as f:
-            json.dump(self.olca_data['metadata_iw_damage_carboneutrality'], f)
-        zipObj.write(path + '/openLCA/expert_version/oLCA_folders/lcia_methods/' +
-                     self.olca_data['metadata_iw_damage_carboneutrality']['@id'] + '.json')
-
-        if not os.path.exists(path + '/openLCA/expert_version/oLCA_folders/lcia_categories/'):
-            os.makedirs(path + '/openLCA/expert_version/oLCA_folders/lcia_categories/')
-        for cat in self.olca_data['cf_dict_damage_carboneutrality'].keys():
-            with open(path + '/openLCA/expert_version/oLCA_folders/lcia_categories/' +
-                      self.olca_data['cf_dict_damage_carboneutrality'][cat]['@id'] + '.json', 'w') as f:
-                json.dump(self.olca_data['cf_dict_damage_carboneutrality'][cat], f)
-            zipObj.write(path + '/openLCA/expert_version/oLCA_folders/lcia_categories/' +
-                         self.olca_data['cf_dict_damage_carboneutrality'][cat]['@id'] + '.json')
-
-        if not os.path.exists(path + '/openLCA/expert_version/oLCA_folders/nw_sets/'):
-            os.makedirs(path + '/openLCA/expert_version/oLCA_folders/nw_sets/')
-        with open(path + '/openLCA/expert_version/oLCA_folders/nw_sets/' +
-                  self.olca_data['normalization_carboneutrality']['@id'] + '.json', 'w') as f:
-            json.dump(self.olca_data['normalization_carboneutrality'], f)
-        zipObj.write(path + '/openLCA/expert_version/oLCA_folders/nw_sets/' +
-                     self.olca_data['normalization_carboneutrality']['@id'] + '.json')
-        zipObj.close()
-        # use shutil to simplify the folder structure within the zip file
-        shutil.make_archive(path + '/openLCA/expert_version/impact_world_plus_'+self.version+
-                            '_expert_version_openLCA', 'zip', path +
-                            '/openLCA/expert_version/oLCA_folders/')
-
-        # create the openLCA version carboneutrality midpoint version (zip file)
-        if not os.path.exists(path + '/openLCA/midpoint_version/'):
-            os.makedirs(path + '/openLCA/midpoint_version/')
-        if os.path.exists(path + '/openLCA/midpoint_version/impact_world_plus'+self.version+'_openLCA.zip'):
-            os.remove(path + '/openLCA/midpoint_version/impact_world_plus'+self.version+'_openLCA.zip')
-        if os.path.exists(path + '/openLCA/midpoint_version/oLCA_folders'):
-            shutil.rmtree(path + '/openLCA/midpoint_version/oLCA_folders')
-        zipObj = zipfile.ZipFile(path + '/openLCA/midpoint_version/impact_world_plus_'+self.version+'_openLCA.zip', 'w')
-
-        if not os.path.exists(path + '/openLCA/midpoint_version/oLCA_folders/categories/'):
-            os.makedirs(path + '/openLCA/midpoint_version/oLCA_folders/categories/')
-        with open(path + '/openLCA/midpoint_version/oLCA_folders/categories/' +
-                  self.olca_data['category_metadata']['@id'] + '.json', 'w') as f:
-            json.dump(self.olca_data['category_metadata'], f)
-        zipObj.write(path + '/openLCA/midpoint_version/oLCA_folders/categories/' +
-                     self.olca_data['category_metadata']['@id'] + '.json')
-
-        if not os.path.exists(path + '/openLCA/midpoint_version/oLCA_folders/lcia_methods/'):
-            os.makedirs(path + '/openLCA/midpoint_version/oLCA_folders/lcia_methods/')
-        with open(path + '/openLCA/midpoint_version/oLCA_folders/lcia_methods/' +
-                  self.olca_data['metadata_iw_midpoint_carboneutrality']['@id'] + '.json', 'w') as f:
-            json.dump(self.olca_data['metadata_iw_midpoint_carboneutrality'], f)
-        zipObj.write(path + '/openLCA/midpoint_version/oLCA_folders/lcia_methods/' +
-                     self.olca_data['metadata_iw_midpoint_carboneutrality']['@id'] + '.json')
-
-        if not os.path.exists(path + '/openLCA/midpoint_version /oLCA_folders/lcia_categories/'):
-            os.makedirs(path + '/openLCA/midpoint_version/oLCA_folders/lcia_categories/')
-        for cat in self.olca_data['cf_dict_midpoint_carboneutrality'].keys():
-            with open(path + '/openLCA/midpoint_version/oLCA_folders/lcia_categories/' +
-                      self.olca_data['cf_dict_midpoint_carboneutrality'][cat]['@id'] + '.json', 'w') as f:
-                json.dump(self.olca_data['cf_dict_midpoint_carboneutrality'][cat], f)
-            zipObj.write(path + '/openLCA/midpoint_version/oLCA_folders/lcia_categories/' +
-                         self.olca_data['cf_dict_midpoint_carboneutrality'][cat]['@id'] + '.json')
-        zipObj.close()
-        # use shutil to simplify the folder structure within the zip file
-        shutil.make_archive(path + '/openLCA/midpoint_version/impact_world_plus_'+self.version+
-                            '_midpoint_version_openLCA', 'zip', path +
-                            '/openLCA/midpoint_version/oLCA_folders/')
-
-        # create the openLCA version carboneutrality combined version (zip file)
-        if not os.path.exists(path + '/openLCA/combined_version/'):
-            os.makedirs(path + '/openLCA/combined_version/')
-        if os.path.exists(path + '/openLCA/combined_version/impact_world_plus'+self.version+'_openLCA.zip'):
-            os.remove(path + '/openLCA/combined_version/impact_world_plus'+self.version+'_openLCA.zip')
-        if os.path.exists(path + '/openLCA/combined_version/oLCA_folders'):
-            shutil.rmtree(path + '/openLCA/combined_version/oLCA_folders')
-        zipObj = zipfile.ZipFile(path + '/openLCA/combined_version/impact_world_plus_'+self.version+'_openLCA.zip', 'w')
-
-        if not os.path.exists(path + '/openLCA/combined_version/oLCA_folders/categories/'):
-            os.makedirs(path + '/openLCA/combined_version/oLCA_folders/categories/')
-        with open(path + '/openLCA/combined_version/oLCA_folders/categories/' +
-                  self.olca_data['category_metadata']['@id'] + '.json', 'w') as f:
-            json.dump(self.olca_data['category_metadata'], f)
-        zipObj.write(path + '/openLCA/combined_version/oLCA_folders/categories/' +
-                     self.olca_data['category_metadata']['@id'] + '.json')
-
-        if not os.path.exists(path + '/openLCA/combined_version/oLCA_folders/lcia_methods/'):
-            os.makedirs(path + '/openLCA/combined_version/oLCA_folders/lcia_methods/')
-        with open(path + '/openLCA/combined_version/oLCA_folders/lcia_methods/' +
-                  self.olca_data['metadata_iw_combined_carboneutrality']['@id'] + '.json', 'w') as f:
-            json.dump(self.olca_data['metadata_iw_combined_carboneutrality'], f)
-        zipObj.write(path + '/openLCA/combined_version/oLCA_folders/lcia_methods/' +
-                     self.olca_data['metadata_iw_combined_carboneutrality']['@id'] + '.json')
-
-        if not os.path.exists(path + '/openLCA/combined_version/oLCA_folders/lcia_categories/'):
-            os.makedirs(path + '/openLCA/combined_version/oLCA_folders/lcia_categories/')
-        for cat in self.olca_data['cf_dict_combined_carboneutrality'].keys():
-            with open(path + '/openLCA/combined_version/oLCA_folders/lcia_categories/' +
-                      self.olca_data['cf_dict_combined_carboneutrality'][cat]['@id'] + '.json', 'w') as f:
-                json.dump(self.olca_data['cf_dict_combined_carboneutrality'][cat], f)
-            zipObj.write(path + '/openLCA/combined_version/oLCA_folders/lcia_categories/' +
-                         self.olca_data['cf_dict_combined_carboneutrality'][cat]['@id'] + '.json')
-
-        if not os.path.exists(path + '/openLCA/combined_version /oLCA_folders/nw_sets/'):
-            os.makedirs(path + '/openLCA/combined_version/oLCA_folders/nw_sets/')
-        with open(path + '/openLCA/combined_version/oLCA_folders/nw_sets/' +
-                  self.olca_data['normalization_carboneutrality']['@id'] + '.json', 'w') as f:
-            json.dump(self.olca_data['normalization_carboneutrality'], f)
-        zipObj.write(path + '/openLCA/combined_version/oLCA_folders/nw_sets/' +
-                     self.olca_data['normalization_carboneutrality']['@id'] + '.json')
-        zipObj.close()
-        # use shutil to simplify the folder structure within the zip file
-        shutil.make_archive(path + '/openLCA/combined_version/impact_world_plus_' + self.version +
-                            '_combined_version_openLCA', 'zip', path +
-                            '/openLCA/combined_version/oLCA_folders/')
+        # # create the openLCA version expert version (zip file)
+        # if not os.path.exists(path + '/openLCA/expert_version (incl. CO2 uptake)/'):
+        #     os.makedirs(path + '/openLCA/expert_version (incl. CO2 uptake)/')
+        # if os.path.exists(path + '/openLCA/expert_version (incl. CO2 uptake)/impact_world_plus'+self.version+
+        #                   ' (incl. CO2 uptake)_openLCA.zip'):
+        #     os.remove(path + '/openLCA/expert_version (incl. CO2 uptake)/impact_world_plus'+self.version+
+        #               ' (incl. CO2 uptake)_openLCA.zip')
+        # if os.path.exists(path + '/openLCA/expert_version (incl. CO2 uptake)/oLCA_folders'):
+        #     shutil.rmtree(path + '/openLCA/expert_version (incl. CO2 uptake)/oLCA_folders')
+        # zipObj = zipfile.ZipFile(path + '/openLCA/expert_version (incl. CO2 uptake)/impact_world_plus_'+self.version+
+        #                          ' (incl. CO2 uptake)_openLCA.zip', 'w')
+        #
+        # if not os.path.exists(path + '/openLCA/expert_version (incl. CO2 uptake)/oLCA_folders/categories/'):
+        #     os.makedirs(path + '/openLCA/expert_version (incl. CO2 uptake)/oLCA_folders/categories/')
+        # with open(path + '/openLCA/expert_version (incl. CO2 uptake)/oLCA_folders/categories/' +
+        #           self.olca_data['category_metadata']['@id']  + '.json', 'w') as f:
+        #     json.dump(self.olca_data['category_metadata'], f)
+        # zipObj.write(path + '/openLCA/expert_version (incl. CO2 uptake)/oLCA_folders/categories/' +
+        #              self.olca_data['category_metadata']['@id'] + '.json')
+        #
+        # if not os.path.exists(path + '/openLCA/expert_version (incl. CO2 uptake)/oLCA_folders/lcia_methods/'):
+        #     os.makedirs(path + '/openLCA/expert_version (incl. CO2 uptake)/oLCA_folders/lcia_methods/')
+        # with open(path + '/openLCA/expert_version (incl. CO2 uptake)/oLCA_folders/lcia_methods/' +
+        #           self.olca_data['metadata_iw_damage']['@id'] + '.json', 'w') as f:
+        #     json.dump(self.olca_data['metadata_iw_damage'], f)
+        # zipObj.write(path + '/openLCA/expert_version (incl. CO2 uptake)/oLCA_folders/lcia_methods/' +
+        #              self.olca_data['metadata_iw_damage']['@id'] + '.json')
+        #
+        # if not os.path.exists(path + '/openLCA/expert_version (incl. CO2 uptake)/oLCA_folders/lcia_categories/'):
+        #     os.makedirs(path + '/openLCA/expert_version (incl. CO2 uptake)/oLCA_folders/lcia_categories/')
+        # for cat in self.olca_data['cf_dict_damage'].keys():
+        #     with open(path + '/openLCA/expert_version (incl. CO2 uptake)/oLCA_folders/lcia_categories/' +
+        #               self.olca_data['cf_dict_damage'][cat]['@id'] + '.json', 'w') as f:
+        #         json.dump(self.olca_data['cf_dict_damage'][cat], f)
+        #     zipObj.write(path + '/openLCA/expert_version (incl. CO2 uptake)/oLCA_folders/lcia_categories/' +
+        #                  self.olca_data['cf_dict_damage'][cat]['@id'] + '.json')
+        #
+        # if not os.path.exists(path + '/openLCA/expert_version (incl. CO2 uptake)/oLCA_folders/nw_sets/'):
+        #     os.makedirs(path + '/openLCA/expert_version (incl. CO2 uptake)/oLCA_folders/nw_sets/')
+        # with open(path + '/openLCA/expert_version (incl. CO2 uptake)/oLCA_folders/nw_sets/' +
+        #           self.olca_data['normalization']['@id'] + '.json', 'w') as f:
+        #     json.dump(self.olca_data['normalization'], f)
+        # zipObj.write(path + '/openLCA/expert_version (incl. CO2 uptake)/oLCA_folders/nw_sets/' +
+        #              self.olca_data['normalization']['@id'] + '.json')
+        # zipObj.close()
+        # # use shutil to simplify the folder structure within the zip file
+        # shutil.make_archive(path + '/openLCA/expert_version (incl. CO2 uptake)/impact_world_plus_'+self.version+
+        #                     ' (incl. CO2 uptake)_expert_version_openLCA', 'zip', path +
+        #                     '/openLCA/expert_version (incl. CO2 uptake)/oLCA_folders/')
+        #
+        # # create the openLCA version midpoint version (zip file)
+        # if not os.path.exists(path + '/openLCA/midpoint_version (incl. CO2 uptake)/'):
+        #     os.makedirs(path + '/openLCA/midpoint_version (incl. CO2 uptake)/')
+        # if os.path.exists(path + '/openLCA/midpoint_version (incl. CO2 uptake)/impact_world_plus'+self.version+
+        #                   ' (incl. CO2 uptake)_openLCA.zip'):
+        #     os.remove(path + '/openLCA/midpoint_version (incl. CO2 uptake)/impact_world_plus'+self.version+
+        #               ' (incl. CO2 uptake)_openLCA.zip')
+        # if os.path.exists(path + '/openLCA/midpoint_version (incl. CO2 uptake)/oLCA_folders'):
+        #     shutil.rmtree(path + '/openLCA/midpoint_version (incl. CO2 uptake)/oLCA_folders')
+        # zipObj = zipfile.ZipFile(path + '/openLCA/midpoint_version (incl. CO2 uptake)/impact_world_plus_'+self.version+
+        #                          ' (incl. CO2 uptake)_openLCA.zip', 'w')
+        #
+        # if not os.path.exists(path + '/openLCA/midpoint_version (incl. CO2 uptake)/oLCA_folders/categories/'):
+        #     os.makedirs(path + '/openLCA/midpoint_version (incl. CO2 uptake)/oLCA_folders/categories/')
+        # with open(path + '/openLCA/midpoint_version (incl. CO2 uptake)/oLCA_folders/categories/' +
+        #           self.olca_data['category_metadata']['@id'] + '.json', 'w') as f:
+        #     json.dump(self.olca_data['category_metadata'], f)
+        # zipObj.write(path + '/openLCA/midpoint_version (incl. CO2 uptake)/oLCA_folders/categories/' +
+        #              self.olca_data['category_metadata']['@id'] + '.json')
+        #
+        # if not os.path.exists(path + '/openLCA/midpoint_version (incl. CO2 uptake)/oLCA_folders/lcia_methods/'):
+        #     os.makedirs(path + '/openLCA/midpoint_version (incl. CO2 uptake)/oLCA_folders/lcia_methods/')
+        # with open(path + '/openLCA/midpoint_version (incl. CO2 uptake)/oLCA_folders/lcia_methods/' +
+        #           self.olca_data['metadata_iw_midpoint']['@id'] + '.json', 'w') as f:
+        #     json.dump(self.olca_data['metadata_iw_midpoint'], f)
+        # zipObj.write(path + '/openLCA/midpoint_version (incl. CO2 uptake)/oLCA_folders/lcia_methods/' +
+        #              self.olca_data['metadata_iw_midpoint']['@id'] + '.json')
+        #
+        # if not os.path.exists(path + '/openLCA/midpoint_version (incl. CO2 uptake)/oLCA_folders/lcia_categories/'):
+        #     os.makedirs(path + '/openLCA/midpoint_version (incl. CO2 uptake)/oLCA_folders/lcia_categories/')
+        # for cat in self.olca_data['cf_dict_midpoint'].keys():
+        #     with open(path + '/openLCA/midpoint_version (incl. CO2 uptake)/oLCA_folders/lcia_categories/' +
+        #               self.olca_data['cf_dict_midpoint'][cat]['@id'] + '.json', 'w') as f:
+        #         json.dump(self.olca_data['cf_dict_midpoint'][cat], f)
+        #     zipObj.write(path + '/openLCA/midpoint_version (incl. CO2 uptake)/oLCA_folders/lcia_categories/' +
+        #                  self.olca_data['cf_dict_midpoint'][cat]['@id'] + '.json')
+        # zipObj.close()
+        # # use shutil to simplify the folder structure within the zip file
+        # shutil.make_archive(path + '/openLCA/midpoint_version (incl. CO2 uptake)/impact_world_plus_'+self.version+
+        #                     ' (incl. CO2 uptake)_midpoint_version_openLCA', 'zip', path +
+        #                     '/openLCA/midpoint_version (incl. CO2 uptake)/oLCA_folders/')
+        #
+        # # create the openLCA version footprint version (zip file)
+        # if not os.path.exists(path + '/openLCA/footprint_version/'):
+        #     os.makedirs(path + '/openLCA/footprint_version/')
+        # if os.path.exists(path + '/openLCA/footprint_version/impact_world_plus'+self.version+'_openLCA.zip'):
+        #     os.remove(path + '/openLCA/footprint_version/impact_world_plus'+self.version+'_openLCA.zip')
+        # if os.path.exists(path + '/openLCA/footprint_version/oLCA_folders'):
+        #     shutil.rmtree(path + '/openLCA/footprint_version/oLCA_folders')
+        # zipObj = zipfile.ZipFile(path + '/openLCA/footprint_version/impact_world_plus_'+self.version+'_openLCA.zip', 'w')
+        #
+        # if not os.path.exists(path + '/openLCA/footprint_version/oLCA_folders/categories/'):
+        #     os.makedirs(path + '/openLCA/footprint_version/oLCA_folders/categories/')
+        # with open(path + '/openLCA/footprint_version/oLCA_folders/categories/' + self.olca_data['category_metadata']['@id']
+        #           + '.json', 'w') as f:
+        #     json.dump(self.olca_data['category_metadata'], f)
+        # zipObj.write(path + '/openLCA/footprint_version/oLCA_folders/categories/' + self.olca_data['category_metadata'][
+        #     '@id'] + '.json')
+        #
+        # if not os.path.exists(path + '/openLCA/footprint_version/oLCA_folders/lcia_methods/'):
+        #     os.makedirs(path + '/openLCA/footprint_version/oLCA_folders/lcia_methods/')
+        # with open(path + '/openLCA/footprint_version/oLCA_folders/lcia_methods/' +
+        #           self.olca_data['metadata_iw_footprint']['@id'] + '.json', 'w') as f:
+        #     json.dump(self.olca_data['metadata_iw_footprint'], f)
+        # zipObj.write(path + '/openLCA/footprint_version/oLCA_folders/lcia_methods/' +
+        #              self.olca_data['metadata_iw_footprint']['@id'] + '.json')
+        #
+        # if not os.path.exists(path + '/openLCA/footprint_version/oLCA_folders/lcia_categories/'):
+        #     os.makedirs(path + '/openLCA/footprint_version/oLCA_folders/lcia_categories/')
+        # for cat in self.olca_data['cf_dict_footprint'].keys():
+        #     with open(path + '/openLCA/footprint_version/oLCA_folders/lcia_categories/' +
+        #               self.olca_data['cf_dict_footprint'][cat]['@id'] + '.json', 'w') as f:
+        #         json.dump(self.olca_data['cf_dict_footprint'][cat], f)
+        #     zipObj.write(path + '/openLCA/footprint_version/oLCA_folders/lcia_categories/' +
+        #                  self.olca_data['cf_dict_footprint'][cat]['@id'] + '.json')
+        # zipObj.close()
+        # # use shutil to simplify the folder structure within the zip file
+        # shutil.make_archive(path + '/openLCA/footprint_version/impact_world_plus_' + self.version +
+        #                     '_footprint_version_openLCA', 'zip', path + '/openLCA/footprint_version/oLCA_folders/')
+        #
+        # # create the openLCA version combined version (zip file)
+        # if not os.path.exists(path + '/openLCA/combined_version (incl. CO2 uptake)/'):
+        #     os.makedirs(path + '/openLCA/combined_version (incl. CO2 uptake)/')
+        # if os.path.exists(path + '/openLCA/combined_version (incl. CO2 uptake)/impact_world_plus'+self.version+
+        #                   ' (incl. CO2 uptake)_openLCA.zip'):
+        #     os.remove(path + '/openLCA/combined_version (incl. CO2 uptake)/impact_world_plus'+self.version+
+        #               ' (incl. CO2 uptake)_openLCA.zip')
+        # if os.path.exists(path + '/openLCA/combined_version (incl. CO2 uptake)/oLCA_folders'):
+        #     shutil.rmtree(path + '/openLCA/combined_version (incl. CO2 uptake)/oLCA_folders')
+        # zipObj = zipfile.ZipFile(path + '/openLCA/combined_version (incl. CO2 uptake)/impact_world_plus_'+self.version+
+        #                          ' (incl. CO2 uptake)_openLCA.zip', 'w')
+        #
+        # if not os.path.exists(path + '/openLCA/combined_version (incl. CO2 uptake)/oLCA_folders/categories/'):
+        #     os.makedirs(path + '/openLCA/combined_version (incl. CO2 uptake)/oLCA_folders/categories/')
+        # with open(path + '/openLCA/combined_version (incl. CO2 uptake)/oLCA_folders/categories/' +
+        #           self.olca_data['category_metadata']['@id'] + '.json', 'w') as f:
+        #     json.dump(self.olca_data['category_metadata'], f)
+        # zipObj.write(path + '/openLCA/combined_version (incl. CO2 uptake)/oLCA_folders/categories/' +
+        #              self.olca_data['category_metadata']['@id'] + '.json')
+        #
+        # if not os.path.exists(path + '/openLCA/combined_version (incl. CO2 uptake)/oLCA_folders/lcia_methods/'):
+        #     os.makedirs(path + '/openLCA/combined_version (incl. CO2 uptake)/oLCA_folders/lcia_methods/')
+        # with open(path + '/openLCA/combined_version (incl. CO2 uptake)/oLCA_folders/lcia_methods/' +
+        #           self.olca_data['metadata_iw_combined']['@id'] + '.json', 'w') as f:
+        #     json.dump(self.olca_data['metadata_iw_combined'], f)
+        # zipObj.write(path + '/openLCA/combined_version (incl. CO2 uptake)/oLCA_folders/lcia_methods/' +
+        #              self.olca_data['metadata_iw_combined']['@id'] + '.json')
+        #
+        # if not os.path.exists(path + '/openLCA/combined_version (incl. CO2 uptake)/oLCA_folders/lcia_categories/'):
+        #     os.makedirs(path + '/openLCA/combined_version (incl. CO2 uptake)/oLCA_folders/lcia_categories/')
+        # for cat in self.olca_data['cf_dict_combined'].keys():
+        #     with open(path + '/openLCA/combined_version (incl. CO2 uptake)/oLCA_folders/lcia_categories/' +
+        #               self.olca_data['cf_dict_combined'][cat]['@id'] + '.json', 'w') as f:
+        #         json.dump(self.olca_data['cf_dict_combined'][cat], f)
+        #     zipObj.write(path + '/openLCA/combined_version (incl. CO2 uptake)/oLCA_folders/lcia_categories/' +
+        #                  self.olca_data['cf_dict_combined'][cat]['@id'] + '.json')
+        #
+        # if not os.path.exists(path + '/openLCA/combined_version (incl. CO2 uptake)/oLCA_folders/nw_sets/'):
+        #     os.makedirs(path + '/openLCA/combined_version (incl. CO2 uptake)/oLCA_folders/nw_sets/')
+        # with open(path + '/openLCA/combined_version (incl. CO2 uptake)/oLCA_folders/nw_sets/' +
+        #           self.olca_data['normalization']['@id'] + '.json', 'w') as f:
+        #     json.dump(self.olca_data['normalization'], f)
+        # zipObj.write(path + '/openLCA/combined_version (incl. CO2 uptake)/oLCA_folders/nw_sets/' +
+        #              self.olca_data['normalization']['@id'] + '.json')
+        # zipObj.close()
+        # # use shutil to simplify the folder structure within the zip file
+        # shutil.make_archive(path + '/openLCA/combined_version (incl. CO2 uptake)/impact_world_plus_' + self.version +
+        #                     ' (incl. CO2 uptake)_combined_version_openLCA', 'zip', path +
+        #                     '/openLCA/combined_version (incl. CO2 uptake)/oLCA_folders/')
+        #
+        # # create the openLCA version carboneutrality expert version (zip file)
+        # if not os.path.exists(path + '/openLCA/expert_version/'):
+        #     os.makedirs(path + '/openLCA/expert_version/')
+        # if os.path.exists(path + '/openLCA/expert_version/impact_world_plus'+self.version+'_openLCA.zip'):
+        #     os.remove(path + '/openLCA/expert_version/impact_world_plus'+self.version+'_openLCA.zip')
+        # if os.path.exists(path + '/openLCA/expert_version/oLCA_folders'):
+        #     shutil.rmtree(path + '/openLCA/expert_version/oLCA_folders')
+        # zipObj = zipfile.ZipFile(path + '/openLCA/expert_version/impact_world_plus_'+self.version+'_openLCA.zip', 'w')
+        #
+        # if not os.path.exists(path + '/openLCA/expert_version/oLCA_folders/categories/'):
+        #     os.makedirs(path + '/openLCA/expert_version/oLCA_folders/categories/')
+        # with open(path + '/openLCA/expert_version/oLCA_folders/categories/' + self.olca_data['category_metadata']['@id']
+        #           + '.json', 'w') as f:
+        #     json.dump(self.olca_data['category_metadata'], f)
+        # zipObj.write(path + '/openLCA/expert_version/oLCA_folders/categories/' +
+        #              self.olca_data['category_metadata']['@id'] + '.json')
+        #
+        # if not os.path.exists(path + '/openLCA/expert_version/oLCA_folders/lcia_methods/'):
+        #     os.makedirs(path + '/openLCA/expert_version/oLCA_folders/lcia_methods/')
+        # with open(path + '/openLCA/expert_version/oLCA_folders/lcia_methods/' +
+        #           self.olca_data['metadata_iw_damage_carboneutrality']['@id'] + '.json', 'w') as f:
+        #     json.dump(self.olca_data['metadata_iw_damage_carboneutrality'], f)
+        # zipObj.write(path + '/openLCA/expert_version/oLCA_folders/lcia_methods/' +
+        #              self.olca_data['metadata_iw_damage_carboneutrality']['@id'] + '.json')
+        #
+        # if not os.path.exists(path + '/openLCA/expert_version/oLCA_folders/lcia_categories/'):
+        #     os.makedirs(path + '/openLCA/expert_version/oLCA_folders/lcia_categories/')
+        # for cat in self.olca_data['cf_dict_damage_carboneutrality'].keys():
+        #     with open(path + '/openLCA/expert_version/oLCA_folders/lcia_categories/' +
+        #               self.olca_data['cf_dict_damage_carboneutrality'][cat]['@id'] + '.json', 'w') as f:
+        #         json.dump(self.olca_data['cf_dict_damage_carboneutrality'][cat], f)
+        #     zipObj.write(path + '/openLCA/expert_version/oLCA_folders/lcia_categories/' +
+        #                  self.olca_data['cf_dict_damage_carboneutrality'][cat]['@id'] + '.json')
+        #
+        # if not os.path.exists(path + '/openLCA/expert_version/oLCA_folders/nw_sets/'):
+        #     os.makedirs(path + '/openLCA/expert_version/oLCA_folders/nw_sets/')
+        # with open(path + '/openLCA/expert_version/oLCA_folders/nw_sets/' +
+        #           self.olca_data['normalization_carboneutrality']['@id'] + '.json', 'w') as f:
+        #     json.dump(self.olca_data['normalization_carboneutrality'], f)
+        # zipObj.write(path + '/openLCA/expert_version/oLCA_folders/nw_sets/' +
+        #              self.olca_data['normalization_carboneutrality']['@id'] + '.json')
+        # zipObj.close()
+        # # use shutil to simplify the folder structure within the zip file
+        # shutil.make_archive(path + '/openLCA/expert_version/impact_world_plus_'+self.version+
+        #                     '_expert_version_openLCA', 'zip', path +
+        #                     '/openLCA/expert_version/oLCA_folders/')
+        #
+        # # create the openLCA version carboneutrality midpoint version (zip file)
+        # if not os.path.exists(path + '/openLCA/midpoint_version/'):
+        #     os.makedirs(path + '/openLCA/midpoint_version/')
+        # if os.path.exists(path + '/openLCA/midpoint_version/impact_world_plus'+self.version+'_openLCA.zip'):
+        #     os.remove(path + '/openLCA/midpoint_version/impact_world_plus'+self.version+'_openLCA.zip')
+        # if os.path.exists(path + '/openLCA/midpoint_version/oLCA_folders'):
+        #     shutil.rmtree(path + '/openLCA/midpoint_version/oLCA_folders')
+        # zipObj = zipfile.ZipFile(path + '/openLCA/midpoint_version/impact_world_plus_'+self.version+'_openLCA.zip', 'w')
+        #
+        # if not os.path.exists(path + '/openLCA/midpoint_version/oLCA_folders/categories/'):
+        #     os.makedirs(path + '/openLCA/midpoint_version/oLCA_folders/categories/')
+        # with open(path + '/openLCA/midpoint_version/oLCA_folders/categories/' +
+        #           self.olca_data['category_metadata']['@id'] + '.json', 'w') as f:
+        #     json.dump(self.olca_data['category_metadata'], f)
+        # zipObj.write(path + '/openLCA/midpoint_version/oLCA_folders/categories/' +
+        #              self.olca_data['category_metadata']['@id'] + '.json')
+        #
+        # if not os.path.exists(path + '/openLCA/midpoint_version/oLCA_folders/lcia_methods/'):
+        #     os.makedirs(path + '/openLCA/midpoint_version/oLCA_folders/lcia_methods/')
+        # with open(path + '/openLCA/midpoint_version/oLCA_folders/lcia_methods/' +
+        #           self.olca_data['metadata_iw_midpoint_carboneutrality']['@id'] + '.json', 'w') as f:
+        #     json.dump(self.olca_data['metadata_iw_midpoint_carboneutrality'], f)
+        # zipObj.write(path + '/openLCA/midpoint_version/oLCA_folders/lcia_methods/' +
+        #              self.olca_data['metadata_iw_midpoint_carboneutrality']['@id'] + '.json')
+        #
+        # if not os.path.exists(path + '/openLCA/midpoint_version /oLCA_folders/lcia_categories/'):
+        #     os.makedirs(path + '/openLCA/midpoint_version/oLCA_folders/lcia_categories/')
+        # for cat in self.olca_data['cf_dict_midpoint_carboneutrality'].keys():
+        #     with open(path + '/openLCA/midpoint_version/oLCA_folders/lcia_categories/' +
+        #               self.olca_data['cf_dict_midpoint_carboneutrality'][cat]['@id'] + '.json', 'w') as f:
+        #         json.dump(self.olca_data['cf_dict_midpoint_carboneutrality'][cat], f)
+        #     zipObj.write(path + '/openLCA/midpoint_version/oLCA_folders/lcia_categories/' +
+        #                  self.olca_data['cf_dict_midpoint_carboneutrality'][cat]['@id'] + '.json')
+        # zipObj.close()
+        # # use shutil to simplify the folder structure within the zip file
+        # shutil.make_archive(path + '/openLCA/midpoint_version/impact_world_plus_'+self.version+
+        #                     '_midpoint_version_openLCA', 'zip', path +
+        #                     '/openLCA/midpoint_version/oLCA_folders/')
+        #
+        # # create the openLCA version carboneutrality combined version (zip file)
+        # if not os.path.exists(path + '/openLCA/combined_version/'):
+        #     os.makedirs(path + '/openLCA/combined_version/')
+        # if os.path.exists(path + '/openLCA/combined_version/impact_world_plus'+self.version+'_openLCA.zip'):
+        #     os.remove(path + '/openLCA/combined_version/impact_world_plus'+self.version+'_openLCA.zip')
+        # if os.path.exists(path + '/openLCA/combined_version/oLCA_folders'):
+        #     shutil.rmtree(path + '/openLCA/combined_version/oLCA_folders')
+        # zipObj = zipfile.ZipFile(path + '/openLCA/combined_version/impact_world_plus_'+self.version+'_openLCA.zip', 'w')
+        #
+        # if not os.path.exists(path + '/openLCA/combined_version/oLCA_folders/categories/'):
+        #     os.makedirs(path + '/openLCA/combined_version/oLCA_folders/categories/')
+        # with open(path + '/openLCA/combined_version/oLCA_folders/categories/' +
+        #           self.olca_data['category_metadata']['@id'] + '.json', 'w') as f:
+        #     json.dump(self.olca_data['category_metadata'], f)
+        # zipObj.write(path + '/openLCA/combined_version/oLCA_folders/categories/' +
+        #              self.olca_data['category_metadata']['@id'] + '.json')
+        #
+        # if not os.path.exists(path + '/openLCA/combined_version/oLCA_folders/lcia_methods/'):
+        #     os.makedirs(path + '/openLCA/combined_version/oLCA_folders/lcia_methods/')
+        # with open(path + '/openLCA/combined_version/oLCA_folders/lcia_methods/' +
+        #           self.olca_data['metadata_iw_combined_carboneutrality']['@id'] + '.json', 'w') as f:
+        #     json.dump(self.olca_data['metadata_iw_combined_carboneutrality'], f)
+        # zipObj.write(path + '/openLCA/combined_version/oLCA_folders/lcia_methods/' +
+        #              self.olca_data['metadata_iw_combined_carboneutrality']['@id'] + '.json')
+        #
+        # if not os.path.exists(path + '/openLCA/combined_version/oLCA_folders/lcia_categories/'):
+        #     os.makedirs(path + '/openLCA/combined_version/oLCA_folders/lcia_categories/')
+        # for cat in self.olca_data['cf_dict_combined_carboneutrality'].keys():
+        #     with open(path + '/openLCA/combined_version/oLCA_folders/lcia_categories/' +
+        #               self.olca_data['cf_dict_combined_carboneutrality'][cat]['@id'] + '.json', 'w') as f:
+        #         json.dump(self.olca_data['cf_dict_combined_carboneutrality'][cat], f)
+        #     zipObj.write(path + '/openLCA/combined_version/oLCA_folders/lcia_categories/' +
+        #                  self.olca_data['cf_dict_combined_carboneutrality'][cat]['@id'] + '.json')
+        #
+        # if not os.path.exists(path + '/openLCA/combined_version /oLCA_folders/nw_sets/'):
+        #     os.makedirs(path + '/openLCA/combined_version/oLCA_folders/nw_sets/')
+        # with open(path + '/openLCA/combined_version/oLCA_folders/nw_sets/' +
+        #           self.olca_data['normalization_carboneutrality']['@id'] + '.json', 'w') as f:
+        #     json.dump(self.olca_data['normalization_carboneutrality'], f)
+        # zipObj.write(path + '/openLCA/combined_version/oLCA_folders/nw_sets/' +
+        #              self.olca_data['normalization_carboneutrality']['@id'] + '.json')
+        # zipObj.close()
+        # # use shutil to simplify the folder structure within the zip file
+        # shutil.make_archive(path + '/openLCA/combined_version/impact_world_plus_' + self.version +
+        #                     '_combined_version_openLCA', 'zip', path +
+        #                     '/openLCA/combined_version/oLCA_folders/')
 
     def produce_files_hybrid_ecoinvent(self):
         """Specific method to create the files matching with hybrid-ecoinvent (pylcaio)."""
@@ -2016,9 +2022,6 @@ class Parse:
         self.logger.info("Loading fossil resources characterization factors...")
         fossils = pd.read_sql(sql='SELECT * FROM [CF - not regionalized - FossilResources]', con=self.conn)
 
-        self.logger.info("Loading mineral resources characterization factors...")
-        minerals = pd.read_sql(sql='SELECT * FROM [CF - not regionalized - MineralResources]', con=self.conn)
-
         elem_flow_list = pd.read_sql(sql='SELECT * FROM [SI - Mapping with elementary flows]', con=self.conn)
 
         self.logger.info("Loading toxicity characterization factors...")
@@ -2053,7 +2056,7 @@ class Parse:
         terr_ecotoxicity = terr_ecotoxicity.rename(
             columns={'Name IW+': 'Elem flow name', 'CAS-Usetox2_Mar_Terr': 'CAS number'})
 
-        self.master_db = pd.concat([ionizing, mar_acid, fossils, minerals, toxicity,
+        self.master_db = pd.concat([ionizing, mar_acid, fossils, toxicity,
                                     fw_ecotoxicity, mar_ecotoxicity, terr_ecotoxicity])
 
         self.master_db = clean_up_dataframe(self.master_db)
@@ -2416,159 +2419,132 @@ class Parse:
         """
 
         # ------------------------------ LOADING DATA -----------------------------------
-        cell_emissions = {
-            'NH3': pd.read_sql('SELECT * FROM [CF - regionalized - AcidFW - native (NH3 emissions to air)]',
-                               self.conn).set_index('cell'),
-            'NOx': pd.read_sql('SELECT * FROM [CF - regionalized - AcidFW - native (NOx emissions to air)]',
-                               self.conn).set_index('cell'),
-            'SO2': pd.read_sql('SELECT * FROM [CF - regionalized - AcidFW - native (SO2 emissions to air)]',
-                               self.conn).set_index('cell')}
+        data = pd.read_sql('SELECT * FROM [CF - regionalized - AcidFW - aggregated]', self.conn)
 
-        inter_country = pd.read_sql('SELECT * FROM [SI - Acidification/Eutrophication - Countries cell resolution]',
-                                    self.conn).set_index('cell').T
-        inter_continent = pd.read_sql('SELECT * FROM [SI - Acidification/Eutrophication - Continents cell resolution]',
-                                      self.conn).set_index('cell').T
+        # concatenating/formatting all the data in one dataframe
+        concat_data = pd.DataFrame()
 
-        # ------------------------- CALCULATING MIDPOINT AND DAMAGE CFS --------------------------------
-        country_emissions = {}
-        continent_emissions = {}
-        for substance in cell_emissions:
-            cell_emissions[substance].index.name = None
-            country_emissions[substance] = inter_country.dot(cell_emissions[substance].Emission)
-            continent_emissions[substance] = inter_continent.dot(cell_emissions[substance].Emission)
+        for ix, row in data.iterrows():
+            concat_data = pd.concat([concat_data,
+                                     pd.DataFrame(['Freshwater acidification', 'kg SO2 eq', 'Air', '(unspecified)',
+                                                   'Ammonia, ' + row['Short name ecoinvent'], '7664-41-7',
+                                                   row['CF NH3 (kg SO2 eq)'], 'kg', 'Midpoint', 'Country'],
+                                                  index=['Impact category', 'CF unit', 'Compartment', 'Sub-compartment',
+                                                         'Elem flow name', 'CAS number', 'CF value', 'Elem flow unit',
+                                                         'MP or Damage', 'Native geographical resolution scale']).T])
 
-        cfs_midpoint = pd.DataFrame(None, cell_emissions.keys(), country_emissions['SO2'].index)
+            concat_data = pd.concat([concat_data,
+                                     pd.DataFrame(['Freshwater acidification', 'PDF.m2.yr', 'Air', '(unspecified)',
+                                                   'Ammonia, ' + row['Short name ecoinvent'], '7664-41-7',
+                                                   row['CF NH3 (PDF.m2.yr)'], 'kg', 'Damage', 'Country'],
+                                                  index=['Impact category', 'CF unit', 'Compartment', 'Sub-compartment',
+                                                         'Elem flow name', 'CAS number', 'CF value', 'Elem flow unit',
+                                                         'MP or Damage', 'Native geographical resolution scale']).T])
 
-        for substance in cell_emissions:
-            # for countries
-            for country in country_emissions[substance].index:
-                try:
-                    aggregated_cf = (cell_emissions[substance].loc[:, 'midpoint'] *
-                                     cell_emissions[substance].loc[:, 'Emission'] /
-                                     country_emissions[substance].loc[country] *
-                                     inter_country.loc[country]).sum()
-                    cfs_midpoint.loc[substance, country] = aggregated_cf
-                except ZeroDivisionError:
-                    pass
+            concat_data = pd.concat([concat_data,
+                                     pd.DataFrame(['Freshwater acidification', 'kg SO2 eq', 'Air', '(unspecified)',
+                                                   'Nitrogen oxides, ' + row['Short name ecoinvent'], '11104-93-1',
+                                                   row['CF NOx (kg SO2 eq)'], 'kg', 'Midpoint', 'Country'],
+                                                  index=['Impact category', 'CF unit', 'Compartment', 'Sub-compartment',
+                                                         'Elem flow name', 'CAS number', 'CF value', 'Elem flow unit',
+                                                         'MP or Damage', 'Native geographical resolution scale']).T])
 
-            # for continents
-            for continent in continent_emissions[substance].index:
-                try:
-                    aggregated_cf = (cell_emissions[substance].loc[:, 'midpoint'] *
-                                     cell_emissions[substance].loc[:, 'Emission'] /
-                                     continent_emissions[substance].loc[continent] *
-                                     inter_continent.loc[continent]).sum()
-                    cfs_midpoint.loc[substance, continent] = aggregated_cf
-                except ZeroDivisionError:
-                    pass
+            concat_data = pd.concat([concat_data,
+                                     pd.DataFrame(['Freshwater acidification', 'PDF.m2.yr', 'Air', '(unspecified)',
+                                                   'Nitrogen oxides, ' + row['Short name ecoinvent'], '11104-93-1',
+                                                   row['CF NOx (PDF.m2.yr)'], 'kg', 'Damage', 'Country'],
+                                                  index=['Impact category', 'CF unit', 'Compartment', 'Sub-compartment',
+                                                         'Elem flow name', 'CAS number', 'CF value', 'Elem flow unit',
+                                                         'MP or Damage', 'Native geographical resolution scale']).T])
 
-            # global
-            GLO_value = (cell_emissions[substance].loc[:, 'midpoint'] *
-                         cell_emissions[substance].loc[:, 'Emission'] /
-                         cell_emissions[substance].Emission.sum()).sum()
-            cfs_midpoint.loc[substance, 'GLO'] = GLO_value
+            concat_data = pd.concat([concat_data,
+                                     pd.DataFrame(['Freshwater acidification', 'kg SO2 eq', 'Air', '(unspecified)',
+                                                   'Sulfur dioxide, ' + row['Short name ecoinvent'], '7446-09-05',
+                                                   row['CF SO2 (kg SO2 eq)'], 'kg', 'Midpoint', 'Country'],
+                                                  index=['Impact category', 'CF unit', 'Compartment', 'Sub-compartment',
+                                                         'Elem flow name', 'CAS number', 'CF value', 'Elem flow unit',
+                                                         'MP or Damage', 'Native geographical resolution scale']).T])
 
-        # divide by reference flow -> SO2
-        cfs_midpoint /= cfs_midpoint.loc['SO2', 'GLO']
+            concat_data = pd.concat([concat_data,
+                                     pd.DataFrame(['Freshwater acidification', 'PDF.m2.yr', 'Air', '(unspecified)',
+                                                   'Sulfur dioxide, ' + row['Short name ecoinvent'], '7446-09-05',
+                                                   row['CF SO2 (PDF.m2.yr)'], 'kg', 'Damage', 'Country'],
+                                                  index=['Impact category', 'CF unit', 'Compartment', 'Sub-compartment',
+                                                         'Elem flow name', 'CAS number', 'CF value', 'Elem flow unit',
+                                                         'MP or Damage', 'Native geographical resolution scale']).T])
 
-        cfs_damage = pd.DataFrame(None, cell_emissions.keys(), country_emissions['SO2'].index)
+            concat_data = pd.concat([concat_data,
+                                     pd.DataFrame(['Freshwater acidification', 'kg SO2 eq', 'Air', '(unspecified)',
+                                                   'Nitric acid, ' + row['Short name ecoinvent'], '7697-37-2',
+                                                   row['CF HNO3 (kg SO2 eq)'], 'kg', 'Midpoint', 'Country'],
+                                                  index=['Impact category', 'CF unit', 'Compartment', 'Sub-compartment',
+                                                         'Elem flow name', 'CAS number', 'CF value', 'Elem flow unit',
+                                                         'MP or Damage', 'Native geographical resolution scale']).T])
 
-        for substance in cell_emissions:
-            # for countries
-            for country in country_emissions[substance].index:
-                try:
-                    aggregated_cf = (cell_emissions[substance].loc[:, 'endpoint'] *
-                                     cell_emissions[substance].loc[:, 'Emission'] /
-                                     country_emissions[substance].loc[country] *
-                                     inter_country.loc[country]).sum()
-                    cfs_damage.loc[substance, country] = aggregated_cf
-                except ZeroDivisionError:
-                    pass
+            concat_data = pd.concat([concat_data,
+                                     pd.DataFrame(['Freshwater acidification', 'PDF.m2.yr', 'Air', '(unspecified)',
+                                                   'Nitric acid, ' + row['Short name ecoinvent'], '7697-37-2',
+                                                   row['CF HNO3 (PDF.m2.yr)'], 'kg', 'Damage', 'Country'],
+                                                  index=['Impact category', 'CF unit', 'Compartment', 'Sub-compartment',
+                                                         'Elem flow name', 'CAS number', 'CF value', 'Elem flow unit',
+                                                         'MP or Damage', 'Native geographical resolution scale']).T])
 
-            # for continents
-            for continent in continent_emissions[substance].index:
-                try:
-                    aggregated_cf = (cell_emissions[substance].loc[:, 'endpoint'] *
-                                     cell_emissions[substance].loc[:, 'Emission'] /
-                                     continent_emissions[substance].loc[continent] *
-                                     inter_continent.loc[continent]).sum()
-                    cfs_damage.loc[substance, continent] = aggregated_cf
-                except ZeroDivisionError:
-                    pass
+        concat_data = concat_data.reset_index().drop('index', axis=1)
 
-            # global
-            GLO_value = (cell_emissions[substance].loc[:, 'endpoint'] *
-                         cell_emissions[substance].loc[:, 'Emission'] /
-                         cell_emissions[substance].Emission.sum()).sum()
-            cfs_damage.loc[substance, 'GLO'] = GLO_value
-
-        # ------------------------------ DATA FORMATTING -----------------------------------
-        # convert country names to ISO 2-letter codes
-        # lines of logger to avoid having warnings showing up
-        coco_logger = coco.logging.getLogger()
-        coco_logger.setLevel(coco.logging.CRITICAL)
-        cfs_midpoint.columns = coco.convert(cfs_midpoint.iloc[:, :-7], to='ISO2') + ['RNA', 'RLA', 'RER', 'RAS', 'RAF',
-                                                                                     'OCE', 'GLO']
-        cfs_damage.columns = cfs_midpoint.columns
-        # countries that don't exist anymore or that are not part of the UN are dropped
-        cfs_midpoint.drop('not found', axis=1, inplace=True)
-        cfs_damage.drop('not found', axis=1, inplace=True)
-
-        cfs_midpoint = cfs_midpoint.stack().reset_index()
-        cfs_midpoint.columns = ['Elem flow', 'Region code', 'CF value']
-        cfs_damage = cfs_damage.stack().reset_index()
-        cfs_damage.columns = ['Elem flow', 'Region code', 'CF value']
-        cfs_midpoint.loc[:, 'CF unit'] = 'kg SO2 eq'
-        cfs_midpoint.loc[:, 'MP or Damage'] = 'Midpoint'
-        cfs_damage.loc[:, 'CF unit'] = 'PDF.m2.yr'
-        cfs_damage.loc[:, 'MP or Damage'] = 'Damage'
-        cfs = pd.concat([cfs_midpoint, cfs_damage])
-        cfs.loc[:, 'Impact category'] = 'Freshwater acidification'
-        cfs.loc[:, 'Compartment'] = 'Air'
-        cfs.loc[:, 'Sub-compartment'] = '(unspecified)'
-        cfs.loc[:, 'Elem flow unit'] = 'kg'
-        cfs.loc[:, 'Native geographical resolution scale'] = 'Country'
-        cfs.loc[cfs.loc[:, 'Elem flow'] == 'NH3', 'CAS number'] = '7664-41-7'
-        cfs.loc[cfs.loc[:, 'Elem flow'] == 'NOx', 'CAS number'] = '11104-93-1'
-        cfs.loc[cfs.loc[:, 'Elem flow'] == 'SO2', 'CAS number'] = '7446-09-5'
-        cfs = clean_up_dataframe(cfs)
-        cfs.loc[[i for i in cfs.index if cfs.loc[i, 'Region code'] in ['RNA', 'RLA', 'RER', 'RAS', 'RAF', 'OCE', 'GLO']],
-                'Native geographical resolution scale'] = 'Continent'
-        cfs.loc[cfs.loc[:, 'Region code'] == 'GLO', 'Native geographical resolution scale'] = 'Global'
+        concat_data.loc[[i for i in concat_data.index if
+                         concat_data.loc[i, 'Elem flow name'].split(', ')[-1] in ['RNA', 'RLA', 'RER', 'RAS', 'RAF',
+                                                                                  'RME', 'UN-OCEANIA']],
+                        'Native geographical resolution scale'] = 'Continent'
+        concat_data.loc[[i for i in concat_data.index if concat_data.loc[i, 'Elem flow name'].split(', ')[
+            -1] == 'GLO'], 'Native geographical resolution scale'] = 'Global'
+        concat_data.loc[[i for i in concat_data.index if concat_data.loc[i, 'Elem flow name'].split(', ')[
+            -1] == 'RoW'], 'Native geographical resolution scale'] = 'Other region'
 
         # ------------------------------ APPLYING STOECHIOMETRIC RATIOS --------------------------
         stoc = pd.read_sql('SELECT * FROM [SI - Stoechiometry]', self.conn)
         stoc = stoc.loc[stoc.loc[:, 'Impact category'] == 'Freshwater acidification']
-        for i in stoc.index:
-            proxy = stoc.loc[i, 'Proxy molecule']
-            comp = stoc.loc[i, 'Compartment']
-            df = cfs[cfs.loc[:, 'Elem flow'] == proxy].loc[cfs.loc[:, 'Compartment'] == comp].copy('deep')
+
+        for ix in stoc.index:
+            proxy = stoc.loc[ix, 'Proxy molecule']
+            comp = stoc.loc[ix, 'Compartment']
+            df = pd.DataFrame()
+            if proxy == 'NH3':
+                # don't create a duplicate
+                if stoc.loc[ix, 'Elem flow name'] != 'Ammonia':
+                    df = concat_data[concat_data.loc[:, 'Elem flow name'].str.contains('Ammonia') &
+                                     ~(concat_data.loc[:, 'Elem flow name'].str.contains('Ammonia, as N'))].loc[
+                        concat_data.loc[:, 'Compartment'] == comp].copy('deep')
+                    df.loc[:, 'Elem flow name'] = [i.replace('Ammonia', stoc.loc[ix, 'Elem flow name']) for i in
+                                                   df.loc[:, 'Elem flow name']]
+            if proxy == 'HNO3':
+                # don't create a duplicate
+                if stoc.loc[ix, 'Elem flow name'] != 'Nitric acid':
+                    df = concat_data[concat_data.loc[:, 'Elem flow name'].str.contains('Nitric acid')].loc[
+                        concat_data.loc[:, 'Compartment'] == comp].copy('deep')
+                    df.loc[:, 'Elem flow name'] = [i.replace('Nitric acid', stoc.loc[ix, 'Elem flow name']) for i in
+                                                   df.loc[:, 'Elem flow name']]
+            if proxy == 'SO2':
+                # don't create a duplicate
+                if stoc.loc[ix, 'Elem flow name'] != 'Sulfur dioxide':
+                    df = concat_data[concat_data.loc[:, 'Elem flow name'].str.contains('Sulfur dioxide')].loc[
+                        concat_data.loc[:, 'Compartment'] == comp].copy('deep')
+                    df.loc[:, 'Elem flow name'] = [i.replace('Sulfur dioxide', stoc.loc[ix, 'Elem flow name']) for i in
+                                                   df.loc[:, 'Elem flow name']]
+            if proxy == 'NOx':
+                # don't create a duplicate
+                if stoc.loc[ix, 'Elem flow name'] != 'Nitrogen oxides':
+                    df = concat_data[concat_data.loc[:, 'Elem flow name'].str.contains('Nitrogen oxides')].loc[
+                        concat_data.loc[:, 'Compartment'] == comp].copy('deep')
+                    df.loc[:, 'Elem flow name'] = [i.replace('Nitrogen oxides', stoc.loc[ix, 'Elem flow name']) for i in
+                                                   df.loc[:, 'Elem flow name']]
             if not df.empty:
-                df.loc[:, 'Elem flow'] = stoc.loc[i, 'Elem flow name']
-                df.loc[:, 'CAS number'] = stoc.loc[i, 'CAS number']
-                df.loc[:, 'CF value'] *= stoc.loc[i, 'Proxy ratio']
+                df.loc[:, 'CAS number'] = stoc.loc[ix, 'CAS number']
+                df.loc[:, 'CF value'] *= stoc.loc[ix, 'Proxy ratio']
 
-                cfs = clean_up_dataframe(pd.concat([cfs, df]))
-
-        # ------------------------------------ FINAL FORMATTING ---------------------------------
-        cfs = cfs.drop(cfs.loc[cfs.loc[:, 'Elem flow'].isin(['NH3', 'NOx', 'SO2'])].index)
-        # concat elem flow and region code in the same name
-        cfs.loc[:, 'Elem flow name'] = [', '.join(i) for i in list(zip(cfs.loc[:, 'Elem flow'], cfs.loc[:, 'Region code']))]
-        cfs = cfs.drop(['Elem flow', 'Region code'], axis=1)
-        cfs = clean_up_dataframe(cfs)
-
-        # add value for RME (Middle East) based on RAS (Asia)
-        df = cfs.loc[cfs.loc[:, 'Elem flow name'].str.contains(', RAS')].copy()
-        df.loc[:, 'Elem flow name'] = [i.split(', RAS')[0] + ', RME' for i in df.loc[:, 'Elem flow name']]
-        cfs = clean_up_dataframe(pd.concat([cfs, df]))
-        # add RoW based on GLO
-        df = cfs.loc[cfs.loc[:, 'Elem flow name'].str.contains(', GLO')].copy()
-        df.loc[:, 'Elem flow name'] = [i.split(', GLO')[0] + ', RoW' for i in df.loc[:, 'Elem flow name']]
-        df.loc[:, 'Native geographical resolution scale'] = 'Other region'
-        cfs = clean_up_dataframe(pd.concat([cfs, df]))
+                concat_data = clean_up_dataframe(pd.concat([concat_data, df]))
 
         # concat with master_db
-        self.master_db = pd.concat([self.master_db, cfs])
+        self.master_db = pd.concat([self.master_db, concat_data])
         self.master_db = clean_up_dataframe(self.master_db)
 
     def load_terrestrial_acidification_cfs(self):
@@ -2583,159 +2559,108 @@ class Parse:
         """
 
         # ------------------------------ LOADING DATA -----------------------------------
-        cell_emissions = {
-            'NH3': pd.read_sql('SELECT * FROM [CF - regionalized - AcidTerr - native (NH3 emissions to air)]',
-                               self.conn).set_index('cell'),
-            'NOx': pd.read_sql('SELECT * FROM [CF - regionalized - AcidTerr - native (NOx emissions to air)]',
-                               self.conn).set_index('cell'),
-            'SO2': pd.read_sql('SELECT * FROM [CF - regionalized - AcidTerr - native (SO2 emissions to air)]',
-                               self.conn).set_index('cell')}
+        data = pd.read_sql('SELECT * FROM [CF - regionalized - AcidTerr - aggregated]', self.conn)
 
-        inter_country = pd.read_sql('SELECT * FROM [SI - Acidification/Eutrophication - Countries cell resolution]',
-                                    self.conn).set_index('cell').T
-        inter_continent = pd.read_sql('SELECT * FROM [SI - Acidification/Eutrophication - Continents cell resolution]',
-                                      self.conn).set_index('cell').T
+        # concatenating/formatting all the data in one dataframe
+        concat_data = pd.DataFrame()
 
-        # ------------------------- CALCULATING MIDPOINT AND DAMAGE CFS --------------------------------
-        country_emissions = {}
-        continent_emissions = {}
-        for substance in cell_emissions:
-            cell_emissions[substance].index.name = None
-            country_emissions[substance] = inter_country.dot(cell_emissions[substance].Emission)
-            continent_emissions[substance] = inter_continent.dot(cell_emissions[substance].Emission)
+        for ix, row in data.iterrows():
+            concat_data = pd.concat([concat_data,
+                                     pd.DataFrame(['Terrestrial acidification', 'kg SO2 eq', 'Air', '(unspecified)',
+                                                   'Ammonia, ' + row['Short name ecoinvent'], '7664-41-7',
+                                                   row['CF NH3 (kg SO2 eq)'], 'kg', 'Midpoint', 'Country'],
+                                                  index=['Impact category', 'CF unit', 'Compartment', 'Sub-compartment',
+                                                         'Elem flow name', 'CAS number', 'CF value', 'Elem flow unit',
+                                                         'MP or Damage', 'Native geographical resolution scale']).T])
 
-        cfs_midpoint = pd.DataFrame(None, cell_emissions.keys(), country_emissions['SO2'].index)
+            concat_data = pd.concat([concat_data,
+                                     pd.DataFrame(['Terrestrial acidification', 'PDF.m2.yr', 'Air', '(unspecified)',
+                                                   'Ammonia, ' + row['Short name ecoinvent'], '7664-41-7',
+                                                   row['CF NH3 (PDF.m2.yr)'], 'kg', 'Damage', 'Country'],
+                                                  index=['Impact category', 'CF unit', 'Compartment', 'Sub-compartment',
+                                                         'Elem flow name', 'CAS number', 'CF value', 'Elem flow unit',
+                                                         'MP or Damage', 'Native geographical resolution scale']).T])
 
-        for substance in cell_emissions:
-            # for countries
-            for country in country_emissions[substance].index:
-                try:
-                    aggregated_cf = (cell_emissions[substance].loc[:, 'midpoint'] *
-                                     cell_emissions[substance].loc[:, 'Emission'] /
-                                     country_emissions[substance].loc[country] *
-                                     inter_country.loc[country]).sum()
-                    cfs_midpoint.loc[substance, country] = aggregated_cf
-                except ZeroDivisionError:
-                    pass
+            concat_data = pd.concat([concat_data,
+                                     pd.DataFrame(['Terrestrial acidification', 'kg SO2 eq', 'Air', '(unspecified)',
+                                                   'Nitrogen oxides, ' + row['Short name ecoinvent'], '11104-93-1',
+                                                   row['CF NOx (kg SO2 eq)'], 'kg', 'Midpoint', 'Country'],
+                                                  index=['Impact category', 'CF unit', 'Compartment', 'Sub-compartment',
+                                                         'Elem flow name', 'CAS number', 'CF value', 'Elem flow unit',
+                                                         'MP or Damage', 'Native geographical resolution scale']).T])
 
-            # for continents
-            for continent in continent_emissions[substance].index:
-                try:
-                    aggregated_cf = (cell_emissions[substance].loc[:, 'midpoint'] *
-                                     cell_emissions[substance].loc[:, 'Emission'] /
-                                     continent_emissions[substance].loc[continent] *
-                                     inter_continent.loc[continent]).sum()
-                    cfs_midpoint.loc[substance, continent] = aggregated_cf
-                except ZeroDivisionError:
-                    pass
+            concat_data = pd.concat([concat_data,
+                                     pd.DataFrame(['Terrestrial acidification', 'PDF.m2.yr', 'Air', '(unspecified)',
+                                                   'Nitrogen oxides, ' + row['Short name ecoinvent'], '11104-93-1',
+                                                   row['CF NOx (PDF.m2.yr)'], 'kg', 'Damage', 'Country'],
+                                                  index=['Impact category', 'CF unit', 'Compartment', 'Sub-compartment',
+                                                         'Elem flow name', 'CAS number', 'CF value', 'Elem flow unit',
+                                                         'MP or Damage', 'Native geographical resolution scale']).T])
 
-            # global
-            GLO_value = (cell_emissions[substance].loc[:, 'midpoint'] *
-                         cell_emissions[substance].loc[:, 'Emission'] /
-                         cell_emissions[substance].Emission.sum()).sum()
-            cfs_midpoint.loc[substance, 'GLO'] = GLO_value
+            concat_data = pd.concat([concat_data,
+                                     pd.DataFrame(['Terrestrial acidification', 'kg SO2 eq', 'Air', '(unspecified)',
+                                                   'Sulfur dioxide, ' + row['Short name ecoinvent'], '7446-09-05',
+                                                   row['CF SO2 (kg SO2 eq)'], 'kg', 'Midpoint', 'Country'],
+                                                  index=['Impact category', 'CF unit', 'Compartment', 'Sub-compartment',
+                                                         'Elem flow name', 'CAS number', 'CF value', 'Elem flow unit',
+                                                         'MP or Damage', 'Native geographical resolution scale']).T])
 
-        # divide by reference flow -> SO2
-        cfs_midpoint /= cfs_midpoint.loc['SO2', 'GLO']
+            concat_data = pd.concat([concat_data,
+                                     pd.DataFrame(['Terrestrial acidification', 'PDF.m2.yr', 'Air', '(unspecified)',
+                                                   'Sulfur dioxide, ' + row['Short name ecoinvent'], '7446-09-05',
+                                                   row['CF SO2 (PDF.m2.yr)'], 'kg', 'Damage', 'Country'],
+                                                  index=['Impact category', 'CF unit', 'Compartment', 'Sub-compartment',
+                                                         'Elem flow name', 'CAS number', 'CF value', 'Elem flow unit',
+                                                         'MP or Damage', 'Native geographical resolution scale']).T])
 
-        cfs_damage = pd.DataFrame(None, cell_emissions.keys(), country_emissions['SO2'].index)
-
-        for substance in cell_emissions:
-            # for countries
-            for country in country_emissions[substance].index:
-                try:
-                    aggregated_cf = (cell_emissions[substance].loc[:, 'endpoint'] *
-                                     cell_emissions[substance].loc[:, 'Emission'] /
-                                     country_emissions[substance].loc[country] *
-                                     inter_country.loc[country]).sum()
-                    cfs_damage.loc[substance, country] = aggregated_cf
-                except ZeroDivisionError:
-                    pass
-
-            # for continents
-            for continent in continent_emissions[substance].index:
-                try:
-                    aggregated_cf = (cell_emissions[substance].loc[:, 'endpoint'] *
-                                     cell_emissions[substance].loc[:, 'Emission'] /
-                                     continent_emissions[substance].loc[continent] *
-                                     inter_continent.loc[continent]).sum()
-                    cfs_damage.loc[substance, continent] = aggregated_cf
-                except ZeroDivisionError:
-                    pass
-
-            # global
-            GLO_value = (cell_emissions[substance].loc[:, 'endpoint'] *
-                         cell_emissions[substance].loc[:, 'Emission'] /
-                         cell_emissions[substance].Emission.sum()).sum()
-            cfs_damage.loc[substance, 'GLO'] = GLO_value
-
-        # ------------------------------ DATA FORMATTING -----------------------------------
-        # convert country names to ISO 2 letter codes
-        # lines of logger to avoid having warnings showing up
-        coco_logger = coco.logging.getLogger()
-        coco_logger.setLevel(coco.logging.CRITICAL)
-        cfs_midpoint.columns = coco.convert(cfs_midpoint.iloc[:, :-7], to='ISO2') + ['RNA', 'RLA', 'RER', 'RAS', 'RAF',
-                                                                                     'OCE', 'GLO']
-        cfs_damage.columns = cfs_midpoint.columns
-        # countries that don't exist anymore or that are not part of the UN are dropped
-        cfs_midpoint.drop('not found', axis=1, inplace=True)
-        cfs_damage.drop('not found', axis=1, inplace=True)
-
-        cfs_midpoint = cfs_midpoint.stack().reset_index()
-        cfs_midpoint.columns = ['Elem flow', 'Region code', 'CF value']
-        cfs_damage = cfs_damage.stack().reset_index()
-        cfs_damage.columns = ['Elem flow', 'Region code', 'CF value']
-        cfs_midpoint.loc[:, 'CF unit'] = 'kg SO2 eq'
-        cfs_midpoint.loc[:, 'MP or Damage'] = 'Midpoint'
-        cfs_damage.loc[:, 'CF unit'] = 'PDF.m2.yr'
-        cfs_damage.loc[:, 'MP or Damage'] = 'Damage'
-        cfs = pd.concat([cfs_midpoint, cfs_damage])
-        cfs.loc[:, 'Impact category'] = 'Terrestrial acidification'
-        cfs.loc[:, 'Compartment'] = 'Air'
-        cfs.loc[:, 'Sub-compartment'] = '(unspecified)'
-        cfs.loc[:, 'Elem flow unit'] = 'kg'
-        cfs.loc[:, 'Native geographical resolution scale'] = 'Country'
-        cfs.loc[cfs.loc[:, 'Elem flow'] == 'NH3', 'CAS number'] = '7664-41-7'
-        cfs.loc[cfs.loc[:, 'Elem flow'] == 'NOx', 'CAS number'] = '11104-93-1'
-        cfs.loc[cfs.loc[:, 'Elem flow'] == 'SO2', 'CAS number'] = '7446-09-5'
-        cfs = clean_up_dataframe(cfs)
-        cfs.loc[[i for i in cfs.index if cfs.loc[i, 'Region code'] in ['RNA', 'RLA', 'RER', 'RAS', 'RAF', 'OCE', 'GLO']],
-                'Native geographical resolution scale'] = 'Continent'
-        cfs.loc[cfs.loc[:, 'Region code'] == 'GLO', 'Native geographical resolution scale'] = 'Global'
+        concat_data = concat_data.reset_index().drop('index', axis=1)
+        concat_data.loc[[i for i in concat_data.index if
+                         concat_data.loc[i, 'Elem flow name'].split(', ')[-1] in ['RNA', 'RLA', 'RER', 'RAS', 'RAF',
+                                                                                  'RME', 'UN-OCEANIA']],
+                        'Native geographical resolution scale'] = 'Continent'
+        concat_data.loc[[i for i in concat_data.index if concat_data.loc[i, 'Elem flow name'].split(', ')[
+            -1] == 'GLO'], 'Native geographical resolution scale'] = 'Global'
+        concat_data.loc[[i for i in concat_data.index if concat_data.loc[i, 'Elem flow name'].split(', ')[
+            -1] == 'RoW'], 'Native geographical resolution scale'] = 'Other region'
 
         # ------------------------------ APPLYING STOECHIOMETRIC RATIOS --------------------------
         stoc = pd.read_sql('SELECT * FROM [SI - Stoechiometry]', self.conn)
         stoc = stoc.loc[stoc.loc[:, 'Impact category'] == 'Terrestrial acidification']
-        for i in stoc.index:
-            proxy = stoc.loc[i, 'Proxy molecule']
-            comp = stoc.loc[i, 'Compartment']
-            df = cfs[cfs.loc[:, 'Elem flow'] == proxy].loc[cfs.loc[:, 'Compartment'] == comp].copy('deep')
+
+        for ix in stoc.index:
+            proxy = stoc.loc[ix, 'Proxy molecule']
+            comp = stoc.loc[ix, 'Compartment']
+            df = pd.DataFrame()
+            if proxy == 'NH3':
+                # don't create a duplicate
+                if stoc.loc[ix, 'Elem flow name'] != 'Ammonia':
+                    df = concat_data[concat_data.loc[:, 'Elem flow name'].str.contains('Ammonia') &
+                                     ~(concat_data.loc[:, 'Elem flow name'].str.contains('Ammonia, as N'))].loc[
+                        concat_data.loc[:, 'Compartment'] == comp].copy('deep')
+                    df.loc[:, 'Elem flow name'] = [i.replace('Ammonia', stoc.loc[ix, 'Elem flow name']) for i in
+                                                   df.loc[:, 'Elem flow name']]
+            if proxy == 'SO2':
+                # don't create a duplicate
+                if stoc.loc[ix, 'Elem flow name'] != 'Sulfur dioxide':
+                    df = concat_data[concat_data.loc[:, 'Elem flow name'].str.contains('Sulfur dioxide')].loc[
+                        concat_data.loc[:, 'Compartment'] == comp].copy('deep')
+                    df.loc[:, 'Elem flow name'] = [i.replace('Sulfur dioxide', stoc.loc[ix, 'Elem flow name']) for i in
+                                                   df.loc[:, 'Elem flow name']]
+            if proxy == 'NOx':
+                # don't create a duplicate
+                if stoc.loc[ix, 'Elem flow name'] != 'Nitrogen oxides':
+                    df = concat_data[concat_data.loc[:, 'Elem flow name'].str.contains('Nitrogen oxides')].loc[
+                        concat_data.loc[:, 'Compartment'] == comp].copy('deep')
+                    df.loc[:, 'Elem flow name'] = [i.replace('Nitrogen oxides', stoc.loc[ix, 'Elem flow name']) for i in
+                                                   df.loc[:, 'Elem flow name']]
             if not df.empty:
-                df.loc[:, 'Elem flow'] = stoc.loc[i, 'Elem flow name']
-                df.loc[:, 'CAS number'] = stoc.loc[i, 'CAS number']
-                df.loc[:, 'CF value'] *= stoc.loc[i, 'Proxy ratio']
+                df.loc[:, 'CAS number'] = stoc.loc[ix, 'CAS number']
+                df.loc[:, 'CF value'] *= stoc.loc[ix, 'Proxy ratio']
 
-                cfs = clean_up_dataframe(pd.concat([cfs, df]))
-
-        # ------------------------------------ FINAL FORMATTING ---------------------------------
-        cfs = cfs.drop(cfs.loc[cfs.loc[:, 'Elem flow'].isin(['NH3', 'NOx', 'SO2'])].index)
-        # concat elem flow and region code in the same name
-        cfs.loc[:, 'Elem flow name'] = [', '.join(i) for i in list(zip(cfs.loc[:, 'Elem flow'], cfs.loc[:, 'Region code']))]
-        cfs = cfs.drop(['Elem flow', 'Region code'], axis=1)
-        cfs = clean_up_dataframe(cfs)
-
-        # add value for RME (Middle East) based on RAS (Asia)
-        df = cfs.loc[cfs.loc[:, 'Elem flow name'].str.contains(', RAS')].copy()
-        df.loc[:, 'Elem flow name'] = [i.split(', RAS')[0] + ', RME' for i in df.loc[:, 'Elem flow name']]
-        cfs = clean_up_dataframe(pd.concat([cfs, df]))
-        # add RoW based on GLO
-        df = cfs.loc[cfs.loc[:, 'Elem flow name'].str.contains(', GLO')].copy()
-        df.loc[:, 'Elem flow name'] = [i.split(', GLO')[0] + ', RoW' for i in df.loc[:, 'Elem flow name']]
-        df.loc[:, 'Native geographical resolution scale'] = 'Other region'
-        cfs = clean_up_dataframe(pd.concat([cfs, df]))
+                concat_data = clean_up_dataframe(pd.concat([concat_data, df]))
 
         # concat with master_db
-        self.master_db = pd.concat([self.master_db, cfs])
+        self.master_db = pd.concat([self.master_db, concat_data])
         self.master_db = clean_up_dataframe(self.master_db)
 
     def load_marine_eutrophication_cfs(self):
@@ -2750,164 +2675,164 @@ class Parse:
         """
 
         # ------------------------------ LOADING DATA -----------------------------------
-        cell_emissions = {
-            'NH3': pd.read_sql('SELECT * FROM [CF - regionalized - MarEutro - native (NH3 emissions to air)]',
-                               self.conn).set_index('cell'),
-            'NOx': pd.read_sql('SELECT * FROM [CF - regionalized - MarEutro - native (NOx emissions to air)]',
-                               self.conn).set_index('cell'),
-            'HNO3': pd.read_sql('SELECT * FROM [CF - regionalized - MarEutro - native (HNO3 emissions to air)]',
-                               self.conn).set_index('cell')}
+        data = pd.read_sql('SELECT * FROM [CF - regionalized - MarEutro - aggregated]', self.conn)
 
-        inter_country = pd.read_sql('SELECT * FROM [SI - Acidification/Eutrophication - Countries cell resolution]',
-                                    self.conn).set_index('cell').T
-        inter_continent = pd.read_sql('SELECT * FROM [SI - Acidification/Eutrophication - Continents cell resolution]',
-                                      self.conn).set_index('cell').T
+        concat_data = pd.DataFrame()
 
-        # ------------------------- CALCULATING MIDPOINT AND DAMAGE CFS --------------------------------
-        country_emissions = {}
-        continent_emissions = {}
-        for substance in cell_emissions:
-            cell_emissions[substance].index.name = None
-            country_emissions[substance] = inter_country.dot(cell_emissions[substance].Emission)
-            continent_emissions[substance] = inter_continent.dot(cell_emissions[substance].Emission)
+        for ix, row in data.iterrows():
+            concat_data = pd.concat([concat_data,
+                                     pd.DataFrame(['Marine eutrophication', 'kg N N-lim eq', 'Air', '(unspecified)',
+                                                   'Ammonia, ' + row['Short name ecoinvent'], '7664-41-7',
+                                                   row['CF NH3 (kg N N-lim eq)'], 'kg', 'Midpoint', 'Country'],
+                                                  index=['Impact category', 'CF unit', 'Compartment', 'Sub-compartment',
+                                                         'Elem flow name', 'CAS number', 'CF value', 'Elem flow unit',
+                                                         'MP or Damage', 'Native geographical resolution scale']).T])
 
-        cfs_midpoint = pd.DataFrame(None, cell_emissions.keys(), country_emissions['NOx'].index)
+            concat_data = pd.concat([concat_data,
+                                     pd.DataFrame(['Marine eutrophication', 'PDF.m2.yr', 'Air', '(unspecified)',
+                                                   'Ammonia, ' + row['Short name ecoinvent'], '7664-41-7',
+                                                   row['CF NH3 (PDF.m2.yr)'], 'kg', 'Damage', 'Country'],
+                                                  index=['Impact category', 'CF unit', 'Compartment', 'Sub-compartment',
+                                                         'Elem flow name', 'CAS number', 'CF value', 'Elem flow unit',
+                                                         'MP or Damage', 'Native geographical resolution scale']).T])
 
-        for substance in cell_emissions:
-            # for countries
-            for country in country_emissions[substance].index:
-                try:
-                    aggregated_cf = (cell_emissions[substance].loc[:, 'midpoint'] *
-                                     cell_emissions[substance].loc[:, 'Emission'] /
-                                     country_emissions[substance].loc[country] *
-                                     inter_country.loc[country]).sum()
-                    cfs_midpoint.loc[substance, country] = aggregated_cf
-                except ZeroDivisionError:
-                    pass
+            concat_data = pd.concat([concat_data,
+                                     pd.DataFrame(['Marine eutrophication', 'kg N N-lim eq', 'Air', '(unspecified)',
+                                                   'Nitrogen oxides, ' + row['Short name ecoinvent'], '11104-93-1',
+                                                   row['CF NOx (kg N N-lim eq)'], 'kg', 'Midpoint', 'Country'],
+                                                  index=['Impact category', 'CF unit', 'Compartment', 'Sub-compartment',
+                                                         'Elem flow name', 'CAS number', 'CF value', 'Elem flow unit',
+                                                         'MP or Damage', 'Native geographical resolution scale']).T])
 
-            # for continents
-            for continent in continent_emissions[substance].index:
-                try:
-                    aggregated_cf = (cell_emissions[substance].loc[:, 'midpoint'] *
-                                     cell_emissions[substance].loc[:, 'Emission'] /
-                                     continent_emissions[substance].loc[continent] *
-                                     inter_continent.loc[continent]).sum()
-                    cfs_midpoint.loc[substance, continent] = aggregated_cf
-                except ZeroDivisionError:
-                    pass
+            concat_data = pd.concat([concat_data,
+                                     pd.DataFrame(['Marine eutrophication', 'PDF.m2.yr', 'Air', '(unspecified)',
+                                                   'Nitrogen oxides, ' + row['Short name ecoinvent'], '11104-93-1',
+                                                   row['CF NOx (PDF.m2.yr)'], 'kg', 'Damage', 'Country'],
+                                                  index=['Impact category', 'CF unit', 'Compartment', 'Sub-compartment',
+                                                         'Elem flow name', 'CAS number', 'CF value', 'Elem flow unit',
+                                                         'MP or Damage', 'Native geographical resolution scale']).T])
 
-            # global
-            GLO_value = (cell_emissions[substance].loc[:, 'midpoint'] *
-                         cell_emissions[substance].loc[:, 'Emission'] /
-                         cell_emissions[substance].Emission.sum()).sum()
-            cfs_midpoint.loc[substance, 'GLO'] = GLO_value
+            concat_data = pd.concat([concat_data,
+                                     pd.DataFrame(['Marine eutrophication', 'kg N N-lim eq', 'Air', '(unspecified)',
+                                                   'Nitric acid, ' + row['Short name ecoinvent'], '7697-37-2',
+                                                   row['CF HNO3 (kg N N-lim eq)'], 'kg', 'Midpoint', 'Country'],
+                                                  index=['Impact category', 'CF unit', 'Compartment', 'Sub-compartment',
+                                                         'Elem flow name', 'CAS number', 'CF value', 'Elem flow unit',
+                                                         'MP or Damage', 'Native geographical resolution scale']).T])
 
-        # factor 0.7 is the reference (it's nitrogen GLO in water)
-        cfs_midpoint /= 0.7
+            concat_data = pd.concat([concat_data,
+                                     pd.DataFrame(['Marine eutrophication', 'PDF.m2.yr', 'Air', '(unspecified)',
+                                                   'Nitric acid, ' + row['Short name ecoinvent'], '7697-37-2',
+                                                   row['CF HNO3 (PDF.m2.yr)'], 'kg', 'Damage', 'Country'],
+                                                  index=['Impact category', 'CF unit', 'Compartment', 'Sub-compartment',
+                                                         'Elem flow name', 'CAS number', 'CF value', 'Elem flow unit',
+                                                         'MP or Damage', 'Native geographical resolution scale']).T])
 
-        cfs_damage = pd.DataFrame(None, cell_emissions.keys(), country_emissions['NOx'].index)
+        concat_data = concat_data.reset_index().drop('index', axis=1)
 
-        for substance in cell_emissions:
-            # for countries
-            for country in country_emissions[substance].index:
-                try:
-                    aggregated_cf = (cell_emissions[substance].loc[:, 'endpoint'] *
-                                     cell_emissions[substance].loc[:, 'Emission'] /
-                                     country_emissions[substance].loc[country] *
-                                     inter_country.loc[country]).sum()
-                    cfs_damage.loc[substance, country] = aggregated_cf
-                except ZeroDivisionError:
-                    pass
-
-            # for continents
-            for continent in continent_emissions[substance].index:
-                try:
-                    aggregated_cf = (cell_emissions[substance].loc[:, 'endpoint'] *
-                                     cell_emissions[substance].loc[:, 'Emission'] /
-                                     continent_emissions[substance].loc[continent] *
-                                     inter_continent.loc[continent]).sum()
-                    cfs_damage.loc[substance, continent] = aggregated_cf
-                except ZeroDivisionError:
-                    pass
-
-            # global
-            GLO_value = (cell_emissions[substance].loc[:, 'endpoint'] *
-                         cell_emissions[substance].loc[:, 'Emission'] /
-                         cell_emissions[substance].Emission.sum()).sum()
-            cfs_damage.loc[substance, 'GLO'] = GLO_value
-
-        # ------------------------------ DATA FORMATTING -----------------------------------
-        # convert country names to ISO 2 letter codes
-        # lines of logger to avoid having warnings showing up
-        coco_logger = coco.logging.getLogger()
-        coco_logger.setLevel(coco.logging.CRITICAL)
-        cfs_midpoint.columns = coco.convert(cfs_midpoint.iloc[:, :-7], to='ISO2') + ['RNA', 'RLA', 'RER', 'RAS', 'RAF',
-                                                                                     'OCE', 'GLO']
-        cfs_damage.columns = cfs_midpoint.columns
-        # countries that don't exist anymore or that are not part of the UN are dropped
-        cfs_midpoint.drop('not found', axis=1, inplace=True)
-        cfs_damage.drop('not found', axis=1, inplace=True)
-
-        cfs_midpoint = cfs_midpoint.stack().reset_index()
-        cfs_midpoint.columns = ['Elem flow', 'Region code', 'CF value']
-        cfs_damage = cfs_damage.stack().reset_index()
-        cfs_damage.columns = ['Elem flow', 'Region code', 'CF value']
-        cfs_midpoint.loc[:, 'CF unit'] = 'kg N N-lim eq'
-        cfs_midpoint.loc[:, 'MP or Damage'] = 'Midpoint'
-        cfs_damage.loc[:, 'CF unit'] = 'PDF.m2.yr'
-        cfs_damage.loc[:, 'MP or Damage'] = 'Damage'
-        cfs = pd.concat([cfs_midpoint, cfs_damage])
-        cfs.loc[:, 'Impact category'] = 'Marine eutrophication'
-        cfs.loc[:, 'Compartment'] = 'Air'
-        cfs.loc[:, 'Sub-compartment'] = '(unspecified)'
-        cfs.loc[:, 'Elem flow unit'] = 'kg'
-        cfs.loc[:, 'Native geographical resolution scale'] = 'Country'
-        cfs.loc[cfs.loc[:, 'Elem flow'] == 'NH3', 'CAS number'] = '7664-41-7'
-        cfs.loc[cfs.loc[:, 'Elem flow'] == 'NOx', 'CAS number'] = '11104-93-1'
-        cfs.loc[cfs.loc[:, 'Elem flow'] == 'HNO3', 'CAS number'] = '7697-37-2'
-        cfs = clean_up_dataframe(cfs)
-        cfs.loc[[i for i in cfs.index if cfs.loc[i, 'Region code'] in ['RNA', 'RLA', 'RER', 'RAS', 'RAF', 'OCE', 'GLO']],
-                'Native geographical resolution scale'] = 'Continent'
-        cfs.loc[cfs.loc[:, 'Region code'] == 'GLO', 'Native geographical resolution scale'] = 'Global'
+        concat_data.loc[[i for i in concat_data.index if
+                         concat_data.loc[i, 'Elem flow name'].split(', ')[-1] in ['RNA', 'RLA', 'RER', 'RAS', 'RAF',
+                                                                                  'RME', 'UN-OCEANIA']],
+                        'Native geographical resolution scale'] = 'Continent'
+        concat_data.loc[[i for i in concat_data.index if concat_data.loc[i, 'Elem flow name'].split(', ')[
+            -1] == 'GLO'], 'Native geographical resolution scale'] = 'Global'
+        concat_data.loc[[i for i in concat_data.index if concat_data.loc[i, 'Elem flow name'].split(', ')[
+            -1] == 'RoW'], 'Native geographical resolution scale'] = 'Other region'
 
         # add non-regionalized flows (water emissions)
-        cfs = clean_up_dataframe(pd.concat(
-            [cfs, pd.read_sql('SELECT * FROM [CF - not regionalized - MarEutro]', self.conn)]))
+        concat_data = clean_up_dataframe(pd.concat(
+            [concat_data, pd.read_sql('SELECT * FROM [CF - not regionalized - MarEutro]', self.conn)]))
+        concat_data.loc[concat_data.Compartment == 'Water', 'Native geographical resolution scale'] = 'Not regionalized'
 
         # ------------------------------ APPLYING STOECHIOMETRIC RATIOS --------------------------
         stoc = pd.read_sql('SELECT * FROM [SI - Stoechiometry]', self.conn)
         stoc = stoc.loc[stoc.loc[:, 'Impact category'] == 'Marine eutrophication']
-        for i in stoc.index:
-            proxy = stoc.loc[i, 'Proxy molecule']
-            comp = stoc.loc[i, 'Compartment']
-            df = cfs[cfs.loc[:, 'Elem flow'] == proxy].loc[cfs.loc[:, 'Compartment'] == comp].copy('deep')
+
+        for ix in stoc.index:
+            proxy = stoc.loc[ix, 'Proxy molecule']
+            comp = stoc.loc[ix, 'Compartment']
+            df = pd.DataFrame()
+            if proxy == 'NH3':
+                # don't create a duplicate
+                if stoc.loc[ix, 'Elem flow name'] != 'Ammonia':
+                    df = concat_data[concat_data.loc[:, 'Elem flow name'].str.contains('Ammonia') &
+                                     ~(concat_data.loc[:, 'Elem flow name'].str.contains('Ammonia, as N'))].loc[
+                        concat_data.loc[:, 'Compartment'] == comp].copy('deep')
+                    df.loc[:, 'Elem flow name'] = [i.replace('Ammonia', stoc.loc[ix, 'Elem flow name']) for i in
+                                                   df.loc[:, 'Elem flow name']]
+            if proxy == 'HNO3':
+                # don't create a duplicate
+                if stoc.loc[ix, 'Elem flow name'] != 'Nitric acid':
+                    df = concat_data[concat_data.loc[:, 'Elem flow name'].str.contains('Nitric acid')].loc[
+                        concat_data.loc[:, 'Compartment'] == comp].copy('deep')
+                    df.loc[:, 'Elem flow name'] = [i.replace('Nitric acid', stoc.loc[ix, 'Elem flow name']) for i in
+                                                   df.loc[:, 'Elem flow name']]
+            if proxy == 'NOx':
+                # don't create a duplicate
+                if stoc.loc[ix, 'Elem flow name'] != 'Nitrogen oxides':
+                    df = concat_data[concat_data.loc[:, 'Elem flow name'].str.contains('Nitrogen oxides')].loc[
+                        concat_data.loc[:, 'Compartment'] == comp].copy('deep')
+                    df.loc[:, 'Elem flow name'] = [i.replace('Nitrogen oxides', stoc.loc[ix, 'Elem flow name']) for i in
+                                                   df.loc[:, 'Elem flow name']]
             if not df.empty:
-                df.loc[:, 'Elem flow'] = stoc.loc[i, 'Elem flow name']
-                df.loc[:, 'CAS number'] = stoc.loc[i, 'CAS number']
-                df.loc[:, 'CF value'] *= stoc.loc[i, 'Proxy ratio']
+                df.loc[:, 'CAS number'] = stoc.loc[ix, 'CAS number']
+                df.loc[:, 'CF value'] *= stoc.loc[ix, 'Proxy ratio']
 
-                cfs = clean_up_dataframe(pd.concat([cfs, df]))
-
-        # ------------------------------------ FINAL FORMATTING ---------------------------------
-        cfs = cfs.drop(cfs.loc[cfs.loc[:, 'Elem flow'].isin(['NH3', 'NOx', 'SO2'])].index)
-        # concat elem flow and region code in the same name
-        cfs.loc[:, 'Elem flow name'] = [', '.join(i) if type(i[1]) == str else i[0]
-                                        for i in list(zip(cfs.loc[:, 'Elem flow'], cfs.loc[:, 'Region code']))]
-        cfs = cfs.drop(['Elem flow', 'Region code'], axis=1)
-        cfs = clean_up_dataframe(cfs)
-
-        # add value for RME (Middle East) based on RAS (Asia)
-        df = cfs.loc[cfs.loc[:, 'Elem flow name'].str.contains(', RAS')].copy()
-        df.loc[:, 'Elem flow name'] = [i.split(', RAS')[0] + ', RME' for i in df.loc[:, 'Elem flow name']]
-        cfs = clean_up_dataframe(pd.concat([cfs, df]))
-        # add RoW based on GLO
-        df = cfs.loc[cfs.loc[:, 'Elem flow name'].str.contains(', GLO')].copy()
-        df.loc[:, 'Elem flow name'] = [i.split(', GLO')[0] + ', RoW' for i in df.loc[:, 'Elem flow name']]
-        df.loc[:, 'Native geographical resolution scale'] = 'Other region'
-        cfs = clean_up_dataframe(pd.concat([cfs, df]))
+                concat_data = clean_up_dataframe(pd.concat([concat_data, df]))
 
         # concat with master_db
-        self.master_db = pd.concat([self.master_db, cfs])
+        self.master_db = pd.concat([self.master_db, concat_data])
+        self.master_db = clean_up_dataframe(self.master_db)
+
+    def load_mineral_resource_use_cfs(self):
+        """
+        Loading the CFs for the mineral resource use impact category.
+
+        Concerned impact categories:
+            - Mineral resource use
+
+        :return: updated master_db
+        """
+
+        # read in and format data
+        data = pd.read_sql('SELECT * FROM [CF - not regionalized - MineralResources]', self.conn)
+        data.columns = ['Elem flow name', 'CAS number', 'Elem flow unit', 'CF value']
+        data.loc[:, 'Impact category'] = 'Mineral resource use'
+        data.loc[:, 'CF unit'] = 'MJ'
+        data.loc[:, 'MP or Damage'] = 'Midpoint'
+        data.loc[:, 'Native geographical resolution scale'] = 'Not regionalized'
+
+        # the CFs must be created for all compartments and sub-compartments possible
+        data.loc[:, 'Compartment'] = 'Air'
+        data.loc[:, 'Sub-compartment'] = '(unspecified)'
+        water_comp_data = data.copy()
+        water_comp_data.loc[:, 'Compartment'] = 'Water'
+        soil_comp_data = data.copy()
+        soil_comp_data.loc[:, 'Compartment'] = 'Soil'
+
+        data = pd.concat([data, water_comp_data, soil_comp_data]).reset_index().drop('index', axis=1)
+
+        subcomps_air = ['high. pop.', 'indoor', 'low. pop.', 'low. pop., long-term', 'stratosphere + troposphere']
+        subcomps_water = ['lake', 'river', 'ocean', 'groundwater', 'groundwater, long-term']
+        subcomps_soil = ['agricultural', 'forestry', 'industrial']
+
+        for subcomp in subcomps_air:
+            df = data[data.Compartment == 'Air'].copy()
+            df.loc[:, 'Sub-compartment'] = subcomp
+            data = pd.concat([data, df])
+        for subcomp in subcomps_water:
+            df = data[data.Compartment == 'Water'].copy()
+            df.loc[:, 'Sub-compartment'] = subcomp
+            data = pd.concat([data, df])
+        for subcomp in subcomps_soil:
+            df = data[data.Compartment == 'Soil'].copy()
+            df.loc[:, 'Sub-compartment'] = subcomp
+            data = pd.concat([data, df])
+
+        data = data.reset_index().drop('index', axis=1)
+
+        # concat with master_db
+        self.master_db = pd.concat([self.master_db, data])
         self.master_db = clean_up_dataframe(self.master_db)
 
     def load_freshwater_eutrophication_cfs(self):
@@ -2922,95 +2847,55 @@ class Parse:
         """
 
         # ------------------------------ LOADING DATA -----------------------------------
-        cell_emissions = pd.read_sql(sql='SELECT * FROM [CF - regionalized - FWEutro - native]', con=self.conn)
-        inter_country = pd.read_sql(
-            sql='SELECT * FROM [SI - Freshwater Eutrophication - Countries/continents cell resolution]',
-            con=self.conn)
+        data = pd.read_sql('SELECT * FROM [CF - regionalized - EutroFW - aggregated]', self.conn)
 
-        df = cell_emissions.merge(inter_country, left_on='cell', right_on='nindex').loc[
-             :, ['cell', 'FF_P_yr', 'Population_per_cell', 'ISO_2DIGIT', 'CNTRY_NAME', 'CONT_NAME']]
+        # ------------------------------ FORMAT DATA ------------------------------------
+        concat_data = pd.DataFrame()
 
-        # 'NA' is converted to None by pandas. So we force it back to 'NA' ('NA' is for Namibia)
-        df.ISO_2DIGIT = df.ISO_2DIGIT.fillna('NA')
+        for ix, row in data.iterrows():
+            concat_data = pd.concat([concat_data,
+                                     pd.DataFrame(
+                                         ['Freshwater eutrophication', 'kg PO4 P-lim eq', 'Water', '(unspecified)',
+                                          'Phosphate, ' + row['Short name ecoinvent'], '14265-44-2',
+                                          row['CF PO4 (kg PO4 P-lim eq)'], 'kg', 'Midpoint', 'Country'],
+                                         index=['Impact category', 'CF unit', 'Compartment', 'Sub-compartment',
+                                                'Elem flow name', 'CAS number', 'CF value', 'Elem flow unit',
+                                                'MP or Damage', 'Native geographical resolution scale']).T])
 
-        # ------------------------- CALCULATING MIDPOINT AND DAMAGE CFS --------------------------------
-        countries = list(set(df.ISO_2DIGIT))
-        countries.sort()
-        cfs_midpoint = pd.DataFrame(None, countries, ['CF'])
-        for country in countries:
-            ponderation = df[df.ISO_2DIGIT == country].Population_per_cell / df[
-                df.ISO_2DIGIT == country].Population_per_cell.sum()
-            cfs_midpoint.loc[country, 'CF'] = (ponderation * df.loc[ponderation.index, 'FF_P_yr']).sum()
+            concat_data = pd.concat([concat_data,
+                                     pd.DataFrame(['Freshwater eutrophication', 'PDF.m2.yr', 'Water', '(unspecified)',
+                                                   'Phosphate, ' + row['Short name ecoinvent'], '14265-44-2',
+                                                   row['CF PO4 (PDF.m2.yr)'], 'kg', 'Damage', 'Country'],
+                                                  index=['Impact category', 'CF unit', 'Compartment', 'Sub-compartment',
+                                                         'Elem flow name', 'CAS number', 'CF value', 'Elem flow unit',
+                                                         'MP or Damage', 'Native geographical resolution scale']).T])
 
-        # global value
-        cfs_midpoint.loc['GLO', 'CF'] = (df.Population_per_cell / df.Population_per_cell.sum()).dot(
-            df.loc[:, 'FF_P_yr'])
+        concat_data = concat_data.reset_index().drop('index', axis=1)
 
-        continents = set(df.CONT_NAME)
-        for continent in continents:
-            ponderation = df[df.CONT_NAME == continent].Population_per_cell / df[
-                df.CONT_NAME == continent].Population_per_cell.sum()
-            cfs_midpoint.loc[continent, 'CF'] = (ponderation * df.loc[ponderation.index, 'FF_P_yr']).sum()
-
-        # Damage: just multiply the value by 11.4
-        cfs_damage = cfs_midpoint.copy('deep')
-        cfs_damage *= 11.4
-
-        # Ponderate by reference flow (Phosphate, GLO)
-        cfs_midpoint /= cfs_midpoint.loc['GLO', 'CF']
-
-        # ------------------------------ DATA FORMATTING -----------------------------------
-        cfs_midpoint.loc[:, 'CF unit'] = 'kg PO4 P-lim eq'
-        cfs_midpoint.loc[:, 'MP or Damage'] = 'Midpoint'
-        cfs_damage.loc[:, 'CF unit'] = 'PDF.m2.yr'
-        cfs_damage.loc[:, 'MP or Damage'] = 'Damage'
-        cfs = pd.concat([cfs_midpoint, cfs_damage])
-        cfs.loc[:, 'Impact category'] = 'Freshwater eutrophication'
-        cfs.loc[:, 'Compartment'] = 'Water'
-        cfs.loc[:, 'Sub-compartment'] = '(unspecified)'
-        cfs.loc[:, 'Elem flow unit'] = 'kg'
-        cfs.loc[:, 'Native geographical resolution scale'] = 'Country'
-        cfs.loc[['RNA', 'RLA', 'RER', 'RAS', 'RAF', 'OCE'], 'Native geographical resolution scale'] = 'Continent'
-        cfs.loc['GLO', 'Native geographical resolution scale'] = 'Global'
-        cfs.loc[:, 'Elem flow'] = 'Phosphate'
-        cfs.loc[:, 'CAS number'] = '14265-44-2'
-        cfs = cfs.reset_index()
-        cfs.columns = ['Region code', 'CF value', 'CF unit', 'MP or Damage', 'Impact category', 'Compartment',
-                       'Sub-compartment', 'Elem flow unit', 'Native geographical resolution scale',
-                       'Elem flow', 'CAS number']
+        concat_data.loc[[i for i in concat_data.index if
+                         concat_data.loc[i, 'Elem flow name'].split(', ')[-1] in ['RNA', 'RLA', 'RER', 'RAS', 'RAF',
+                                                                                  'RME', 'UN-OCEANIA']],
+                        'Native geographical resolution scale'] = 'Continent'
+        concat_data.loc[[i for i in concat_data.index if concat_data.loc[i, 'Elem flow name'].split(', ')[
+            -1] == 'GLO'], 'Native geographical resolution scale'] = 'Global'
 
         # ------------------------------ APPLYING STOECHIOMETRIC RATIOS --------------------------
         stoc = pd.read_sql('SELECT * FROM [SI - Stoechiometry]', self.conn)
         stoc = stoc.loc[stoc.loc[:, 'Impact category'] == 'Freshwater eutrophication']
-        for i in stoc.index:
-            proxy = stoc.loc[i, 'Proxy molecule']
-            comp = stoc.loc[i, 'Compartment']
-            df = cfs[cfs.loc[:, 'Elem flow'] == proxy].loc[cfs.loc[:, 'Compartment'] == comp].copy('deep')
-            if not df.empty:
-                df.loc[:, 'Elem flow'] = stoc.loc[i, 'Elem flow name']
-                df.loc[:, 'CAS number'] = stoc.loc[i, 'CAS number']
-                df.loc[:, 'CF value'] *= stoc.loc[i, 'Proxy ratio']
 
-                cfs = clean_up_dataframe(pd.concat([cfs, df]))
+        for ix in stoc.index:
+            df = concat_data[concat_data.loc[:, 'Elem flow name'].str.contains('Phosphate')].loc[
+                concat_data.loc[:, 'Compartment'] == stoc.loc[ix, 'Compartment']].copy('deep')
 
-        # ------------------------------------ FINAL FORMATTING ---------------------------------
-        cfs.loc[:, 'Elem flow name'] = [', '.join(i) for i in
-                                        list(zip(cfs.loc[:, 'Elem flow'], cfs.loc[:, 'Region code']))]
-        cfs = cfs.drop(['Elem flow', 'Region code'], axis=1)
-        cfs = clean_up_dataframe(cfs)
+            df.loc[:, 'Elem flow name'] = [i.replace('Phosphate', stoc.loc[ix, 'Elem flow name']) for i in
+                                           df.loc[:, 'Elem flow name']]
+            df.loc[:, 'CAS number'] = stoc.loc[ix, 'CAS number']
+            df.loc[:, 'CF value'] *= stoc.loc[ix, 'Proxy ratio']
 
-        # add value for RME (Middle East) based on RAS (Asia)
-        df = cfs.loc[cfs.loc[:, 'Elem flow name'].str.contains(', RAS')].copy()
-        df.loc[:, 'Elem flow name'] = [i.split(', RAS')[0] + ', RME' for i in df.loc[:, 'Elem flow name']]
-        cfs = clean_up_dataframe(pd.concat([cfs, df]))
-        # add RoW based on GLO
-        df = cfs.loc[cfs.loc[:, 'Elem flow name'].str.contains(', GLO')].copy()
-        df.loc[:, 'Elem flow name'] = [i.split(', GLO')[0] + ', RoW' for i in df.loc[:, 'Elem flow name']]
-        df.loc[:, 'Native geographical resolution scale'] = 'Other region'
-        cfs = clean_up_dataframe(pd.concat([cfs, df]))
+            concat_data = clean_up_dataframe(pd.concat([concat_data, df]))
 
         # concat with master_db
-        self.master_db = pd.concat([self.master_db, cfs])
+        self.master_db = pd.concat([self.master_db, concat_data])
         self.master_db = clean_up_dataframe(self.master_db)
 
     def load_land_use_cfs(self):
@@ -3025,455 +2910,57 @@ class Parse:
         """
 
         # ------------------------------ LOADING DATA -----------------------------------
-        original_cf_occup = pd.read_sql(sql='SELECT * FROM [CF - regionalized - Land occupation per biome]',
-                                        con=self.conn)
-
-        intersect_country = pd.read_sql(sql='SELECT * FROM [SI - Land occupation - countries cell resolution]',
-                                        con=self.conn)
-
-        land_use_type = pd.read_sql(sql='SELECT * FROM [SI - Land occupation - land use type per country/continent]',
-                                    con=self.conn)
-
-        recovery_times = pd.read_sql(sql='SELECT * FROM [SI - Land transformation - recovery times]', con=self.conn)
-
-        original_cf_occup = original_cf_occup.merge(intersect_country, left_on='Biome', right_on='WWF_MHTNUM',
-                                                    how='outer')
-
-        original_cf_occup = original_cf_occup.merge(land_use_type, on='ISO', how='outer')
-
-        original_cf_occup = original_cf_occup.merge(recovery_times, left_on='WWF_MHTNUM', right_on='Biome_type')
-
-        original_cf_occup = original_cf_occup.set_index(['ECO_CODE', 'ISO', 'Distribution'])
-        original_cf_occup.index.names = None, None, None
-
-        original_cf_occup = original_cf_occup.loc[:,
-                            ['Forest/Grassland, not used', 'Secondary Vegetation', 'Forest, used',
-                             'Pasture/meadow', 'Annual crops', 'Permanent crops',
-                             'Agriculture, mosaic (Agroforestry)', 'Artificial areas', 'Proxy_area_AGRI',
-                             'Proxy_area_PAST', 'Proxy_area_URB', 'Proxy_area_MANAGED_FOR', 'Proxy_area_FOR',
-                             'ID_CONT_1', 'Time']]
-        original_cf_occup = original_cf_occup.dropna(
-            subset=['Forest/Grassland, not used', 'Secondary Vegetation', 'Forest, used',
-                    'Pasture/meadow', 'Annual crops', 'Permanent crops',
-                    'Agriculture, mosaic (Agroforestry)', 'Artificial areas'], how='all')
-        original_cf_occup = original_cf_occup.drop(original_cf_occup[original_cf_occup.ID_CONT_1.isna()].index)
-
-        original_cf_transfo = original_cf_occup.copy()
-
-        for land_type in ['Forest/Grassland, not used', 'Secondary Vegetation', 'Forest, used', 'Pasture/meadow',
-                          'Annual crops',
-                          'Permanent crops', 'Agriculture, mosaic (Agroforestry)', 'Artificial areas']:
-            original_cf_transfo.loc[:, land_type] *= original_cf_transfo.loc[:, 'Time'] * 0.5
-
-        # ------------------------- CALCULATING MIDPOINT AND DAMAGE CFS --------------------------------
-        # the proxy used for ponderation
-        proxy = {'Forest/Grassland, not used': ('Proxy_area_FOR', 'surface_COUNT_FOR'),
-                 'Secondary Vegetation': ('Proxy_area_MANAGED_FOR', 'surface_COUNT_FOR'),
-                 'Forest, used': ('Proxy_area_MANAGED_FOR', 'surface_COUNT_FOR'),
-                 'Pasture/meadow': ('Proxy_area_PAST', 'surface_COUNT_PAST'),
-                 'Annual crops': ('Proxy_area_AGRI', 'surface_COUNT_AGRI'),
-                 'Permanent crops': ('Proxy_area_AGRI', 'surface_COUNT_AGRI'),
-                 'Agriculture, mosaic (Agroforestry)': ('Proxy_area_AGRI', 'surface_COUNT_AGRI'),
-                 'Artificial areas': ('Proxy_area_URB', 'surface_COUNT_URB')}
-
-        #                             - FOR LAND OCCUPATION -
-
-        # for countries
-        index = list(set([i[1] for i in original_cf_occup.index]))
-        index.sort()
-        cfs = pd.DataFrame(0, index, proxy)
-
-        for cty in cfs.index:
-            for land_type in cfs.columns:
-                native_cfs = original_cf_occup.loc(axis=0)[:, cty, 'Median'].loc[:, land_type].dropna()
-
-                ponderation = (original_cf_occup.loc[native_cfs.index, proxy[land_type][0]] /
-                               original_cf_occup.loc[native_cfs.index, proxy[land_type][0]].sum())
-                df = (native_cfs * ponderation).sum()
-
-                cfs.loc[cty, land_type] = df
-
-        # for continents
-        for cont in set(original_cf_occup.ID_CONT_1):
-            for land_type in cfs.columns:
-                native_cfs = original_cf_occup[original_cf_occup.ID_CONT_1 == cont].loc(axis=0)[:, :, 'Median'].loc[:,
-                             land_type].dropna()
-
-                ponderation = (original_cf_occup.loc[native_cfs.index, proxy[land_type][0]] /
-                               original_cf_occup.loc[native_cfs.index, proxy[land_type][0]].sum())
-                df = (native_cfs * ponderation).sum()
-
-                cfs.loc[cont, land_type] = df
-
-        # for global value
-        for land_type in cfs.columns:
-            native_cfs = original_cf_occup.loc(axis=0)[:, :, 'Median'].loc[:, land_type].dropna()
-
-            ponderation = (original_cf_occup.loc[native_cfs.index, proxy[land_type][0]] /
-                           original_cf_occup.loc[native_cfs.index, proxy[land_type][0]].sum())
-            cf = (native_cfs * ponderation).sum()
-
-            cfs.loc['GLO', land_type] = cf
-
-        # CFs obtained are already for damage categories
-        occupation_damage_cfs = cfs.copy('deep')
-
-        # to get midpoint CFS, simply normalize with reference
-        occupation_midpoint_cfs = cfs / cfs.loc['GLO', 'Annual crops']
-
-        # to get an unspecified value
-        for country in set([i[1] for i in original_cf_occup.index]):
-
-            CF_sum = 0
-
-            for land_use in proxy.keys():
-                if proxy[land_use][0] == 'Proxy_area_AGRI':
-                    # gotta split agriculture area evenly between the three agriculture land types
-                    CF_sum += (original_cf_occup.loc(axis=0)[:, country, 'Median'].loc[:, land_use] *
-                               original_cf_occup.loc(axis=0)[:, country, 'Median'].loc[:, proxy[land_use][0]]).sum() / 3
-                if proxy[land_use][0] == 'Proxy_area_MANAGED_FOR':
-                    # gotta split forest area evenly between the two forest land types
-                    CF_sum += (original_cf_occup.loc(axis=0)[:, country, 'Median'].loc[:, land_use] *
-                               original_cf_occup.loc(axis=0)[:, country, 'Median'].loc[:, proxy[land_use][0]]).sum() / 2
-                else:
-                    CF_sum += (original_cf_occup.loc(axis=0)[:, country, 'Median'].loc[:, land_use] *
-                               original_cf_occup.loc(axis=0)[:, country, 'Median'].loc[:, proxy[land_use][0]]).sum()
-
-            total_area_covered = 0
-
-            for land_use in proxy.keys():
-                covered_or_not = original_cf_occup.loc(axis=0)[:, country, 'Median'].loc[:, proxy.keys()].mask(
-                    original_cf_occup.loc(axis=0)[:, country, 'Median'].loc[:, proxy.keys()] > -10, 1)
-                if proxy[land_use][0] == 'Proxy_area_AGRI':
-                    # gotta split agriculture area evenly between the three agriculture land types
-                    total_area_covered += (covered_or_not.loc[:, land_use] *
-                                           original_cf_occup.loc(axis=0)[:, country, 'Median'].loc[:,
-                                           proxy[land_use][0]]).sum() / 3
-                if proxy[land_use][0] == 'Proxy_area_MANAGED_FOR':
-                    # gotta split forest area evenly between the two forest land types
-                    total_area_covered += (covered_or_not.loc[:, land_use] *
-                                           original_cf_occup.loc(axis=0)[:, country, 'Median'].loc[:,
-                                           proxy[land_use][0]]).sum() / 2
-                else:
-                    total_area_covered += (covered_or_not.loc[:, land_use] *
-                                           original_cf_occup.loc(axis=0)[:, country, 'Median'].loc[:,
-                                           proxy[land_use][0]]).sum()
-
-            occupation_damage_cfs.loc[country, 'Unspecified'] = CF_sum / total_area_covered
-
-        conts = ['OCE', 'RAF', 'RAS', 'RER', 'RLA', 'RNA', 'Antarctica']
-
-        for cont in conts:
-
-            cont_data = original_cf_occup.loc(axis=0)[:, :, 'Median'][
-                original_cf_occup.loc(axis=0)[:, :, 'Median'].ID_CONT_1 == cont]
-
-            CF_sum = 0
-
-            for land_use in proxy.keys():
-                if proxy[land_use][0] == 'Proxy_area_AGRI':
-                    # gotta split agriculture area evenly between the three agriculture land types
-                    CF_sum += (cont_data.loc[:, land_use] * cont_data.loc[:, proxy[land_use][0]]).sum() / 3
-                if proxy[land_use][0] == 'Proxy_area_MANAGED_FOR':
-                    # gotta split forest area evenly between the two forest land types
-                    CF_sum += (cont_data.loc[:, land_use] * cont_data.loc[:, proxy[land_use][0]]).sum() / 2
-                else:
-                    CF_sum += (cont_data.loc[:, land_use] * cont_data.loc[:, proxy[land_use][0]]).sum()
-
-            total_area_covered = 0
-
-            for land_use in proxy.keys():
-                covered_or_not = cont_data.loc[:, proxy.keys()].mask(cont_data.loc[:, proxy.keys()] > -10, 1)
-                if proxy[land_use][0] == 'Proxy_area_AGRI':
-                    # gotta split agriculture area evenly between the three agriculture land types
-                    total_area_covered += (covered_or_not.loc[:, land_use] * cont_data.loc[:,
-                                                                             proxy[land_use][0]]).sum() / 3
-                if proxy[land_use][0] == 'Proxy_area_MANAGED_FOR':
-                    # gotta split forest area evenly between the two forest land types
-                    total_area_covered += (covered_or_not.loc[:, land_use] * cont_data.loc[:,
-                                                                             proxy[land_use][0]]).sum() / 2
-                else:
-                    total_area_covered += (covered_or_not.loc[:, land_use] * cont_data.loc[:, proxy[land_use][0]]).sum()
-
-            occupation_damage_cfs.loc[cont, 'Unspecified'] = CF_sum / total_area_covered
-
-        # global
-        CF_sum = 0
-
-        for land_use in proxy.keys():
-            if proxy[land_use][0] == 'Proxy_area_AGRI':
-                # gotta split agriculture area evenly between the three agriculture land types
-                CF_sum += (original_cf_occup.loc(axis=0)[:, :, 'Median'].loc[:, land_use] *
-                           original_cf_occup.loc(axis=0)[:, :, 'Median'].loc[:, proxy[land_use][0]]).sum() / 3
-            if proxy[land_use][0] == 'Proxy_area_MANAGED_FOR':
-                # gotta split forest area evenly between the two forest land types
-                CF_sum += (original_cf_occup.loc(axis=0)[:, :, 'Median'].loc[:, land_use] *
-                           original_cf_occup.loc(axis=0)[:, :, 'Median'].loc[:, proxy[land_use][0]]).sum() / 2
-            else:
-                CF_sum += (original_cf_occup.loc(axis=0)[:, :, 'Median'].loc[:, land_use] *
-                           original_cf_occup.loc(axis=0)[:, :, 'Median'].loc[:, proxy[land_use][0]]).sum()
-
-        total_area_covered = 0
-
-        for land_use in proxy.keys():
-            covered_or_not = original_cf_occup.loc(axis=0)[:, :, 'Median'].loc[:, proxy.keys()].mask(
-                original_cf_occup.loc(axis=0)[:, :, 'Median'].loc[:, proxy.keys()] > -10, 1)
-            if proxy[land_use][0] == 'Proxy_area_AGRI':
-                # gotta split agriculture area evenly between the three agriculture land types
-                total_area_covered += (covered_or_not.loc[:, land_use] *
-                                       original_cf_occup.loc(axis=0)[:, :, 'Median'].loc[:,
-                                       proxy[land_use][0]]).sum() / 3
-            if proxy[land_use][0] == 'Proxy_area_MANAGED_FOR':
-                # gotta split forest area evenly between the two forest land types
-                total_area_covered += (covered_or_not.loc[:, land_use] *
-                                       original_cf_occup.loc(axis=0)[:, :, 'Median'].loc[:,
-                                       proxy[land_use][0]]).sum() / 2
-            else:
-                total_area_covered += (covered_or_not.loc[:, land_use] *
-                                       original_cf_occup.loc(axis=0)[:, :, 'Median'].loc[:, proxy[land_use][0]]).sum()
-
-        occupation_damage_cfs.loc['GLO', 'Unspecified'] = CF_sum / total_area_covered
-
-        occupation_midpoint_cfs.loc[:, 'Unspecified'] = (occupation_damage_cfs.loc[:, 'Unspecified'] /
-                                                         occupation_damage_cfs.loc['GLO', 'Annual crops'])
-
-        #                              - FOR LAND TRANSFORMATION -
-
-        # for countries
-        index = list(set([i[1] for i in original_cf_transfo.index]))
-        index.sort()
-        cfs = pd.DataFrame(0, index, proxy)
-
-        for cty in cfs.index:
-            for land_type in cfs.columns:
-                native_cfs = original_cf_transfo.loc(axis=0)[:, cty, 'Median'].loc[:, land_type].dropna()
-
-                ponderation = (original_cf_transfo.loc[native_cfs.index, proxy[land_type][0]] /
-                               original_cf_transfo.loc[native_cfs.index, proxy[land_type][0]].sum())
-                cf = (native_cfs * ponderation).sum()
-
-                cfs.loc[cty, land_type] = cf
-
-        # for continents
-        for cont in set(original_cf_transfo.ID_CONT_1):
-            for land_type in cfs.columns:
-                native_cfs = original_cf_transfo[original_cf_transfo.ID_CONT_1 == cont].loc(axis=0)[:, :, 'Median'].loc[
-                             :, land_type].dropna()
-
-                ponderation = (original_cf_transfo.loc[native_cfs.index, proxy[land_type][0]] /
-                               original_cf_transfo.loc[native_cfs.index, proxy[land_type][0]].sum())
-                cf = (native_cfs * ponderation).sum()
-
-                cfs.loc[cont, land_type] = cf
-
-        for land_type in cfs.columns:
-            native_cfs = original_cf_transfo.loc(axis=0)[:, :, 'Median'].loc[:, land_type].dropna()
-
-            ponderation = (original_cf_transfo.loc[native_cfs.index, proxy[land_type][0]] /
-                           original_cf_transfo.loc[native_cfs.index, proxy[land_type][0]].sum())
-            cf = (native_cfs * ponderation).sum()
-
-            cfs.loc['GLO', land_type] = cf
-
-        # CFs obtained are already for damage categories
-        transformation_damage_cfs = cfs.copy('deep')
-
-        # to get midpoint CFS, simply normalize with reference
-        transformation_midpoint_cfs = cfs / cfs.loc['GLO', 'Annual crops']
-
-        # to egt an unspecified value
-        for country in set([i[1] for i in original_cf_transfo.index]):
-
-            CF_sum = 0
-
-            for land_use in proxy.keys():
-                if proxy[land_use][0] == 'Proxy_area_AGRI':
-                    # gotta split agriculture area evenly between the three agriculture land types
-                    CF_sum += (original_cf_transfo.loc(axis=0)[:, country, 'Median'].loc[:, land_use] *
-                               original_cf_transfo.loc(axis=0)[:, country, 'Median'].loc[:,
-                               proxy[land_use][0]]).sum() / 3
-                if proxy[land_use][0] == 'Proxy_area_MANAGED_FOR':
-                    # gotta split forest area evenly between the two forest land types
-                    CF_sum += (original_cf_transfo.loc(axis=0)[:, country, 'Median'].loc[:, land_use] *
-                               original_cf_transfo.loc(axis=0)[:, country, 'Median'].loc[:,
-                               proxy[land_use][0]]).sum() / 2
-                else:
-                    CF_sum += (original_cf_transfo.loc(axis=0)[:, country, 'Median'].loc[:, land_use] *
-                               original_cf_transfo.loc(axis=0)[:, country, 'Median'].loc[:, proxy[land_use][0]]).sum()
-
-            total_area_covered = 0
-
-            for land_use in proxy.keys():
-                covered_or_not = original_cf_transfo.loc(axis=0)[:, country, 'Median'].loc[:, proxy.keys()].mask(
-                    original_cf_transfo.loc(axis=0)[:, country, 'Median'].loc[:, proxy.keys()] > -10, 1)
-                if proxy[land_use][0] == 'Proxy_area_AGRI':
-                    # gotta split agriculture area evenly between the three agriculture land types
-                    total_area_covered += (covered_or_not.loc[:, land_use] *
-                                           original_cf_transfo.loc(axis=0)[:, country, 'Median'].loc[:,
-                                           proxy[land_use][0]]).sum() / 3
-                if proxy[land_use][0] == 'Proxy_area_MANAGED_FOR':
-                    # gotta split forest area evenly between the two forest land types
-                    total_area_covered += (covered_or_not.loc[:, land_use] *
-                                           original_cf_transfo.loc(axis=0)[:, country, 'Median'].loc[:,
-                                           proxy[land_use][0]]).sum() / 2
-                else:
-                    total_area_covered += (covered_or_not.loc[:, land_use] *
-                                           original_cf_transfo.loc(axis=0)[:, country, 'Median'].loc[:,
-                                           proxy[land_use][0]]).sum()
-
-            transformation_damage_cfs.loc[country, 'Unspecified'] = CF_sum / total_area_covered
-
-        conts = ['OCE', 'RAF', 'RAS', 'RER', 'RLA', 'RNA', 'Antarctica']
-
-        for cont in conts:
-
-            cont_data = original_cf_transfo.loc(axis=0)[:, :, 'Median'][
-                original_cf_transfo.loc(axis=0)[:, :, 'Median'].ID_CONT_1 == cont]
-
-            CF_sum = 0
-
-            for land_use in proxy.keys():
-                if proxy[land_use][0] == 'Proxy_area_AGRI':
-                    # gotta split agriculture area evenly between the three agriculture land types
-                    CF_sum += (cont_data.loc[:, land_use] * cont_data.loc[:, proxy[land_use][0]]).sum() / 3
-                if proxy[land_use][0] == 'Proxy_area_MANAGED_FOR':
-                    # gotta split forest area evenly between the two forest land types
-                    CF_sum += (cont_data.loc[:, land_use] * cont_data.loc[:, proxy[land_use][0]]).sum() / 2
-                else:
-                    CF_sum += (cont_data.loc[:, land_use] * cont_data.loc[:, proxy[land_use][0]]).sum()
-
-            total_area_covered = 0
-
-            for land_use in proxy.keys():
-                covered_or_not = cont_data.loc[:, proxy.keys()].mask(cont_data.loc[:, proxy.keys()] > -10, 1)
-                if proxy[land_use][0] == 'Proxy_area_AGRI':
-                    # gotta split agriculture area evenly between the three agriculture land types
-                    total_area_covered += (covered_or_not.loc[:, land_use] * cont_data.loc[:,
-                                                                             proxy[land_use][0]]).sum() / 3
-                if proxy[land_use][0] == 'Proxy_area_MANAGED_FOR':
-                    # gotta split forest area evenly between the two forest land types
-                    total_area_covered += (covered_or_not.loc[:, land_use] * cont_data.loc[:,
-                                                                             proxy[land_use][0]]).sum() / 2
-                else:
-                    total_area_covered += (covered_or_not.loc[:, land_use] * cont_data.loc[:, proxy[land_use][0]]).sum()
-
-            transformation_damage_cfs.loc[cont, 'Unspecified'] = CF_sum / total_area_covered
-
-        # global
-        CF_sum = 0
-
-        for land_use in proxy.keys():
-            if proxy[land_use][0] == 'Proxy_area_AGRI':
-                # gotta split agriculture area evenly between the three agriculture land types
-                CF_sum += (original_cf_transfo.loc(axis=0)[:, :, 'Median'].loc[:, land_use] *
-                           original_cf_transfo.loc(axis=0)[:, :, 'Median'].loc[:, proxy[land_use][0]]).sum() / 3
-            if proxy[land_use][0] == 'Proxy_area_MANAGED_FOR':
-                # gotta split forest area evenly between the two forest land types
-                CF_sum += (original_cf_transfo.loc(axis=0)[:, :, 'Median'].loc[:, land_use] *
-                           original_cf_transfo.loc(axis=0)[:, :, 'Median'].loc[:, proxy[land_use][0]]).sum() / 2
-            else:
-                CF_sum += (original_cf_transfo.loc(axis=0)[:, :, 'Median'].loc[:, land_use] *
-                           original_cf_transfo.loc(axis=0)[:, :, 'Median'].loc[:, proxy[land_use][0]]).sum()
-
-        total_area_covered = 0
-
-        for land_use in proxy.keys():
-            covered_or_not = original_cf_transfo.loc(axis=0)[:, :, 'Median'].loc[:, proxy.keys()].mask(
-                original_cf_transfo.loc(axis=0)[:, :, 'Median'].loc[:, proxy.keys()] > -10, 1)
-            if proxy[land_use][0] == 'Proxy_area_AGRI':
-                # gotta split agriculture area evenly between the three agriculture land types
-                total_area_covered += (covered_or_not.loc[:, land_use] *
-                                       original_cf_transfo.loc(axis=0)[:, :, 'Median'].loc[:,
-                                       proxy[land_use][0]]).sum() / 3
-            if proxy[land_use][0] == 'Proxy_area_MANAGED_FOR':
-                # gotta split forest area evenly between the two forest land types
-                total_area_covered += (covered_or_not.loc[:, land_use] *
-                                       original_cf_transfo.loc(axis=0)[:, :, 'Median'].loc[:,
-                                       proxy[land_use][0]]).sum() / 2
-            else:
-                total_area_covered += (covered_or_not.loc[:, land_use] *
-                                       original_cf_transfo.loc(axis=0)[:, :, 'Median'].loc[:, proxy[land_use][0]]).sum()
-
-        transformation_damage_cfs.loc['GLO', 'Unspecified'] = CF_sum / total_area_covered
-
-        transformation_midpoint_cfs.loc[:, 'Unspecified'] = (transformation_damage_cfs.loc[:, 'Unspecified'] /
-                                                             transformation_damage_cfs.loc['GLO', 'Annual crops'])
-
-        # ------------------------------ DATA FORMATTING -----------------------------------
-        occupation_damage_cfs = occupation_damage_cfs.stack().reset_index()
-        occupation_midpoint_cfs = occupation_midpoint_cfs.stack().reset_index()
-        transformation_damage_cfs = transformation_damage_cfs.stack().reset_index()
-        transformation_midpoint_cfs = transformation_midpoint_cfs.stack().reset_index()
-        occupation_damage_cfs.loc[:, 'Impact category'] = 'Land occupation, biodiversity'
-        occupation_midpoint_cfs.loc[:, 'Impact category'] = 'Land occupation, biodiversity'
-        transformation_damage_cfs.loc[:, 'Impact category'] = 'Land transformation, biodiversity'
-        transformation_midpoint_cfs.loc[:, 'Impact category'] = 'Land transformation, biodiversity'
-        occupation_damage_cfs.loc[:, 'MP or Damage'] = 'Damage'
-        occupation_midpoint_cfs.loc[:, 'MP or Damage'] = 'Midpoint'
-        transformation_damage_cfs.loc[:, 'MP or Damage'] = 'Damage'
-        transformation_midpoint_cfs.loc[:, 'MP or Damage'] = 'Midpoint'
-        occupation_damage_cfs.loc[:, 'CF unit'] = 'PDF.m2.yr'
-        occupation_midpoint_cfs.loc[:, 'CF unit'] = 'm2 arable land eq .yr'
-        transformation_damage_cfs.loc[:, 'CF unit'] = 'PDF.m2.yr'
-        transformation_midpoint_cfs.loc[:, 'CF unit'] = 'm2 arable land eq'
-        occupation_damage_cfs.loc[:, 'Elem flow unit'] = 'm2.yr'
-        occupation_midpoint_cfs.loc[:, 'Elem flow unit'] = 'm2.yr'
-        transformation_damage_cfs.loc[:, 'Elem flow unit'] = 'm2'
-        transformation_midpoint_cfs.loc[:, 'Elem flow unit'] = 'm2'
-        land_cfs = pd.concat(
-            [occupation_damage_cfs, occupation_midpoint_cfs, transformation_damage_cfs, transformation_midpoint_cfs])
-        land_cfs = clean_up_dataframe(land_cfs)
-        continents = [i for i in land_cfs.index if
-                      land_cfs.loc[i, 'level_0'] in ['RNA', 'RER', 'RLA', 'RAF', 'OCE', 'RAS', 'GLO']]
-
-        continental_data = land_cfs.loc[continents].copy('deep')
-        land_cfs = land_cfs.drop(continents)
-        land_cfs.loc[:, 'level_0'] = coco.convert(land_cfs.loc[:, 'level_0'], to='ISO2')
-        land_cfs = land_cfs.drop([i for i in land_cfs.index if land_cfs.loc[i, 'level_0'] == 'not found'])
-        land_cfs = pd.concat([land_cfs, continental_data])
-        land_cfs.level_1 = [i.lower() for i in land_cfs.level_1]
-        land_cfs.loc[:, 'Elem flow name'] = [', '.join(i) for i in
-                                             list(zip(land_cfs.loc[:, 'level_1'], land_cfs.loc[:, 'level_0']))]
-        land_cfs.loc[land_cfs.loc[:, 'Impact category'] == 'Land occupation, biodiversity', 'Elem flow name'] = [
-            'Occupation, ' + i[0].lower() + i[1:] for i in land_cfs.loc[land_cfs.loc[:, 'Impact category'] ==
-                                                                        'Land occupation, biodiversity', 'Elem flow name']]
-        land_cfs.loc[land_cfs.loc[:, 'Impact category'] == 'Land transformation, biodiversity', 'Elem flow name'] = [
-            'Transformation, to ' + i[0].lower() + i[1:] for i in land_cfs.loc[land_cfs.loc[:, 'Impact category'] ==
-                                                                               'Land transformation, biodiversity', 'Elem flow name']]
-        for_negative = land_cfs.loc[land_cfs.loc[:, 'Impact category'] == 'Land transformation, biodiversity'].copy(
-            'deep')
-        for_negative.loc[:, 0] *= -1
-        for_negative.loc[:, 'Elem flow name'] = ['Transformation, from' + i.split('Transformation, to')[1] for i in
-                                                 for_negative.loc[:, 'Elem flow name']]
-        land_cfs = pd.concat([land_cfs, for_negative])
-        land_cfs = clean_up_dataframe(land_cfs)
-        land_cfs.loc[:, 'Native geographical resolution scale'] = 'Country'
-        land_cfs.loc[
-            [i for i in land_cfs.index if land_cfs.loc[i, 'level_0'] in ['RNA', 'RER', 'RLA', 'RAF', 'OCE', 'RAS']],
-            'Native geographical resolution scale'] = 'Continent'
-        land_cfs.loc[land_cfs.level_0 == 'GLO', 'Native geographical resolution scale'] = 'Global'
-        land_cfs.loc[:, 'CAS number'] = ''
-        land_cfs.loc[:, 'Compartment'] = 'Raw'
-        land_cfs.loc[:, 'Sub-compartment'] = 'land'
-        land_cfs = land_cfs.drop(['level_0', 'level_1'], axis=1)
-        land_cfs = land_cfs.rename(columns={0: 'CF value'})
-
-        # assign global default value to zero values (except for "not used" land type)
-        for indicator in ['Occupation, ', 'Transformation, from ', 'Transformation, to ']:
-            for land_type in ['secondary vegetation', 'forest, used', 'pasture/meadow', 'annual crops',
-                              'permanent crops',
-                              'agriculture, mosaic (agroforestry)', 'artificial areas', 'unspecified']:
-                for level in ['Midpoint', 'Damage']:
-                    to_adapt_to_global_default = (land_cfs.loc[land_cfs.loc[:, 'CF value'] == 0].loc[
-                                                      land_cfs.loc[:, 'MP or Damage'] == level].loc[
-                                                      land_cfs.loc[:, 'Elem flow name'].str.contains(
-                                                          indicator + land_type.split('(')[0])].index)
-                    land_cfs.loc[to_adapt_to_global_default, 'CF value'] = (
-                        land_cfs.loc[land_cfs.loc[:, 'MP or Damage'] == level].loc[
-                        land_cfs.loc[:, 'Elem flow name'] == indicator + land_type + ', GLO', 'CF value'].iloc[0])
+        data = pd.read_sql('SELECT * FROM [CF - regionalized - Land use - aggregated]', self.conn)
+
+        data = data.loc[:, ['Elem flow name', 'CFs (PDF.m2.yr)']]
+        data = data.rename(columns={'CFs (PDF.m2.yr)': 'CF value'})
+        data.loc[data.loc[:, 'Elem flow name'].str.contains(
+            'Occupation'), 'Impact category'] = 'Land occupation, biodiversity'
+        data.loc[data.loc[:, 'Elem flow name'].str.contains(
+            'Transformation'), 'Impact category'] = 'Land transformation, biodiversity'
+        data.loc[data.loc[:, 'Elem flow name'].str.contains('Occupation'), 'Elem flow unit'] = 'm2.yr'
+        data.loc[data.loc[:, 'Elem flow name'].str.contains('Transformation'), 'Elem flow unit'] = 'm2'
+        data.loc[:, 'CF unit'] = 'PDF.m2.yr'
+        data.loc[:, 'Compartment'] = 'Raw'
+        data.loc[:, 'Sub-compartment'] = 'land'
+        data.loc[:, 'MP or Damage'] = 'Damage'
+        data.loc[:, 'Native geographical resolution scale'] = 'Country'
+
+        # calculate midpoint values
+        midpoint_data = data.copy()
+        midpoint_data.loc[:, 'CF value'] /= (
+            midpoint_data.loc[midpoint_data.loc[:, 'Elem flow name'] ==
+                              'Occupation, annual crops, GLO', 'CF value'].iloc[0]
+        )
+        midpoint_data.loc[:, 'MP or Damage'] = 'Midpoint'
+        midpoint_data.loc[
+            midpoint_data.loc[:, 'Elem flow name'].str.contains('Occupation'), 'CF unit'] = 'm2 arable land eq .yr'
+        midpoint_data.loc[
+            midpoint_data.loc[:, 'Elem flow name'].str.contains('Transformation'), 'CF unit'] = 'm2 arable land eq'
+
+        data = pd.concat([data, midpoint_data]).reset_index().drop('index', axis=1)
+
+        data.loc[[i for i in data.index if
+                  data.loc[i, 'Elem flow name'].split(', ')[-1] in ['RNA', 'RLA', 'RER', 'RAS', 'RAF',
+                                                                    'RME', 'UN-OCEANIA']],
+                 'Native geographical resolution scale'] = 'Continent'
+        data.loc[[i for i in data.index if
+                  data.loc[i, 'Elem flow name'].split(', ')[-1] == 'GLO'],
+                 'Native geographical resolution scale'] = 'Global'
+
+        data.loc[[i for i in data.index if
+                  data.loc[i, 'Elem flow name'].split(', ')[-1] == 'RoW'],
+                 'Native geographical resolution scale'] = 'Other region'
+
+        forest_not_used = data.loc[data.loc[:, 'Elem flow name'].str.contains('artificial areas')].copy()
+        forest_not_used.loc[:, 'Elem flow name'] = [i.replace('artificial areas', 'forest/grassland, not used') for i in
+                                                    forest_not_used.loc[:, 'Elem flow name']]
+        forest_not_used.loc[:, 'CF value'] = 0
+
+        data = pd.concat([data, forest_not_used]).reset_index().drop('index', axis=1)
 
         # concat with master_db
-        self.master_db = pd.concat([self.master_db, land_cfs])
+        self.master_db = pd.concat([self.master_db, data])
         self.master_db = clean_up_dataframe(self.master_db)
 
     def load_particulates_cfs(self):
@@ -4754,15 +4241,15 @@ class Parse:
         :return: update master_db
         """
 
-        original_cfs = pd.read_sql('SELECT * from "CF - not regionalized - PlasticPhysicalImpactonBiota"',
+        original_cfs = pd.read_sql('SELECT * from "CF - not regionalized - PhysicalImpactonBiota"',
                                    con=self.conn)
 
-        original_cfs.drop(['Geometric st.dev.', 'Lower limit 95% CI (calculated)',
-                           'Upper limit 95% CI (calculated)'], axis=1, inplace=True)
-        original_cfs.loc[:, 'Impact category'] = 'Plastics physical effects on biota'
+        original_cfs.drop(['Geometric st.dev.', 'Lower limit 95% CI', 'Upper limit 95% CI'], axis=1, inplace=True)
+        original_cfs.loc[:, 'Impact category'] = 'Physical effects on biota'
         original_cfs.loc[:, 'Native geographical resolution scale'] = 'Global'
         original_cfs.loc[:, 'MP or Damage'] = ['Midpoint' if original_cfs.loc[i, 'CF unit'] == 'CTUe' else 'Damage' for
                                                i in original_cfs.index]
+
         CAS = {'EPS': '9003-53-6',
                'HDPE': '9002-88-4',
                'LDPE': '9002-88-4',
@@ -4774,22 +4261,25 @@ class Parse:
                'PS': '9003-53-6',
                'PVC': '9002-86-2',
                'TRWP': None,
+               'Cotton': None,
+               'Linen': None,
+               'Lyocell': None,
+               'Modal': None,
+               'PAN/Acrylic': '9065-11-6',
                'PU/Spandex': '9009-54-5',
-               'Acrylic': '9065-11-6'}
-        shape_names = {'Beads/spheres': 'Microplastic beads',
-                       'Film fragments': 'Microplastic film fragments',
-                       'Microfibers/cylinders': 'Plastic microfibers'}
+               'Rayon': None,
+               'Viscose': None}
+
         original_cfs.loc[:, 'CAS number'] = [CAS[i] for i in original_cfs.loc[:, 'Polymer type']]
-        original_cfs.loc[:, 'Shape'] = [shape_names[i] for i in original_cfs.loc[:, 'Shape']]
         original_cfs = original_cfs.rename(columns={'Recommended CF (geometric mean)': 'CF value'})
         original_cfs.loc[:, 'Elem flow name'] = [
             original_cfs.loc[i, 'Shape'] + ' - ' + original_cfs.loc[i, 'Polymer type'] + ' (' +
             str(original_cfs.loc[i, 'Size']) + ' µm diameter)' for i in original_cfs.index]
 
         # we create CFs for default sizes which depend on the shape of the microplastics
-        default_sizes = {'Microplastic beads': 1000,
-                         'Microplastic film fragments': 100,
-                         'Plastic microfibers': 10}
+        default_sizes = {'Beads/spheres': 1000,
+                         'Film fragments': 100,
+                         'Microfibers/cylinders': 10}
         for shape in default_sizes.keys():
             df = original_cfs.loc[[i for i in original_cfs.index if
                                    shape == original_cfs.loc[i, 'Shape'] and default_sizes[shape] == original_cfs.loc[
@@ -4804,8 +4294,8 @@ class Parse:
         self.master_db = clean_up_dataframe(self.master_db)
 
         # have an unspecified sub-compartment in the water compartment for plastics
-        df = self.master_db.loc[self.master_db.loc[:, 'Impact category'] == 'Plastics physical effects on biota'].loc[
-            self.master_db.loc[:, 'Sub-compartment'] == 'ocean'].copy()
+        df = self.master_db.loc[self.master_db.loc[:, 'Impact category'] == 'Physical effects on biota'].loc[
+            self.master_db.loc[:, 'Sub-compartment'] == 'lake'].copy()
         df.loc[:, 'Sub-compartment'] = '(unspecified)'
         self.master_db = clean_up_dataframe(pd.concat([self.master_db, df]))
 
@@ -5616,9 +5106,8 @@ class Parse:
 
             # -------------- Mapping substances --------------
 
-            mapping = pd.read_excel(pkg_resources.resource_stream(__name__, '/Data/mappings/ei'+
-                                                                     latest_ei_version.replace('.','')+
-                                                                     '/ei_iw_mapping.xlsx'))
+            mapping = pd.read_excel(pkg_resources.resource_stream(
+                __name__, '/Data/mappings/ei' + latest_ei_version.replace('.', '') + '/ei_iw_mapping.xlsx'))
             ei_mapping = mapping.loc[:, ['ecoinvent name', 'iw name']].dropna()
             not_one_for_one = ei_mapping[ei_mapping.loc[:, 'iw name'].duplicated(False)]
             one_for_one = ei_mapping[~ei_mapping.loc[:, 'iw name'].duplicated(False)]
@@ -5642,11 +5131,10 @@ class Parse:
             # remove CFs from IW for substances that are not in ecoinvent
             ei_iw_db = ei_iw_db.loc[[i for i in ei_iw_db.index if
                                      ei_iw_db.loc[i, 'Elem flow name'] in ei_mapping.loc[:, 'ecoinvent name'].tolist()]]
-            # CFs for minerals should only be for Mineral resources use and Fossil and nuclear energy use impact categories
+            # CFs for resources "in ground" should only be for Fossil and nuclear energy use
             minerals = [i for i in ei_iw_db.index if (', in ground' in ei_iw_db.loc[i, 'Elem flow name'] and
                                                       ei_iw_db.loc[i, 'Impact category'] not in [
-                                                          'Fossil and nuclear energy use',
-                                                          'Mineral resources use'] and
+                                                          'Fossil and nuclear energy use'] and
                                                       'Water' not in ei_iw_db.loc[i, 'Elem flow name'])]
             ei_iw_db.drop(minerals, axis=0, inplace=True)
             # ions are only available in Water compartments! So remove those ions in air that don't make any sense.
@@ -5663,18 +5151,16 @@ class Parse:
 
             # --------- Comp & subcomp shenanigans ------------
 
-            with open(pkg_resources.resource_filename(__name__, "Data/mappings/ei"+
-                                                                     latest_ei_version.replace('.','')+
-                                                                     "/comps.json"), "r") as f:
+            with open(pkg_resources.resource_filename(
+                    __name__, "Data/mappings/ei" + latest_ei_version.replace('.', '') + "/comps.json"), "r") as f:
                 comps = json.load(f)
-            with open(pkg_resources.resource_filename(__name__, "Data/mappings/ei"+
-                                                                     latest_ei_version.replace('.','')+
-                                                                     "/subcomps.json"), "r") as f:
+            with open(pkg_resources.resource_filename(
+                    __name__, "Data/mappings/ei" + latest_ei_version.replace('.', '') + "/subcomps.json"), "r") as f:
                 subcomps = json.load(f)
 
             ei_iw_db.Compartment = [comps[i] for i in ei_iw_db.Compartment]
             ei_iw_db.loc[:, 'Sub-compartment'] = [subcomps[i] if i in subcomps else None for i in
-                                                    ei_iw_db.loc[:, 'Sub-compartment']]
+                                                  ei_iw_db.loc[:, 'Sub-compartment']]
 
             # special cases: forestry subcomp = unspecified subcomp
             df = ei_iw_db.loc[
@@ -5693,8 +5179,7 @@ class Parse:
 
             # special cases: fossil well subcomp in raw comp = in ground subcomp
             df = ei_iw_db.loc[[i for i in ei_iw_db.index if (ei_iw_db.loc[i, 'Sub-compartment'] == 'in ground' and
-                                                                 ei_iw_db.loc[
-                                                                     i, 'Compartment'] == 'natural resource')]].copy()
+                                                             ei_iw_db.loc[i, 'Compartment'] == 'natural resource')]].copy()
             df.loc[:, 'Sub-compartment'] = 'fossil well'
             ei_iw_db = pd.concat([ei_iw_db, df])
             ei_iw_db = clean_up_dataframe(ei_iw_db)
@@ -5747,8 +5232,8 @@ class Parse:
                     ei_iw_db['Impact category'].str.contains(', fossil', na=False), 'Impact category'] = [
                     i.replace(', fossil', ', land transformation') for i in ei_iw_db.loc[
                         ei_iw_db['Elem flow name'].isin(['Carbon dioxide, from soil or biomass stock',
-                                                     'Carbon monoxide, from soil or biomass stock',
-                                                     'Methane, from soil or biomass stock']) &
+                                                         'Carbon monoxide, from soil or biomass stock',
+                                                         'Methane, from soil or biomass stock']) &
                         ei_iw_db['Impact category'].str.contains(', fossil', na=False), 'Impact category']]
 
                 # start with latest available version of ecoinvent
@@ -5804,7 +5289,7 @@ class Parse:
 
                 self.ei311_iw_carbon_neutrality = ei_iw_db.copy('deep')
 
-                only_in_311 = list(mapping[mapping.loc[:, 'introduced in ei v.'] == '3.11'].dropna(
+                only_in_311 = list(mapping[mapping.loc[:, 'introduced in ei v.'] == 3.11].dropna(
                     subset=['iw name']).loc[:, 'ecoinvent name'])
 
                 self.ei310_iw_carbon_neutrality = self.ei311_iw_carbon_neutrality.drop(
@@ -5869,7 +5354,7 @@ class Parse:
             # apply the mapping with the different SP flow names
             sp = pd.read_excel(pkg_resources.resource_filename(__name__, '/Data/mappings/SP/sp_mapping.xlsx'), None)
             sp = clean_up_dataframe(pd.concat([sp['Non regionalized'], sp['Regionalized']]))
-            sp = sp.drop('Unnamed: 0', axis=1).loc[:, ['Name', 'Name IW+']].dropna()
+            sp = sp.loc[:, ['Name', 'Name IW+']].dropna()
             differences = sp.loc[sp.Name != sp.loc[:, 'Name IW+']].set_index('Name IW+')
             double_iw_flow = sp.loc[sp.loc[:, 'Name IW+'].duplicated(), 'Name IW+'].tolist()
             sp = sp.set_index('Name IW+')
@@ -6301,262 +5786,68 @@ class Parse:
         :return:
         """
 
-        EXIO_IW_concordance = pd.read_excel(pkg_resources.resource_filename(
-            __name__, 'Data/mappings/exiobase/EXIO_IW_concordance.xlsx'))
-        EXIO_IW_concordance.set_index('EXIOBASE', inplace=True)
+        for exio_version in ['3.8', '3.9']:
+            EXIO_IW_concordance = pd.read_excel(pkg_resources.resource_filename(
+                __name__, 'Data/mappings/exiobase/EXIO_'+exio_version.replace('.', '_')+'_IW_concordance.xlsx'))
+            EXIO_IW_concordance.set_index('EXIOBASE', inplace=True)
 
-        self.exio_iw = pd.DataFrame(0, EXIO_IW_concordance.index, list(set(list(zip(self.master_db_carbon_neutrality.loc[:, 'Impact category'],
-                                                                         self.master_db_carbon_neutrality.loc[:, 'CF unit'])))))
-        self.exio_iw.columns = pd.MultiIndex.from_tuples(self.exio_iw.columns, names=['Impact category', 'CF unit'])
-        self.exio_iw = self.exio_iw.T.sort_index().T
+            C = pd.DataFrame(0, EXIO_IW_concordance.index,
+                             list(set(list(zip(self.master_db_carbon_neutrality.loc[:, 'Impact category'],
+                                               self.master_db_carbon_neutrality.loc[:, 'CF unit'])))))
+            C.columns = pd.MultiIndex.from_tuples(C.columns, names=['Impact category', 'CF unit'])
+            C = C.T.sort_index().T
 
-        for flow in EXIO_IW_concordance.index:
-            if not EXIO_IW_concordance.loc[flow].isna().iloc[0]:
-                # identify all entries (any impact category, compartment, etc.) for given flow
-                CF_flow = self.master_db_carbon_neutrality.loc[self.master_db_carbon_neutrality['Elem flow name'] ==
-                                                               EXIO_IW_concordance.loc[flow, 'IW']].loc[:,
-                          ['Impact category', 'CF unit', 'CF value', 'Compartment', 'Sub-compartment']]
-                # name of the comp in lower case to match exiobase easily
-                CF_flow.Compartment = [i.lower() for i in CF_flow.Compartment]
-                # only keeping right compartments, always selecting unspecified sub-compartment
-                if flow.split('- ')[-1] == 'soil':
-                    # P - soil is not characterized in IW+
-                    pass
-                elif flow.split('- ')[-1] in ['air', 'water']:
-                    CFs = pd.pivot(CF_flow, values='CF value', index=['Compartment', 'Sub-compartment'],
-                                   columns=['Impact category', 'CF unit']).loc[
-                        (flow.split('- ')[-1], '(unspecified)')].fillna(0)
-                elif 'Occupation' in EXIO_IW_concordance.loc[flow, 'IW']:
-                    CFs = pd.pivot(CF_flow, values='CF value', index=['Compartment', 'Sub-compartment'],
-                                   columns=['Impact category', 'CF unit']).loc[('raw', 'land')].fillna(0)
-                elif 'Fishery' in flow:
-                    CFs = pd.pivot(CF_flow, values='CF value', index=['Compartment', 'Sub-compartment'],
-                                   columns=['Impact category', 'CF unit']).loc[('raw', 'biotic')].fillna(0)
-                else:
-                    try:
+            for flow in EXIO_IW_concordance.index:
+                if not EXIO_IW_concordance.loc[flow].isna().iloc[0]:
+                    # identify all entries (any impact category, compartment, etc.) for given flow
+                    CF_flow = self.master_db_carbon_neutrality.loc[self.master_db_carbon_neutrality['Elem flow name'] ==
+                                                                   EXIO_IW_concordance.loc[flow, 'IW']].loc[:,
+                              ['Impact category', 'CF unit', 'CF value', 'Compartment', 'Sub-compartment']]
+                    # name of the comp in lower case to match exiobase easily
+                    CF_flow.Compartment = [i.lower() for i in CF_flow.Compartment]
+                    # only keeping right compartments, always selecting unspecified sub-compartment
+                    if flow.split('- ')[-1] == 'soil':
+                        # P - soil is not characterized in IW+
+                        pass
+                    elif flow.split('- ')[-1] in ['air', 'water']:
                         CFs = pd.pivot(CF_flow, values='CF value', index=['Compartment', 'Sub-compartment'],
-                                       columns=['Impact category', 'CF unit']).loc[('raw', '(unspecified)')].fillna(0)
-                    except KeyError:
+                                       columns=['Impact category', 'CF unit']).loc[
+                            (flow.split('- ')[-1], '(unspecified)')].fillna(0)
+                    elif 'Occupation' in EXIO_IW_concordance.loc[flow, 'IW']:
                         CFs = pd.pivot(CF_flow, values='CF value', index=['Compartment', 'Sub-compartment'],
-                                       columns=['Impact category', 'CF unit']).loc[('raw', 'in ground')].fillna(0)
-                CFs.name = flow
-                # dumping the CF values in the C matrix
-                self.exio_iw.update(pd.DataFrame(CFs).T)
+                                       columns=['Impact category', 'CF unit']).loc[('raw', 'land')].fillna(0)
+                    else:
+                        try:
+                            CFs = pd.pivot(CF_flow, values='CF value', index=['Compartment', 'Sub-compartment'],
+                                           columns=['Impact category', 'CF unit']).loc[('raw', '(unspecified)')].fillna(
+                                0)
+                        except KeyError:
+                            CFs = pd.pivot(CF_flow, values='CF value', index=['Compartment', 'Sub-compartment'],
+                                           columns=['Impact category', 'CF unit']).loc[('raw', 'biotic')].fillna(0)
+                    CFs.name = flow
+                    # dumping the CF values in the C matrix
+                    C.update(pd.DataFrame(CFs).T)
 
-        # EXIOBASE land occupation in km2 while IW in m2, so we convert
-        self.exio_iw.loc[:, [i for i in self.exio_iw.columns if 'Land' in i[0]]] *= 1000000
-        # EXIOBASE energy flows in TJ while IW in MJ, so we convert
-        self.exio_iw.loc[:, 'Fossil and nuclear energy use'] = self.exio_iw.loc[:, 'Fossil and nuclear energy use'].values * 1000000
-        # EXIOBASE mineral flows in kt while IW in kg, so we convert
-        self.exio_iw.loc[:, 'Mineral resources use'] = self.exio_iw.loc[:, 'Mineral resources use'].values * 1000000
-        # EXIOBASE water flows in Mm3 while IW in m3, so we convert
-        self.exio_iw.loc[:, [i for i in self.exio_iw.columns if 'Water' in i[0]]] *= 1000000
-        # more common to have impact categories as index
-        self.exio_iw = self.exio_iw.T
-        # keep same index format as previously
-        self.exio_iw.index = [(i[0] + ' (' + i[1] + ')') for i in self.exio_iw.index]
-        # HFC and PFC linked to "carbon dioxide" but should not impact marine acidification
-        self.exio_iw.loc[['Marine acidification, long term (PDF.m2.yr)', 'Marine acidification, short term (PDF.m2.yr)'], [
-            'HFC - air', 'PFC - air']] = 0
-        # cannot use +/-1 carbon biogenic approach with IO, so put back CFs from carbon neutrality approach
-        self.exio_iw.loc[:, 'CO2 - waste - biogenic - air'] = 0
+            # EXIOBASE land occupation in km2 while IW in m2, so we convert
+            C.loc[:, [i for i in C.columns if 'Land' in i[0]]] *= 1000000
+            # EXIOBASE energy flows in TJ while IW in MJ, so we convert
+            C.loc[:, 'Fossil and nuclear energy use'] = C.loc[:, 'Fossil and nuclear energy use'].values * 1000000
+            # EXIOBASE mineral flows in kt while IW in kg, so we convert
+            C.loc[:, 'Mineral resources use'] = Cloc[:, 'Mineral resources use'].values * 1000000
+            # EXIOBASE water flows in Mm3 while IW in m3, so we convert
+            C.loc[:, [i for i in C.columns if 'Water' in i[0]]] *= 1000000
+            # more common to have impact categories as index
+            C = C.T
+            # keep same index format as previously
+            C.index = [(i[0] + ' (' + i[1] + ')') for i in C.index]
+            # HFC and PFC linked to "carbon dioxide" but should not impact marine acidification
+            C.loc[['Marine acidification, long term (PDF.m2.yr)', 'Marine acidification, short term (PDF.m2.yr)'],
+                  ['HFC - air', 'PFC - air']] = 0
 
-        self.special_case_minerals_exiobase()
-
-    def special_case_minerals_exiobase(self):
-        """
-        Minerals in exiobase are accounted for as kilograms of ore, while IW+ operates with kilograms of metal. This
-        function is here to take extra information from exiobase, such as average ore content, to create corresponding
-        CFs for ores of exiobase.
-        :return:
-        """
-
-        # loading the file with metal content information (obtained from the EXIOBASE team)
-        metal_concentration_exiobase = pd.read_csv(pkg_resources.resource_filename(
-            __name__, 'Data/metadata/exiobase/All_factors_applied_to_Exiobase_metals_minerals.csv'), sep=';')
-
-        # extracting the average amount of metal per ore from this file
-        average_gold_per_ore = metal_concentration_exiobase.loc[
-            [i for i in metal_concentration_exiobase.index if
-             'Gold' in metal_concentration_exiobase.CommodityName[i] and
-             'Global average\r' in metal_concentration_exiobase.UsedComment[i]]].Concentration.mean()
-        average_lead_per_ore = metal_concentration_exiobase.loc[
-            [i for i in metal_concentration_exiobase.index if
-             'Lead' in metal_concentration_exiobase.CommodityName[i]]].Concentration.mean()
-        average_copper_per_ore = metal_concentration_exiobase.loc[
-            [i for i in metal_concentration_exiobase.index if
-             'opper' in metal_concentration_exiobase.CommodityName[i]]].Concentration.mean()
-        average_silver_per_ore = metal_concentration_exiobase.loc[
-            [i for i in metal_concentration_exiobase.index if
-             'Silver' in metal_concentration_exiobase.CommodityName[i] and
-             'Global average\r' in metal_concentration_exiobase.UsedComment[i]]].Concentration.mean()
-        average_iron_per_ore = metal_concentration_exiobase.loc[
-            [i for i in metal_concentration_exiobase.index if
-             'Iron' in metal_concentration_exiobase.CommodityName[i] and
-             'Global average\r' in metal_concentration_exiobase.UsedComment[i]]].Concentration.mean()
-        average_nickel_per_ore = metal_concentration_exiobase.loc[
-            [i for i in metal_concentration_exiobase.index if
-             'Nickel' in metal_concentration_exiobase.CommodityName[i] and
-             'Global average\r' in metal_concentration_exiobase.UsedComment[i]]].Concentration.mean()
-        average_zinc_per_ore = metal_concentration_exiobase.loc[
-            [i for i in metal_concentration_exiobase.index if
-             'Zinc' in metal_concentration_exiobase.CommodityName[i]]].Concentration.mean()
-        average_pgm_per_ore = metal_concentration_exiobase.loc[
-            [i for i in metal_concentration_exiobase.index if
-             'Platinum-group (PGM)' in metal_concentration_exiobase.CommodityName[i] and
-             'By-products of other ore' in metal_concentration_exiobase.UsedComment[i]]].UsedFactor.mean()
-
-        df = self.master_db_carbon_neutrality.copy()
-        df = df.set_index(['Elem flow name', 'Compartment', 'Sub-compartment'])
-
-        self.exio_iw.loc['Mineral resources use (kg deprived)', 'Domestic Extraction Used - Metal Ores - Gold ores'] = (
-                average_gold_per_ore *  df.loc[('Gold','Raw','in ground'), 'CF value'].iloc[0] * 1000000)
-        self.exio_iw.loc['Mineral resources use (kg deprived)', 'Unused Domestic Extraction - Metal Ores - Gold ores'] = (
-                average_gold_per_ore *  df.loc[('Gold','Raw','in ground'), 'CF value'].iloc[0] * 0)
-        self.exio_iw.loc['Mineral resources use (kg deprived)', 'Domestic Extraction Used - Metal Ores - Lead ores'] = (
-                average_lead_per_ore * df.loc[('Lead','Raw','in ground'), 'CF value'].iloc[0] * 1000000)
-        self.exio_iw.loc['Mineral resources use (kg deprived)', 'Unused Domestic Extraction - Metal Ores - Lead ores'] = (
-                average_lead_per_ore * df.loc[('Lead','Raw','in ground'), 'CF value'].iloc[0] * 0)
-        self.exio_iw.loc['Mineral resources use (kg deprived)', 'Domestic Extraction Used - Metal Ores - Copper ores'] = (
-                average_copper_per_ore * df.loc[('Copper','Raw','in ground'), 'CF value'].iloc[0] * 1000000)
-        self.exio_iw.loc[ 'Mineral resources use (kg deprived)', 'Unused Domestic Extraction - Metal Ores - Copper ores'] = (
-                average_copper_per_ore * df.loc[('Copper','Raw','in ground'), 'CF value'].iloc[0] * 0)
-        self.exio_iw.loc['Mineral resources use (kg deprived)', 'Domestic Extraction Used - Metal Ores - Silver ores'] = (
-                average_silver_per_ore * df.loc[('Silver','Raw','in ground'), 'CF value'].iloc[0] * 1000000)
-        self.exio_iw.loc['Mineral resources use (kg deprived)', 'Unused Domestic Extraction - Metal Ores - Silver ores'] = (
-                average_silver_per_ore * df.loc[('Silver','Raw','in ground'), 'CF value'].iloc[0] * 0)
-        self.exio_iw.loc['Mineral resources use (kg deprived)', 'Domestic Extraction Used - Metal Ores - Iron ores'] = (
-                average_iron_per_ore * df.loc[('Iron','Raw','in ground'), 'CF value'].iloc[0] * 1000000)
-        self.exio_iw.loc['Mineral resources use (kg deprived)', 'Unused Domestic Extraction - Metal Ores - Iron ores'] = (
-                average_iron_per_ore * df.loc[('Iron','Raw','in ground'), 'CF value'].iloc[0] * 0)
-        self.exio_iw.loc['Mineral resources use (kg deprived)', 'Domestic Extraction Used - Metal Ores - Nickel ores'] = (
-                average_nickel_per_ore * df.loc[('Nickel','Raw','in ground'), 'CF value'].iloc[0] * 1000000)
-        self.exio_iw.loc['Mineral resources use (kg deprived)', 'Unused Domestic Extraction - Metal Ores - Nickel ores'] = (
-                average_nickel_per_ore * df.loc[('Nickel','Raw','in ground'), 'CF value'].iloc[0] * 0)
-        self.exio_iw.loc['Mineral resources use (kg deprived)', 'Domestic Extraction Used - Metal Ores - Zinc ores'] = (
-                average_zinc_per_ore * df.loc[('Zinc','Raw','in ground'), 'CF value'].iloc[0] * 1000000)
-        self.exio_iw.loc['Mineral resources use (kg deprived)', 'Unused Domestic Extraction - Metal Ores - Zinc ores'] = (
-                average_zinc_per_ore * df.loc[('Zinc','Raw','in ground'), 'CF value'].iloc[0] * 0)
-        self.exio_iw.loc['Mineral resources use (kg deprived)', 'Domestic Extraction Used - Metal Ores - PGM ores'] = (
-                average_pgm_per_ore * df.loc[('Platinum','Raw','in ground'), 'CF value'].iloc[0] * 1000000)
-        self.exio_iw.loc['Mineral resources use (kg deprived)', 'Unused Domestic Extraction - Metal Ores - PGM ores'] = (
-                average_pgm_per_ore * df.loc[('Platinum','Raw','in ground'), 'CF value'].iloc[0] * 0)
-
-        # loading the file describing which metals EXIOBASE includes in their other non-ferrous metals flow
-        other_categories_composition = pd.read_excel(pkg_resources.resource_filename(
-            __name__, 'Data/mappings/exiobase/Mineral_extension_exio_detailed_2016.xlsx'))
-
-        # identify non ferrous metals among the list of mineral resources
-        other_non_ferrous_metals_index = [i for i in other_categories_composition.index if
-                                          'Other non-ferrous metal ores' in
-                                          other_categories_composition.PhysicalTypeName[i]]
-        # delete duplicated other non ferrous metals identified
-        other_non_ferrous_metals = other_categories_composition.loc[other_non_ferrous_metals_index].groupby(
-            other_categories_composition.CommodityName).head(1)
-        # make a dataframe of it
-        other_non_ferrous_metals = pd.DataFrame(0, other_non_ferrous_metals.CommodityName,
-                                                ['Metal content', 'Ore abundance'])
-
-        # iterate through the non-ferrous metals
-        for metal in other_non_ferrous_metals.index:
-            # if we can find a global average value pick it
-            try:
-                average_metal_content = metal_concentration_exiobase.loc[
-                    [i for i in metal_concentration_exiobase.index if
-                     metal in metal_concentration_exiobase.CommodityName[i] and
-                     'Global average' in metal_concentration_exiobase.UsedComment[i]]].Concentration.mean()
-            except TypeError:
-                pass
-            # if we didn't have a match
-            if np.isnan(average_metal_content):
-                # try with By-product of other ores
-                try:
-                    average_metal_content = metal_concentration_exiobase.loc[
-                        [i for i in metal_concentration_exiobase.index if
-                         metal in metal_concentration_exiobase.CommodityName[i] and
-                         'By-product of other ores' in metal_concentration_exiobase.UsedComment[i]]].UsedFactor.mean()
-                except TypeError:
-                    pass
-            # if for whatever reason we have a completely ridiculous concentration drop it
-            if average_metal_content > 0.5:
-                average_metal_content = None
-            other_non_ferrous_metals.loc[metal, 'Metal content'] = average_metal_content
-
-        # use 0.001 as default value
-        other_non_ferrous_metals = other_non_ferrous_metals.fillna(0.001)
-
-        abundance = pd.read_excel(pkg_resources.resource_filename(
-            __name__, 'Data/metadata/exiobase/USGS_extraction_volumes.xlsx'), 'metals')
-        abundance.set_index('Unnamed: 0', inplace=True)
-        abundance /= abundance.sum()
-        assert (other_non_ferrous_metals.index == abundance.index).all()
-        other_non_ferrous_metals.loc[:, 'Ore abundance'] = abundance.values
-
-        other_metal_concordance = pd.read_excel(pkg_resources.resource_filename(
-            __name__, 'Data/mappings/exiobase/other_metals_matching.xlsx')).drop('comments', axis=1)
-        other_metal_concordance.set_index('Unnamed: 0', inplace=True)
-        other_metal_concordance.dropna(inplace=True)
-
-        for flow in other_metal_concordance.index:
-            CF_flow = self.master_db_carbon_neutrality.loc[self.master_db_carbon_neutrality['Elem flow name'] ==
-                                                           other_metal_concordance.loc[flow].iloc[0]].loc[:,
-                      ['Impact category', 'CF unit', 'CF value', 'Compartment', 'Sub-compartment']]
-            CFs = pd.pivot(CF_flow, values='CF value', index=['Compartment', 'Sub-compartment'],
-                           columns=['Impact category', 'CF unit']).loc[('Raw', 'in ground')].fillna(0)
-            other_non_ferrous_metals.loc[flow, 'CF'] = CFs.loc['Mineral resources use'].iloc[0]
-
-        CF = (other_non_ferrous_metals.loc[:, 'Metal content'] * other_non_ferrous_metals.loc[:,
-                                                                 'Ore abundance'] * other_non_ferrous_metals.loc[:,
-                                                                                    'CF']).sum()
-
-        self.exio_iw.loc['Mineral resources use (kg deprived)',
-                         'Domestic Extraction Used - Metal Ores - Other non-ferrous metal ores'] = CF * 1000000
-        self.exio_iw.loc['Mineral resources use (kg deprived)',
-                         'Unused Domestic Extraction - Metal Ores - Other non-ferrous metal ores'] = CF * 0
-
-        # first we identify which mineral are part of "other minerals"
-        other_minerals = other_categories_composition.loc[
-            [i for i in other_categories_composition.index if
-             'Other minerals' in other_categories_composition.PhysicalTypeName[i]]].groupby(
-            other_categories_composition.CommodityName).head(1).drop(
-            ['PhysicalTypeName', 'ProductTypeCode', 'CountryCode', 'ISOAlpha2', 'AccountingYear'], axis=1)
-        other_minerals.index = other_minerals.CommodityName
-
-        other_minerals.loc['Sillica sand (quartzsand)', 'CF'] = \
-        df.loc[('Sand, quartz', 'Raw', 'in ground'), 'CF value'].iloc[0]
-        other_minerals.loc['Feldspar', 'CF'] = df.loc[('Feldspar', 'Raw', 'in ground'), 'CF value'].iloc[0]
-        other_minerals.loc['Graphite, natural', 'CF'] = \
-        df.loc[('Metamorphous rock, graphite containing', 'Raw', 'in ground'), 'CF value'].iloc[0]
-        other_minerals.loc['Magnesite', 'CF'] = df.loc[('Magnesite', 'Raw', 'in ground'), 'CF value'].iloc[0]
-        other_minerals.loc['Talc (steatite, soapstone, pyrophyllite)', 'CF'] = \
-        df.loc[('Talc', 'Raw', 'in ground'), 'CF value'].iloc[0]
-        other_minerals.loc['Diatomite', 'CF'] = df.loc[('Diatomite', 'Raw', 'in ground'), 'CF value'].iloc[0]
-        other_minerals.loc['Vermiculite', 'CF'] = df.loc[('Vermiculite', 'Raw', 'in ground'), 'CF value'].iloc[0]
-        other_minerals.loc['Perlite', 'CF'] = df.loc[('Perlite', 'Raw', 'in ground'), 'CF value'].iloc[0]
-        # arithmetic average because it does not matter (both are at 0)
-        other_minerals.loc['Igneous rock (basalt, basaltic lava, diabase, granite, porphyry, etc.)',
-                           'CF'] = (df.loc[('Basalt','Raw','in ground'), 'CF value'].iloc[0] +
-                                    df.loc[('Granite','Raw','in ground'), 'CF value'].iloc[0]) / 2
-        other_minerals.loc['Peat for agricultural use', 'CF'] = df.loc[('Peat', 'Raw', 'in ground'), 'CF value'].iloc[0]
-        other_minerals.loc['Strontium minerals', 'CF'] = df.loc[('Strontium', 'Raw', 'in ground'), 'CF value'].iloc[0]
-        other_minerals.loc['Abrasives, natural (puzzolan, pumice, volcanic cinder etc.)', 'CF'] = \
-        df.loc[('Pumice', 'Raw', 'in ground'), 'CF value'].iloc[0]
-        other_minerals.loc['Calcite', 'CF'] = df.loc[('Calcite', 'Raw', 'in ground'), 'CF value'].iloc[0]
-
-        abundance_minerals = pd.read_excel(pkg_resources.resource_filename(
-            __name__, 'Data/metadata/exiobase/USGS_extraction_volumes.xlsx'), 'minerals')
-
-        # Include those in the dataframe containing all intel on other minerals
-        other_minerals = pd.concat([other_minerals, abundance_minerals.set_index('CommodityName')], axis=1)
-        # weighted average
-        other_minerals.loc[:, 'Mineral extracted (kg)'] /= other_minerals.loc[:, 'Mineral extracted (kg)'].sum()
-        # the CF for the aggregated mineral flow is thus:
-        new_CF = (other_minerals.loc[:, 'CF'] * other_minerals.loc[:, 'Mineral extracted (kg)']).sum()
-
-        self.exio_iw.loc['Mineral resources use (kg deprived)',
-                         'Domestic Extraction Used - Non-Metallic Minerals - Other minerals'] = new_CF * 1000000
-        self.exio_iw.loc['Mineral resources use (kg deprived)',
-                          'Unused Domestic Extraction - Non-Metallic Minerals - Other minerals'] = new_CF * 0
+            if exio_version == '3.8':
+                self.exio_iw_38 = C.copy()
+            elif exio_version == '3.9':
+                self.exio_iw_39 = C.copy()
 
     def get_simplified_versions(self):
 
@@ -6565,8 +5856,8 @@ class Parse:
             self.iw_sp_carbon_neutrality.columns, axis=1))
 
         # openLCA
-        self.simplified_version_olca = clean_up_dataframe(produce_simplified_version(self.olca_iw_carbon_neutrality).reindex(
-            self.olca_iw_carbon_neutrality.columns, axis=1))
+        # self.simplified_version_olca = clean_up_dataframe(produce_simplified_version(self.olca_iw_carbon_neutrality).reindex(
+        #     self.olca_iw_carbon_neutrality.columns, axis=1))
 
         # ecoinvent
         self.simplified_version_ei38 = clean_up_dataframe(produce_simplified_version(self.ei38_iw_carbon_neutrality).reindex(
