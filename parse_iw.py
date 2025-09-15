@@ -28,8 +28,8 @@ import pkg_resources
 import json
 import country_converter as coco
 import scipy.sparse
-import brightway2 as bw2
-import bw2io
+import bw2data as bd
+import bw2io as bi
 import datetime
 from datetime import datetime
 import csv
@@ -46,46 +46,85 @@ from tqdm import tqdm
 
 
 class Parse:
-    def __init__(self, path_access_db, version, bw2_projects):
+    def __init__(self, path_access_db, version, bw2_projects, bw_version):
         """
         :param path_access_db: path to the Microsoft access database (source version)
         :param version: the version of IW+ to parse
-        :param bw2_projects: (optional) the name of a brightway2 project in which the database "biosphere3" is available
+        :param bw2_projects: the name of a brightway2 project in which the database "biosphere3" is available
+        :param bw_version: the version of brightway used, can be '2' or '2.5'
 
         Object instance variables:
         -------------------------
             - master_db : the master dataframe where basic IW CFs are stored (what is used to produce the dev.xlsx file)
-            - ei35_iw   : the dataframe where IW CFs linked to ecoinvent v3.5 elementary flows are stored
-            - ei36_iw   : the dataframe where IW CFs linked to ecoinvent v3.6 elementary flows are stored
-            - ei371_iw  : the dataframe where IW CFs linked to ecoinvent v3.7.1 elementary flows are stored
-            - ei38_iw   : the dataframe where IW CFs linked to ecoinvent v3.8 elementary flows are stored
-            - ei391_iw  : the dataframe where IW CFs linked to ecoinvent v3.9.1 elementary flows are stored
-            - ei310_iw  : the dataframe where IW CFs linked to ecoinvent v3.10 elementary flows are stored
-            - iw_sp : the dataframe where IW CFs linked to SimaPro elementary flows are stored
-            - olca_iw   : the dataframe where IW CFs linked to openLCA elementary flows are stored
-            - exio_iw   : the dataframe where IW CFs linked to EXIOBASE elementary flows are stored
+                          following a +/-1 approach for biogenic carbon
+            - master_db_carbon_neutrality : the master dataframe where basic IW CFs are stored (what is used to produce the dev.xlsx file)
+                                            following a 0/0 approach for biogenic carbon
+            - ei310_iw  : the dataframe where IW CFs linked to ecoinvent v3.10 elementary flows are stored,
+                          following a +/-1 approach for biogenic carbon
+            - ei310_iw_carbon_neutrality  : the dataframe where IW CFs linked to ecoinvent v3.10 elementary flows are stored
+                                            following a 0/0 approach for biogenic carbon
+            - simplified_version_ei310  : the dataframe where IW CFs linked to ecoinvent v3.10 elementary flows are stored
+                                        for the footprint version
+            - ei311_iw  : the dataframe where IW CFs linked to ecoinvent v3.11 elementary flows are stored,
+                          following a +/-1 approach for biogenic carbon
+            - ei311_iw_carbon_neutrality  : the dataframe where IW CFs linked to ecoinvent v3.11 elementary flows are stored
+                                            following a 0/0 approach for biogenic carbon
+            - simplified_version_ei311  : the dataframe where IW CFs linked to ecoinvent v3.11 elementary flows are stored
+                                        for the footprint version
+            - iw_sp  : the dataframe where IW CFs linked to SimaPro elementary flows are stored,
+                          following a +/-1 approach for biogenic carbon
+            - iw_sp_carbon_neutrality  : the dataframe where IW CFs linked to SimaPro elementary flows are stored
+                                            following a 0/0 approach for biogenic carbon
+            - simplified_version_sp  : the dataframe where IW CFs linked to SimaPro elementary flows are stored
+                                        for the footprint version
+            - olca_iw  : the dataframe where IW CFs linked to openLCA elementary flows are stored,
+                          following a +/-1 approach for biogenic carbon
+            - olca_iw_carbon_neutrality  : the dataframe where IW CFs linked to openLCA elementary flows are stored
+                                            following a 0/0 approach for biogenic carbon
+            - simplified_version_olca  : the dataframe where IW CFs linked to openLCA elementary flows are stored
+                                        for the footprint version
+            - exio_iw_38    : the dataframe where IW CFs linked to EXIOBASE v3.8.2 and before elementary flows are stored
+            - exio_iw_39    : the dataframe where IW CFs linked to EXIOBASE v3.9.0 and after elementary flows are stored
 
         Object insteance methods:
         -------------------------
             - load_cfs()
             - load_basic_cfs()
-            - load_acid_eutro_cfs()
+            - load_climate_change_cfs()
+            - load_ozone_layer_depletion_cfs()
+            - load_photochemical_ozone_formation()
+            - load_freshwater_acidification_cfs()
+            - load_terrestrial_acidification_cfs()
+            - load_marine_eutrophication_cfs()
+            - load_mineral_resource_use_cfs()
+            - load_freshwater_eutrophication_cfs()
             - load_land_use_cfs()
-            - load_particulates_cfs()
+            - load_particulates_cfs ()
             - load_water_scarcity_cfs()
-            - load_water_availability_fw_cfs()
             - load_water_availability_hh_cfs()
+            - load_water_availability_fw_cfs()
             - load_water_availability_terr_cfs()
             - load_thermally_polluted_water_cfs()
+            - load_physical_effects_cfs()
+            - load_fisheries_cfs()
+            - harmonize_regionalized_substances()
             - apply_rules()
             - create_not_regio_flows()
             - create_regio_flows_for_not_regio_ic()
             - order_things_around()
+            - deal_with_biogenic_carbon()
+            - deal_with_temporary_storage_of_carbon()
+            - separate_ghg_indicators()
             - separate_regio_cfs()
             - link_to_ecoinvent()
-            - export_to_bw2()
             - link_to_sp()
+            - link_to_exiobase()
+            - link_to_olca()
+            - get_simplified_versions()
+            - get_total_hh_and_eq()
+            - export_to_bw()
             - export_to_sp()
+            - export_to_olca()
             - produce_files()
             - produce_files_hybrid_ecoinvent()
 
@@ -111,6 +150,7 @@ class Parse:
         self.path_access_db = path_access_db
         self.version = str(version)
         self.bw2_projects = bw2_projects
+        self.bw_version = bw_version
 
         # OUTPUTs
         self.master_db = pd.DataFrame()
@@ -176,8 +216,8 @@ class Parse:
         self.load_water_availability_terr_cfs()
         self.logger.info("Loading thermally polluted water characterization factors...")
         self.load_thermally_polluted_water_cfs()
-        self.logger.info("Loading plastic physical effects on biota characterization factors...")
-        self.load_plastic_cfs()
+        self.logger.info("Loading physical effects on biota characterization factors...")
+        self.load_physical_effects_cfs()
         self.logger.info("Loading fisheries impact characterization factors...")
         self.load_fisheries_cfs()
 
@@ -218,11 +258,9 @@ class Parse:
         # only relevant for openLCA
         # self.get_total_hh_and_eq()
 
-    def export_to_bw2(self):
+    def export_to_bw(self):
         """
-        This method creates a brightway2 method with the IW+ characterization factors.
-        :param ei_flows_version: [str] Provide a specific ei version (e.g., 3.6) to be used to determine the elementary flows
-                                 to be linked to iw+. Default values = eiv3.8 (in 2022)
+        This method creates a brightway2 or brightway2.5 method with the IW+ characterization factors.
 
         :return:
         """
@@ -230,9 +268,16 @@ class Parse:
         self.logger.info("Exporting to brightway2...")
 
         for project in self.bw2_projects:
-            bw2.projects.set_current(project)
-            bio = bw2.Database('biosphere3')
+            bd.projects.set_current(project)
+            # for bw2
+            if 'biosphere3' in bd.databases:
+                biosphere_db_name = 'biosphere3'
+            # for bw2.5
+            else:
+                biosphere_db_name = [i for i in bd.databases if 'biosphere' in i][0]
+            bio = bd.Database(biosphere_db_name)
             ei_version = project.split('ecoinvent')[1]
+
             bw_flows_with_codes = (
                 pd.DataFrame(
                     [(i.as_dict()['name'], i.as_dict()['categories'][0], i.as_dict()['categories'][1],
@@ -242,24 +287,22 @@ class Parse:
                      for i in bio],
                     columns=['Elem flow name', 'Compartment', 'Sub-compartment', 'code'])
             )
-            if project == 'ecoinvent3.8':
-                ei_in_bw_normal = self.ei38_iw.merge(bw_flows_with_codes)
-                ei_in_bw_carbon_neutrality = self.ei38_iw_carbon_neutrality.merge(bw_flows_with_codes)
-                ei_in_bw_simple = self.simplified_version_ei38.merge(bw_flows_with_codes)
-            elif project == 'ecoinvent3.9.1':
-                ei_in_bw_normal = self.ei39_iw.merge(bw_flows_with_codes)
-                ei_in_bw_carbon_neutrality = self.ei39_iw_carbon_neutrality.merge(bw_flows_with_codes)
-                ei_in_bw_simple = self.simplified_version_ei39.merge(bw_flows_with_codes)
-            elif project == 'ecoinvent3.10.1':
+
+            if '3.10' in project:
                 ei_in_bw_normal = self.ei310_iw.merge(bw_flows_with_codes)
                 ei_in_bw_carbon_neutrality = self.ei310_iw_carbon_neutrality.merge(bw_flows_with_codes)
                 ei_in_bw_simple = self.simplified_version_ei310.merge(bw_flows_with_codes)
+            elif '3.11' in project:
+                ei_in_bw_normal = self.ei311_iw.merge(bw_flows_with_codes)
+                ei_in_bw_carbon_neutrality = self.ei311_iw_carbon_neutrality.merge(bw_flows_with_codes)
+                ei_in_bw_simple = self.simplified_version_ei311.merge(bw_flows_with_codes)
 
             for ei_in_bw_format in ['normal', 'carbon neutrality']:
                 if ei_in_bw_format == 'normal':
                     ei_in_bw = ei_in_bw_normal
                 elif ei_in_bw_format == 'carbon neutrality':
                     ei_in_bw = ei_in_bw_carbon_neutrality
+
                 # create total HH and EQ categories
                 ei_in_bw.set_index(['Impact category', 'CF unit', 'code'], inplace=True)
                 total_hh = ei_in_bw.loc(axis=0)[:, 'DALY'].copy('deep')
@@ -316,7 +359,7 @@ class Parse:
                                         ei_version, 'Ecosystem quality', ic[0])
 
                     # initialize the "Method" method
-                    new_method = bw2.Method(name)
+                    new_method = bd.Method(name)
                     # register the new method
                     new_method.register()
                     # set its unit
@@ -327,7 +370,7 @@ class Parse:
 
                     data = []
                     for stressor in df.index:
-                        data.append((('biosphere3', stressor), df.loc[stressor, 'CF value']))
+                        data.append(((biosphere_db_name, stressor), df.loc[stressor, 'CF value']))
                     new_method.write(data)
 
             # -------------- For simplified version of IW+ ----------------
@@ -340,7 +383,7 @@ class Parse:
                 name = ('IMPACT World+ Footprint ' + self.version + ' for ecoinvent v' + ei_version, ic[0])
 
                 # initialize the "Method" method
-                new_method = bw2.Method(name)
+                new_method = bd.Method(name)
                 # register the new method
                 new_method.register()
                 # set its unit
@@ -351,7 +394,7 @@ class Parse:
 
                 data = []
                 for stressor in df.index:
-                    data.append((('biosphere3', stressor), df.loc[stressor, 'CF value']))
+                    data.append(((biosphere_db_name, stressor), df.loc[stressor, 'CF value']))
                 new_method.write(data)
 
     def export_to_sp(self):
@@ -361,6 +404,13 @@ class Parse:
         """
 
         self.logger.info("Exporting to SimaPro...")
+
+        # some elementary flows with the following region exceed the 100 characters limit of SimaPro -> drop region
+        self.iw_sp_carbon_neutrality = self.iw_sp_carbon_neutrality.loc[
+            ~self.iw_sp_carbon_neutrality.loc[:, 'Elem flow name'].str.contains(
+                'United States of America, including overseas territories')]
+        self.iw_sp = self.iw_sp.loc[~self.iw_sp.loc[:, 'Elem flow name'].str.contains(
+            'United States of America, including overseas territories')]
 
         # csv accepts strings only
         self.iw_sp.loc[:, 'CF value'] = self.iw_sp.loc[:, 'CF value'].astype(str)
@@ -384,7 +434,7 @@ class Parse:
                                     ['Name', '', '', '', '', ''],
                                     ['IMPACT World+ Midpoint ' + self.version + ' (incl. CO2 uptake)', '', '', '', '', ''],
                                     ['', '', '', '', '', ''], ['Version', '', '', '', '', ''],
-                                    ['2','1', '', '', '', ''],
+                                    ['2','2', '', '', '', ''],
                                     ['', '', '', '', '', ''], ['Comment', '', '', '', '', ''],
                                     ['IMPACT World+ Midpoint ' + self.version + ' (incl. CO2 uptake)' + chr(int("007F", 16)) + chr(int("007F", 16)) +
                                      'New category:' + chr(int("007F", 16)) +
@@ -415,7 +465,7 @@ class Parse:
                                   ['Name', '', '', '', '', ''],
                                   ['IMPACT World+ Expert ' + self.version + ' (incl. CO2 uptake)', '', '', '', '', ''],
                                   ['', '', '', '', '', ''], ['Version', '', '', '', '', ''],
-                                  ['2','1', '', '', '', ''],
+                                  ['2','2', '', '', '', ''],
                                   ['', '', '', '', '', ''], ['Comment', '', '', '', '', ''],
                                   ['IMPACT World+ Expert ' + self.version + ' (incl. CO2 uptake)' + chr(int("007F", 16)) + chr(int("007F", 16)) +
                                    'New categories:' + chr(int("007F", 16)) + '- Marine ecotoxicity' + chr(int("007F", 16)) +
@@ -448,7 +498,7 @@ class Parse:
                                     ['Name', '', '', '', '', ''],
                                     ['IMPACT World+ ' + self.version + ' (incl. CO2 uptake)', '', '', '', '', ''],
                                     ['', '', '', '', '', ''], ['Version', '', '', '', '', ''],
-                                    ['2','1', '', '', '', ''],
+                                    ['2','2', '', '', '', ''],
                                     ['', '', '', '', '', ''], ['Comment', '', '', '', '', ''],
                                     ['IMPACT World+ ' + self.version  + ' (incl. CO2 uptake)' + chr(int("007F", 16)) +
                                      'New categories:' + chr(int("007F", 16)) +
@@ -486,7 +536,7 @@ class Parse:
                                     ['Name', '', '', '', '', ''],
                                     ['IMPACT World+ Midpoint ' + self.version, '', '', '', '', ''],
                                     ['', '', '', '', '', ''], ['Version', '', '', '', '', ''],
-                                    ['2','1', '', '', '', ''],
+                                    ['2','2', '', '', '', ''],
                                     ['IMPACT World+ Midpoint ' + self.version + chr(int("007F", 16)) + chr(int("007F", 16)) +
                                      'New category:' + chr(int("007F", 16)) +
                                      '- Plastics physical effect on biota' + chr(int("007F", 16)) +
@@ -515,7 +565,7 @@ class Parse:
                                   ['Name', '', '', '', '', ''],
                                   ['IMPACT World+ Expert ' + self.version, '', '', '', '', ''],
                                   ['', '', '', '', '', ''], ['Version', '', '', '', '', ''],
-                                  ['2','1', '', '', '', ''],
+                                  ['2','2', '', '', '', ''],
                                   ['', '', '', '', '', ''], ['Comment', '', '', '', '', ''],
                                   ['IMPACT World+ Expert ' + self.version + chr(int("007F", 16)) + chr(int("007F", 16)) +
                                    'New categories:' + chr(int("007F", 16)) + '- Marine ecotoxicity' + chr(int("007F", 16)) +
@@ -547,7 +597,7 @@ class Parse:
                                     ['Name', '', '', '', '', ''],
                                     ['IMPACT World+ ' + self.version, '', '', '', '', ''],
                                     ['', '', '', '', '', ''], ['Version', '', '', '', '', ''],
-                                    ['2','1', '', '', '', ''],
+                                    ['2','2', '', '', '', ''],
                                     ['', '', '', '', '', ''], ['Comment', '', '', '', '', ''],
                                     ['IMPACT World+ ' + self.version + chr(int("007F", 16)) +
                                      'New categories:' + chr(int("007F", 16)) +
@@ -584,7 +634,7 @@ class Parse:
                                     ['Name', '', '', '', '', ''],
                                     ['IMPACT World+ Footprint ' + self.version, '', '', '', '', ''],
                                     ['', '', '', '', '', ''], ['Version', '', '', '', '', ''],
-                                    ['2','1', '', '', '', ''],
+                                    ['2','2', '', '', '', ''],
                                     ['', '', '', '', '', ''], ['Comment', '', '', '', '', ''],
                                     ['IMPACT World+ Footprint ' + self.version + chr(int("007F", 16)) +
                                      'Updated categories:' + chr(int("007F", 16)) +
@@ -619,7 +669,7 @@ class Parse:
         weighting_info_damage_carboneutrality.insert(32, ['Marine ecotoxicity, long term', '1.00E+00', '', '', '', ''])
         weighting_info_damage_carboneutrality.insert(33, ['Marine ecotoxicity, short term', '1.00E+00', '', '', '', ''])
         weighting_info_damage_carboneutrality.insert(35, ['Photochemical ozone formation, ecosystem quality', '1.00E+00', '', '', '', ''])
-        weighting_info_damage_carboneutrality.insert(36, ['Plastics physical effects on biota', '1.00E+00', '', '', '', ''])
+        weighting_info_damage_carboneutrality.insert(36, ['Physical effects on biota', '1.00E+00', '', '', '', ''])
         weighting_info_damage_carboneutrality.insert(38, ['Terrestrial ecotoxicity, long term', '1.00E+00', '', '', '', ''])
         weighting_info_damage_carboneutrality.insert(39, ['Terrestrial ecotoxicity, short term', '1.00E+00', '', '', '', ''])
 
@@ -631,7 +681,7 @@ class Parse:
         weighting_info_combined_carboneutrality[28] = ['Land occupation, biodiversity (damage)', '1.00E+00', '', '', '', '']
         weighting_info_combined_carboneutrality[29] = ['Land transformation, biodiversity (damage)', '1.00E+00', '', '', '', '']
         weighting_info_combined_carboneutrality[34] = ['Marine eutrophication (damage)', '1.00E+00', '', '', '', '']
-        weighting_info_combined_carboneutrality[36] = ['Plastics physical effects on biota (damage)', '1.00E+00', '', '', '', '']
+        weighting_info_combined_carboneutrality[36] = ['Physical effects on biota (damage)', '1.00E+00', '', '', '', '']
         weighting_info_combined_carboneutrality[37] = ['Terrestrial acidification (damage)', '1.00E+00', '', '', '', '']
 
         weighting_info_damage = [[df.loc[i].tolist()[0], df.loc[i].tolist()[1], '', '', '', ''] for i in df.index]
@@ -646,7 +696,7 @@ class Parse:
         weighting_info_damage.insert(32, ['Marine ecotoxicity, long term', '1.00E+00', '', '', '', ''])
         weighting_info_damage.insert(33, ['Marine ecotoxicity, short term', '1.00E+00', '', '', '', ''])
         weighting_info_damage.insert(35, ['Photochemical ozone formation, ecosystem quality', '1.00E+00', '', '', '', ''])
-        weighting_info_damage.insert(36, ['Plastics physical effects on biota', '1.00E+00', '', '', '', ''])
+        weighting_info_damage.insert(36, ['Physical effects on biota', '1.00E+00', '', '', '', ''])
         weighting_info_damage.insert(38, ['Terrestrial ecotoxicity, long term', '1.00E+00', '', '', '', ''])
         weighting_info_damage.insert(39, ['Terrestrial ecotoxicity, short term', '1.00E+00', '', '', '', ''])
         weighting_info_damage.insert(6, ['Climate change, HH, LT, biogenic', '1.00E+00', '', '', '', ''])
@@ -670,7 +720,7 @@ class Parse:
         weighting_info_combined[40] = ['Land occupation, biodiversity (damage)', '1.00E+00', '', '', '', '']
         weighting_info_combined[41] = ['Land transformation, biodiversity (damage)', '1.00E+00', '', '', '', '']
         weighting_info_combined[46] = ['Marine eutrophication (damage)', '1.00E+00', '', '', '', '']
-        weighting_info_combined[48] = ['Plastics physical effects on biota (damage)', '1.00E+00', '', '', '', '']
+        weighting_info_combined[48] = ['Physical effects on biota (damage)', '1.00E+00', '', '', '', '']
         weighting_info_combined[49] = ['Terrestrial acidification (damage)', '1.00E+00', '', '', '', '']
 
         # extracting midpoint CFs
@@ -752,7 +802,7 @@ class Parse:
         same_names = ['Freshwater acidification','Freshwater eutrophication','Land occupation, biodiversity',
                       'Land transformation, biodiversity','Marine eutrophication','Ozone layer depletion',
                       'Particulate matter formation','Terrestrial acidification',
-                      'Plastics physical effects on biota']
+                      'Physical effects on biota']
         combined_values = []
         for j in ic_unit.index:
             combined_values.append(['', '', '', '', '', ''])
@@ -782,7 +832,7 @@ class Parse:
         same_names = ['Freshwater acidification','Freshwater eutrophication','Land occupation, biodiversity',
                       'Land transformation, biodiversity','Marine eutrophication','Ozone layer depletion',
                       'Particulate matter formation','Terrestrial acidification',
-                      'Plastics physical effects on biota']
+                      'Physical effects on biota']
         combined_values_carboneutrality = []
         for j in ic_unit.index:
             combined_values_carboneutrality.append(['', '', '', '', '', ''])
@@ -1509,8 +1559,8 @@ class Parse:
             os.makedirs(path + '/ecoinvent/')
         if not os.path.exists(path + '/exiobase/'):
             os.makedirs(path + '/exiobase/')
-        if not os.path.exists(path + '/bw2/'):
-            os.makedirs(path + '/bw2/')
+        if not os.path.exists(path + '/bw' + self.bw_version.replace('.', '')):
+            os.makedirs(path + '/bw' + self.bw_version.replace('.', ''))
         if not os.path.exists(path + '/SimaPro/'):
             os.makedirs(path + '/SimaPro/')
         if not os.path.exists(path + '/openLCA/'):
@@ -1521,18 +1571,12 @@ class Parse:
         self.master_db_carbon_neutrality.to_excel(path + '/Dev/impact_world_plus_' + self.version + '_dev.xlsx')
 
         # ecoinvent versions in Excel format
-        self.ei38_iw.to_excel(path + '/ecoinvent/impact_world_plus_' + self.version + ' (incl. CO2 uptake)_expert_version_ecoinvent_v38.xlsx')
-        self.ei39_iw.to_excel(path + '/ecoinvent/impact_world_plus_' + self.version + ' (incl. CO2 uptake)_expert_version_ecoinvent_v39.xlsx')
         self.ei310_iw.to_excel(path + '/ecoinvent/impact_world_plus_' + self.version + ' (incl. CO2 uptake)_expert_version_ecoinvent_v310.xlsx')
         self.ei311_iw.to_excel(path + '/ecoinvent/impact_world_plus_' + self.version + ' (incl. CO2 uptake)_expert_version_ecoinvent_v311.xlsx')
-        self.ei38_iw_carbon_neutrality.to_excel(path + '/ecoinvent/impact_world_plus_' + self.version + '_expert_version_ecoinvent_v38.xlsx')
-        self.ei39_iw_carbon_neutrality.to_excel(path + '/ecoinvent/impact_world_plus_' + self.version + '_expert_version_ecoinvent_v39.xlsx')
         self.ei310_iw_carbon_neutrality.to_excel(path + '/ecoinvent/impact_world_plus_' + self.version + '_expert_version_ecoinvent_v310.xlsx')
         self.ei311_iw_carbon_neutrality.to_excel(path + '/ecoinvent/impact_world_plus_' + self.version + '_expert_version_ecoinvent_v311.xlsx')
 
         # ecoinvent version in DataFrame format
-        self.simplified_version_ei38.to_excel(path + '/ecoinvent/impact_world_plus_' + self.version + '_footprint_version_ecoinvent_v38.xlsx')
-        self.simplified_version_ei39.to_excel(path + '/ecoinvent/impact_world_plus_' + self.version + '_footprint_version_ecoinvent_v39.xlsx')
         self.simplified_version_ei310.to_excel(path + '/ecoinvent/impact_world_plus_' + self.version + '_footprint_version_ecoinvent_v310.xlsx')
         self.simplified_version_ei311.to_excel(path + '/ecoinvent/impact_world_plus_' + self.version + '_footprint_version_ecoinvent_v311.xlsx')
 
@@ -1544,55 +1588,49 @@ class Parse:
 
         # brightway2 versions in bw2package format
         for project in self.bw2_projects:
-            bw2.projects.set_current(project)
-            if '3.8' in project:
-                IW_ic = [bw2.Method(ic) for ic in list(bw2.methods) if ('IMPACT World+' in ic[0] and 'Footprint' not in ic[0] and
+            bd.projects.set_current(project)
+            if '3.10' in project:
+                IW_ic = [bd.Method(ic) for ic in list(bd.methods) if ('IMPACT World+' in ic[0] and 'Footprint' not in ic[0] and
                                                                         self.version in ic[0] and "for ecoinvent" in ic[0] and
                                                                         ' (incl. CO2 uptake)' in ic[0])]
-                bw2io.package.BW2Package.export_objs(IW_ic, filename='impact_world_plus_' + self.version +
-                                                                     ' (incl. CO2 uptake)_brightway2_expert_version_ei38',
-                                                     folder=path+'/bw2/')
-                IW_ic = [bw2.Method(ic) for ic in list(bw2.methods) if ('IMPACT World+' in ic[0] and 'Footprint' not in ic[0] and
+                bi.package.BW2Package.export_objs(IW_ic, filename='impact_world_plus_' + self.version +
+                                                                     ' (incl. CO2 uptake)_brightway' + self.bw_version +
+                                                                  '_expert_version_ei310',
+                                                     folder=path + '/bw' + self.bw_version.replace('.', '') + '/')
+                IW_ic = [bd.Method(ic) for ic in list(bd.methods) if ('IMPACT World+' in ic[0] and 'Footprint' not in ic[0] and
                                                                         self.version in ic[0] and "for ecoinvent" in ic[0] and
                                                                         ' (incl. CO2 uptake)' not in ic[0])]
-                bw2io.package.BW2Package.export_objs(IW_ic, filename='impact_world_plus_' + self.version +
-                                                                     '_brightway2_expert_version_ei38', folder=path+'/bw2/')
-                IW_ic = [bw2.Method(ic) for ic in list(bw2.methods) if ('IMPACT World+' in ic[0] and 'Footprint' in ic[0] and
+                bi.package.BW2Package.export_objs(IW_ic, filename='impact_world_plus_' + self.version +
+                                                                     '_brightway' + self.bw_version +
+                                                                  '_expert_version_ei310',
+                                                  folder=path + '/bw' + self.bw_version.replace('.', '') + '/')
+                IW_ic = [bd.Method(ic) for ic in list(bd.methods) if ('IMPACT World+' in ic[0] and 'Footprint' in ic[0] and
                                                                         self.version in ic[0] and "for ecoinvent" in ic[0])]
-                bw2io.package.BW2Package.export_objs(IW_ic, filename='impact_world_plus_' + self.version +
-                                                                     '_brightway2_footprint_version_ei38', folder=path+'/bw2/')
-            elif '3.9' in project:
-                IW_ic = [bw2.Method(ic) for ic in list(bw2.methods) if ('IMPACT World+' in ic[0] and 'Footprint' not in ic[0] and
+                bi.package.BW2Package.export_objs(IW_ic, filename='impact_world_plus_' + self.version +
+                                                                     '_brightway' + self.bw_version +
+                                                                  '_footprint_version_ei310',
+                                                  folder=path + '/bw' + self.bw_version.replace('.', '') + '/')
+            elif '3.11' in project:
+                IW_ic = [bd.Method(ic) for ic in list(bd.methods) if ('IMPACT World+' in ic[0] and 'Footprint' not in ic[0] and
                                                                         self.version in ic[0] and "for ecoinvent" in ic[0] and
                                                                         ' (incl. CO2 uptake)' in ic[0])]
-                bw2io.package.BW2Package.export_objs(IW_ic, filename='impact_world_plus_' + self.version +
-                                                                     ' (incl. CO2 uptake)_brightway2_expert_version_ei39',
-                                                     folder=path+'/bw2/')
-                IW_ic = [bw2.Method(ic) for ic in list(bw2.methods) if ('IMPACT World+' in ic[0] and 'Footprint' not in ic[0] and
+                bi.package.BW2Package.export_objs(IW_ic, filename='impact_world_plus_' + self.version +
+                                                                     ' (incl. CO2 uptake)_brightway' + self.bw_version +
+                                                                  '_expert_version_ei311',
+                                                     folder=path + '/bw' + self.bw_version.replace('.', '') + '/')
+                IW_ic = [bd.Method(ic) for ic in list(bd.methods) if ('IMPACT World+' in ic[0] and 'Footprint' not in ic[0] and
                                                                         self.version in ic[0] and "for ecoinvent" in ic[0] and
                                                                         ' (incl. CO2 uptake)' not in ic[0])]
-                bw2io.package.BW2Package.export_objs(IW_ic, filename='impact_world_plus_' + self.version +
-                                                                     '_brightway2_expert_version_ei39', folder=path+'/bw2/')
-                IW_ic = [bw2.Method(ic) for ic in list(bw2.methods) if ('IMPACT World+' in ic[0] and 'Footprint' in ic[0] and
+                bi.package.BW2Package.export_objs(IW_ic, filename='impact_world_plus_' + self.version +
+                                                                     '_brightway' + self.bw_version +
+                                                                  '_expert_version_ei311',
+                                                  folder=path + '/bw' + self.bw_version.replace('.', '') + '/')
+                IW_ic = [bd.Method(ic) for ic in list(bd.methods) if ('IMPACT World+' in ic[0] and 'Footprint' in ic[0] and
                                                                         self.version in ic[0] and "for ecoinvent" in ic[0])]
-                bw2io.package.BW2Package.export_objs(IW_ic, filename='impact_world_plus_' + self.version +
-                                                                     '_brightway2_footprint_version_ei39', folder=path+'/bw2/')
-            elif '3.10' in project:
-                IW_ic = [bw2.Method(ic) for ic in list(bw2.methods) if ('IMPACT World+' in ic[0] and 'Footprint' not in ic[0] and
-                                                                        self.version in ic[0] and "for ecoinvent" in ic[0] and
-                                                                        ' (incl. CO2 uptake)' in ic[0])]
-                bw2io.package.BW2Package.export_objs(IW_ic, filename='impact_world_plus_' + self.version +
-                                                                     ' (incl. CO2 uptake)_brightway2_expert_version_ei310',
-                                                     folder=path+'/bw2/')
-                IW_ic = [bw2.Method(ic) for ic in list(bw2.methods) if ('IMPACT World+' in ic[0] and 'Footprint' not in ic[0] and
-                                                                        self.version in ic[0] and "for ecoinvent" in ic[0] and
-                                                                        ' (incl. CO2 uptake)' not in ic[0])]
-                bw2io.package.BW2Package.export_objs(IW_ic, filename='impact_world_plus_' + self.version +
-                                                                     '_brightway2_expert_version_ei310', folder=path+'/bw2/')
-                IW_ic = [bw2.Method(ic) for ic in list(bw2.methods) if ('IMPACT World+' in ic[0] and 'Footprint' in ic[0] and
-                                                                        self.version in ic[0] and "for ecoinvent" in ic[0])]
-                bw2io.package.BW2Package.export_objs(IW_ic, filename='impact_world_plus_' + self.version +
-                                                                     '_brightway2_footprint_version_ei310', folder=path+'/bw2/')
+                bi.package.BW2Package.export_objs(IW_ic, filename='impact_world_plus_' + self.version +
+                                                                     '_brightway' + self.bw_version +
+                                                                  '_footprint_version_ei311',
+                                                  folder=path + '/bw' + self.bw_version.replace('.', '') + '/')
 
         # SimaPro version in csv format
         with open(path+'/SimaPro/impact_world_plus_'+self.version+' (incl. CO2 uptake)_midpoint_version_simapro.csv', 'w', newline='') as f:
@@ -4231,12 +4269,12 @@ class Parse:
         self.master_db = pd.concat([self.master_db, water_data])
         self.master_db = clean_up_dataframe(self.master_db)
 
-    def load_plastic_cfs(self):
+    def load_physical_effects_cfs(self):
         """
-        Load CFs for plastics impact.
+        Load CFs for plastics and naturel fibers physical effects on biota impact.
 
         Concerned impact categories:
-            - Plastics physical effect on biota
+            - Physical effect on biota
 
         :return: update master_db
         """
@@ -4408,6 +4446,7 @@ class Parse:
             [data, pd.concat([pd.DataFrame([i[1] + ' fish, discarded, GLO' for i in glo.index], columns=['Elem flow name']),
                               pd.DataFrame(glo.loc[:, 'Discard CF (PDF.m2.yr/t discarded fish)'].values,
                                            columns=['CF value'])], axis=1)])
+        data = clean_up_dataframe(data)
         data.loc[:, 'Impact category'] = 'Fisheries impact'
         data.loc[:, 'CF unit'] = 'PDF.m2.yr'
         data.loc[[i for i in data.index if 'discarded' not in data.loc[i, 'Elem flow name']], 'Compartment'] = 'Raw'
@@ -5098,6 +5137,9 @@ class Parse:
 
         latest_ei_version = '3.11'
 
+        elem_flow_uuid = pd.read_excel(pkg_resources.resource_stream(
+            __name__, '/Data/mappings/ei' + latest_ei_version.replace('.', '') + '/ei_elem_flow_uuids.xlsx'))
+
         for db_format in ['normal', 'carbon neutrality']:
             if db_format == 'normal':
                 ei_iw_db = self.master_db_not_regio.copy()
@@ -5238,56 +5280,31 @@ class Parse:
 
                 # start with latest available version of ecoinvent
                 self.ei311_iw = ei_iw_db.copy('deep')
-                only_in_311 = list(mapping[mapping.loc[:, 'introduced in ei v.'] == '3.11'].dropna(
+                # add ecoinvent elem flow uuids
+                self.ei311_iw = self.ei311_iw.merge(
+                    elem_flow_uuid.loc[:, ['Name', 'Compartment', 'Subcompartment', 'ID']],
+                    right_on=['Name', 'Compartment', 'Subcompartment'],
+                    left_on=['Elem flow name', 'Compartment', 'Sub-compartment'],
+                    how='left')
+
+                only_in_311 = list(mapping[mapping.loc[:, 'introduced in ei v.'] == 3.11].dropna(
                     subset=['iw name']).loc[:, 'ecoinvent name'])
 
                 self.ei310_iw = self.ei311_iw.drop([i for i in self.ei311_iw.index if self.ei311_iw.loc[i, 'Elem flow name'] in
                                                   only_in_311]).copy('deep')
 
-                only_in_310 = list(mapping[mapping.loc[:, 'introduced in ei v.'] == '3.10'].dropna(
-                    subset=['iw name']).loc[:, 'ecoinvent name'])
-
-                self.ei39_iw = self.ei310_iw.drop([i for i in self.ei310_iw.index if self.ei310_iw.loc[i, 'Elem flow name'] in
-                                                  only_in_310]).copy('deep')
-
-                only_in_39 = list(mapping[mapping.loc[:, 'introduced in ei v.'] == 3.9].dropna(
-                    subset=['iw name']).loc[:, 'ecoinvent name'])
-
-                self.ei38_iw = self.ei39_iw.drop([i for i in self.ei39_iw.index if self.ei39_iw.loc[i, 'Elem flow name'] in
-                                                  only_in_39]).copy('deep')
-
-                metals_in_ei38 = {'Aluminium': 'Aluminium III',
-                                  'Antimony': 'Antimony ion',
-                                  'Arsenic': 'Arsenic ion',
-                                  'Barium': 'Barium II',
-                                  'Beryllium': 'Beryllium II',
-                                  'Cadmium': 'Cadmium II',
-                                  'Chromium': 'Chromium III',
-                                  'Cobalt': 'Cobalt II',
-                                  'Copper': 'Copper ion',
-                                  'Iron': 'Iron ion',
-                                  'Lead': 'Lead II',
-                                  'Manganese': 'Manganese II',
-                                  'Mercury': 'Mercury II',
-                                  'Molybdenum': 'Molybdenum VI',
-                                  'Nickel': 'Nickel II',
-                                  'Selenium': 'Selenium IV',
-                                  'Silver': 'Silver I',
-                                  'Strontium': 'Strontium I',
-                                  'Thallium': 'Thallium I',
-                                  'Tin': 'Tin ion',
-                                  'Vanadium': 'Vanadium V',
-                                  'Zinc': 'Zinc II'}
-
-                # special case for ei3.8, since metal names in ei38 are shared between ions and their metallic form
-                for metal in metals_in_ei38:
-                    df = self.ei311_iw.loc[self.ei311_iw.loc[:, 'Elem flow name'] == metals_in_ei38[metal]].copy()
-                    df.loc[:, 'Elem flow name'] = metal
-                    self.ei38_iw = clean_up_dataframe(pd.concat([self.ei38_iw, df]))
+                self.ei311_iw = self.ei311_iw.dropna(subset=['ID'])
+                self.ei310_iw = self.ei310_iw.dropna(subset=['ID'])
 
             elif db_format == 'carbon neutrality':
 
                 self.ei311_iw_carbon_neutrality = ei_iw_db.copy('deep')
+                # add ecoinvent elem flow uuids
+                self.ei311_iw_carbon_neutrality = self.ei311_iw_carbon_neutrality.merge(
+                    elem_flow_uuid.loc[:, ['Name', 'Compartment', 'Subcompartment', 'ID']],
+                    right_on=['Name', 'Compartment', 'Subcompartment'],
+                    left_on=['Elem flow name', 'Compartment', 'Sub-compartment'],
+                    how='left')
 
                 only_in_311 = list(mapping[mapping.loc[:, 'introduced in ei v.'] == 3.11].dropna(
                     subset=['iw name']).loc[:, 'ecoinvent name'])
@@ -5296,48 +5313,8 @@ class Parse:
                     [i for i in self.ei311_iw_carbon_neutrality.index if self.ei311_iw_carbon_neutrality.loc[i, 'Elem flow name'] in
                      only_in_311]).copy('deep')
 
-                only_in_310 = list(mapping[mapping.loc[:, 'introduced in ei v.'] == '3.10'].dropna(
-                    subset=['iw name']).loc[:, 'ecoinvent name'])
-
-                self.ei39_iw_carbon_neutrality = self.ei310_iw_carbon_neutrality.drop(
-                    [i for i in self.ei310_iw_carbon_neutrality.index if self.ei310_iw_carbon_neutrality.loc[i, 'Elem flow name'] in
-                     only_in_310]).copy('deep')
-
-                only_in_39 = list(mapping[mapping.loc[:, 'introduced in ei v.'] == 3.9].dropna(
-                    subset=['iw name']).loc[:, 'ecoinvent name'])
-
-                self.ei38_iw_carbon_neutrality = self.ei39_iw_carbon_neutrality.drop(
-                    [i for i in self.ei39_iw_carbon_neutrality.index if self.ei39_iw_carbon_neutrality.loc[i, 'Elem flow name'] in
-                     only_in_39]).copy('deep')
-
-                metals_in_ei38 = {'Aluminium': 'Aluminium III',
-                                  'Antimony': 'Antimony ion',
-                                  'Arsenic': 'Arsenic ion',
-                                  'Barium': 'Barium II',
-                                  'Beryllium': 'Beryllium II',
-                                  'Cadmium': 'Cadmium II',
-                                  'Chromium': 'Chromium III',
-                                  'Cobalt': 'Cobalt II',
-                                  'Copper': 'Copper ion',
-                                  'Iron': 'Iron ion',
-                                  'Lead': 'Lead II',
-                                  'Manganese': 'Manganese II',
-                                  'Mercury': 'Mercury II',
-                                  'Molybdenum': 'Molybdenum VI',
-                                  'Nickel': 'Nickel II',
-                                  'Selenium': 'Selenium IV',
-                                  'Silver': 'Silver I',
-                                  'Strontium': 'Strontium I',
-                                  'Thallium': 'Thallium I',
-                                  'Tin': 'Tin ion',
-                                  'Vanadium': 'Vanadium V',
-                                  'Zinc': 'Zinc II'}
-
-                # special case for ei3.8, since metal names in ei38 are shared between ions and their metallic form
-                for metal in metals_in_ei38:
-                    df = self.ei311_iw_carbon_neutrality.loc[self.ei311_iw_carbon_neutrality.loc[:, 'Elem flow name'] == metals_in_ei38[metal]].copy()
-                    df.loc[:, 'Elem flow name'] = metal
-                    self.ei38_iw_carbon_neutrality = clean_up_dataframe(pd.concat([self.ei38_iw_carbon_neutrality, df]))
+                self.ei311_iw_carbon_neutrality = self.ei311_iw_carbon_neutrality.dropna(subset=['ID'])
+                self.ei310_iw_carbon_neutrality = self.ei310_iw_carbon_neutrality.dropna(subset=['ID'])
 
     def link_to_sp(self):
         """
@@ -5833,7 +5810,7 @@ class Parse:
             # EXIOBASE energy flows in TJ while IW in MJ, so we convert
             C.loc[:, 'Fossil and nuclear energy use'] = C.loc[:, 'Fossil and nuclear energy use'].values * 1000000
             # EXIOBASE mineral flows in kt while IW in kg, so we convert
-            C.loc[:, 'Mineral resources use'] = Cloc[:, 'Mineral resources use'].values * 1000000
+            C.loc[:, 'Mineral resource use'] = C.loc[:, 'Mineral resource use'].values * 1000000
             # EXIOBASE water flows in Mm3 while IW in m3, so we convert
             C.loc[:, [i for i in C.columns if 'Water' in i[0]]] *= 1000000
             # more common to have impact categories as index
@@ -5860,11 +5837,6 @@ class Parse:
         #     self.olca_iw_carbon_neutrality.columns, axis=1))
 
         # ecoinvent
-        self.simplified_version_ei38 = clean_up_dataframe(produce_simplified_version(self.ei38_iw_carbon_neutrality).reindex(
-            self.ei38_iw_carbon_neutrality.columns, axis=1))
-
-        self.simplified_version_ei39 = clean_up_dataframe(produce_simplified_version(self.ei39_iw_carbon_neutrality).reindex(
-            self.ei39_iw_carbon_neutrality.columns, axis=1))
 
         self.simplified_version_ei310 = clean_up_dataframe(produce_simplified_version(self.ei310_iw_carbon_neutrality).reindex(
             self.ei310_iw_carbon_neutrality.columns, axis=1))
@@ -6302,7 +6274,7 @@ def produce_simplified_version(complete_dataframe):
                      'Ionizing radiations', 'Land occupation, biodiversity', 'Land transformation, biodiversity',
                      'Marine eutrophication', 'Mineral resources use', 'Ozone layer depletion',
                      'Particulate matter formation', 'Photochemical ozone formation',
-                     'Plastics physical effects on biota', 'Terrestrial acidification']
+                     'Physical effects on biota', 'Terrestrial acidification']
     # endpoint categories excluded from simplified version
     endpoint_drop = ['Climate change, ecosystem quality, long term',
                      'Climate change, ecosystem quality, short term',
