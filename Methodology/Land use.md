@@ -54,7 +54,7 @@ and 6 land use types:
 - Forest, used, intensive
 - Urban areas
 
-For each of the biome/land use type/taxa combinations, the mean value is calculated.
+For each of the biome/land use type/taxa combinations, the median value is calculated.
 
 Then, we combine the ecoregions of Olson 2001 [https://doi.org/10.1641/0006-3568(2001)051[0933:TEOTWA]2.0.CO;2] with
 regions of ecoinvent (GIS shapefile available on their website) and land use type maps obtained from ESA World Cover 2021,
@@ -79,7 +79,11 @@ permanent crops was derived and applied.
 2. An unspecified land use type is derived by averaging all land use types together, using their respective land cover areas
 as weighting. The unspecified land use type is thus composed of around ~55% pasture/meadows - ~29% forests - 16% crops
 (annual and permanent) - <0.01% urban.
-3. Whenever no data in Chaudhary et al. (2015) was available for a given land use type in a given biome (e.g.,urban 
+3. A land use type "Sealed area" was created to represent urban area where all biodiversity is displaced. This is
+different from the "Artificial areas" where some biodiversity persists. For instance, on a mineral extraction site,
+some biodiversity persists while in an industrial zone or on the road itself, there is no biodiversity at all. Sealed 
+area was thus attributed a CF of 1 PDF.
+4. Whenever no data in Chaudhary et al. (2015) was available for a given land use type in a given biome (e.g.,urban 
 areas in the desert), the global average value was attributed. While this might be less scientific than keeping the 
 absence of value, the latter yields null CFs for certain land use types in certain countries (e.g., urban areas in 
 the United Arab Emirates), which is too extreme to keep.

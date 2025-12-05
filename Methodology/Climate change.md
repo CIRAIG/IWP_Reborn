@@ -108,10 +108,36 @@ a total of 3.69e7 DALY/(K.yr). The weight of each risk and the exact total value
 "SI - Climate change - effect factors" table from the source database.
 
 ##### 3.2.2.2 Ecosystem quality
-The effect factor for Ecosystem quality comes from Thomas et al., 2004 [http://dx.doi.org/10.1038/nature02121] which provided 
-an average 0.119 PDF/K effect factor. We then multiplied this value by the total surface of natural terrestrial areas 
-of the world. Using the ESA GlobCover Version 2.3 Land Cover Map we obtained a surface of 2.29e13m2 which results in an 
-effect factor of 2.74e12 PDF.m2.yr/K.
+The effect factor for Ecosystem quality is based on Potentially Affected Fraction of species (PAF). A species is 
+considered affected whenever their niche habitat temperature is exceeded for 5 consecutive years. This definition is
+based on the article of Trisos et al. 2020 (https://doi.org/10.1038/s41586-020-2189-9) which is also used by 
+Iordan-Vasquez et al. 2023 (https://doi.org/10.1016/j.resconrec.2023.107159). The latter is the basis of the equivalent
+indicator in the GLAM methodology.
+
+##### 3.2.2.2.1 Data sources
+The niche temperature of each species is defined "using the	maximum	mean annual	temperature experienced	across the 
+entire geographic range of a species, between 1850 and 2005" (Trisos et al. 2020). In other words, the authors had 155 mean annual 
+temperatures (at grid level across the globe) and derived a maximum out of these 155 values. Crossing these local
+temperatures with the locations where each species resides, the niche temperature of each species was defined. Same 
+species living in different places thus share the same niche temperature. 
+Trisos 2020 provides these temperatures for 30,652 species across 9 taxa. 4 taxa living on land: amphibians, birds, 
+mammals, reptiles and 5 taxa living in the ocean: benthic marine invertebrates, corals & seagrasses, marine fishes, 
+marine mammals and marine reptiles.
+
+The distribution of species (where each species resides) is taken from the data of Iordan-Vasquez et al. (2023). The
+data is curated as 100km x 100km grid cells. This covers 26,648 species: birds (n = 7177), terrestrial mammals (n = 5160), 
+terrestrial reptiles (n = 4599), amphibians (n = 5998), marine mammals (n = 117), marine reptiles (n = 61), 
+marine fish (n = 1822), benthic marine invertebrates (n = 916), and corals and seagrasses (n = 798). The data originally
+comes from the International Union for Conservation of Nature (IUCN) and BirdLife International.
+
+Since PAFs are defined as the exceedance of the niche temperature limit of each species over 5 consecutive years, we
+need climate models to determine what the temperature will be over the next years. To do so, we re-use the data from
+Iordan-Vasquez et al. (2023). They averaged 5 climate models (CESM1(CAM5), HadGEM2-ES, IPSL-CM5A-MR, MIROC5, MPI-ESM-MR)
+to obtain temperatures from 2010 to 2100, at a 1.875° resolution, for three climate scenarios RCP2.6, 4.5 and 8.5. This
+provides temperatures for air temperature and surface ocean temperature.
+
+Finally, the maps to determine the distribution of land vs ocean surface come from using MODIS MCD12Q1 land water mask
+through the Google Earth Engine.
 
 ### 3.3 The case of biogenic carbon
 With the v2.1 update, users have the possibility to choose between two versions of IMPACT World+ corresponding to two 

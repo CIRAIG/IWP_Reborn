@@ -30,17 +30,16 @@ import country_converter as coco
 import scipy.sparse
 import bw2data as bd
 import bw2io as bi
-import datetime
 from datetime import datetime
 import csv
 import warnings
 import uuid
-import shutil
-import zipfile
 import logging
 import sqlite3
 import math
 import molmass
+import olca_ipc as ipc
+import olca_schema as schema
 from scipy.stats import gmean
 from tqdm import tqdm
 
@@ -96,7 +95,7 @@ class Parse:
             - load_freshwater_acidification_cfs()
             - load_terrestrial_acidification_cfs()
             - load_marine_eutrophication_cfs()
-            - load_mineral_resource_use_cfs()
+            - load_resources_services_loss_cfs()
             - load_freshwater_eutrophication_cfs()
             - load_land_use_cfs()
             - load_particulates_cfs ()
@@ -157,15 +156,15 @@ class Parse:
         self.master_db_carbon_neutrality = pd.DataFrame()
         self.master_db_not_regio = pd.DataFrame()
         self.master_db_not_regio_carbon_neutrality = pd.DataFrame()
-        self.ei38_iw = pd.DataFrame()
-        self.ei38_iw_carbon_neutrality = pd.DataFrame()
-        self.ei39_iw = pd.DataFrame()
-        self.ei39_iw_carbon_neutrality = pd.DataFrame()
         self.ei310_iw = pd.DataFrame()
         self.ei310_iw_carbon_neutrality = pd.DataFrame()
-        self.simplified_version_ei38 = pd.DataFrame()
-        self.simplified_version_ei39 = pd.DataFrame()
+        self.ei311_iw = pd.DataFrame()
+        self.ei311_iw_carbon_neutrality = pd.DataFrame()
+        self.ei312_iw = pd.DataFrame()
+        self.ei312_iw_carbon_neutrality = pd.DataFrame()
         self.simplified_version_ei310 = pd.DataFrame()
+        self.simplified_version_ei311 = pd.DataFrame()
+        self.simplified_version_ei312 = pd.DataFrame()
         self.iw_sp = pd.DataFrame()
         self.iw_sp_carbon_neutrality = pd.DataFrame()
         self.simplified_version_sp = pd.DataFrame()
@@ -174,14 +173,22 @@ class Parse:
         self.sp_data = {}
         self.olca_iw = pd.DataFrame()
         self.olca_iw_carbon_neutrality = pd.DataFrame()
-        self.olca_data = {}
-        self.olca_data_custom = {}
         self.exio_iw_38 = pd.DataFrame()
         self.exio_iw_39 = pd.DataFrame()
 
         self.conn = sqlite3.connect(self.path_access_db)
 
-# -------------------------------------------- Main methods ------------------------------------------------------------
+        # Open openLCA. Open a database. Go to Tools/Dev tools/IPC server. Create a server with the local port 8080
+        # (comes by default). Activate the port (the green olay arrow)
+        # then we simply connect to that port. Now Python and openLCA can communicate via the "client" we created
+        self.olca_client = ipc.Client(8080)
+        # check if the opening of the openLCA client is activated or not
+        try:
+            self.olca_client.get_descriptor(schema.Unit, name='kg')
+        except:
+            print("The openLCA client. If you need it, don't forget to activate it in openLCA!")
+
+    # -------------------------------------------- Main methods -------------------------------------------------------
 
     def load_cfs(self):
         """
@@ -204,8 +211,8 @@ class Parse:
         self.load_freshwater_eutrophication_cfs()
         self.logger.info("Loading land use characterization factors...")
         self.load_land_use_cfs()
-        self.logger.info("Loading mineral resource use characterization factors...")
-        self.load_mineral_resource_use_cfs()
+        self.logger.info("Loading resources services loss characterization factors...")
+        self.load_resources_services_loss_cfs()
         self.logger.info("Loading particulate matter characterization factors...")
         self.load_particulates_cfs()
         self.logger.info("Loading water scarcity characterization factors...")
@@ -246,17 +253,15 @@ class Parse:
         self.logger.info("Linking to SimaPro elementary flows...")
         self.link_to_sp()
 
-        # self.logger.info("Linking to openLCA elementary flows...")
-        # self.link_to_olca()
+        self.logger.info("Linking to openLCA elementary flows...")
+        self.link_to_olca()
 
         self.logger.info("Linking to exiobase environmental extensions...")
         self.link_to_exiobase()
 
         self.logger.info("Prepare the footprint version...")
         self.get_simplified_versions()
-
-        # only relevant for openLCA
-        # self.get_total_hh_and_eq()
+        self.get_total_hh_and_eq_for_olca()
 
     def export_to_bw(self):
         """
@@ -296,7 +301,10 @@ class Parse:
                 ei_in_bw_normal = self.ei311_iw.merge(bw_flows_with_codes)
                 ei_in_bw_carbon_neutrality = self.ei311_iw_carbon_neutrality.merge(bw_flows_with_codes)
                 ei_in_bw_simple = self.simplified_version_ei311.merge(bw_flows_with_codes)
-
+            elif '3.12' in project:
+                ei_in_bw_normal = self.ei312_iw.merge(bw_flows_with_codes)
+                ei_in_bw_carbon_neutrality = self.ei312_iw_carbon_neutrality.merge(bw_flows_with_codes)
+                ei_in_bw_simple = self.simplified_version_ei312.merge(bw_flows_with_codes)
             for ei_in_bw_format in ['normal', 'carbon neutrality']:
                 if ei_in_bw_format == 'normal':
                     ei_in_bw = ei_in_bw_normal
@@ -324,7 +332,8 @@ class Parse:
                                                          'Elem flow unit': 'first',
                                                          'MP or Damage': 'first',
                                                          'Native geographical resolution scale': 'first'})
-                total_eq.index = pd.MultiIndex.from_product([['Total ecosystem quality'], ['PDF.m2.yr'], total_eq.index])
+                total_eq.index = pd.MultiIndex.from_product(
+                    [['Total ecosystem quality'], ['PDF.m2.yr'], total_eq.index])
                 ei_in_bw = pd.concat([ei_in_bw, total_hh, total_eq])
                 ei_in_bw.index.names = ['Impact category', 'CF unit', 'code']
                 ei_in_bw = ei_in_bw.reset_index()
@@ -399,7 +408,7 @@ class Parse:
 
     def export_to_sp(self):
         """
-        This method creates the necessary information for the csv creation in SimaPro.
+        This method careates the necessary information for the csv creation in SimaPro.
         :return:
         """
 
@@ -432,23 +441,31 @@ class Parse:
         # metadata on the midpoint method
         midpoint_method_metadata = [['Method', '', '', '', '', ''], ['', '', '', '', '', ''],
                                     ['Name', '', '', '', '', ''],
-                                    ['IMPACT World+ Midpoint ' + self.version + ' (incl. CO2 uptake)', '', '', '', '', ''],
+                                    ['IMPACT World+ Midpoint ' + self.version + ' (incl. CO2 uptake)', '', '', '', '',
+                                     ''],
                                     ['', '', '', '', '', ''], ['Version', '', '', '', '', ''],
-                                    ['2','2', '', '', '', ''],
+                                    ['2', '2', '', '', '', ''],
                                     ['', '', '', '', '', ''], ['Comment', '', '', '', '', ''],
-                                    ['IMPACT World+ Midpoint ' + self.version + ' (incl. CO2 uptake)' + chr(int("007F", 16)) + chr(int("007F", 16)) +
-                                     'New category:' + chr(int("007F", 16)) +
-                                     '- Plastics physical effect on biota' + chr(int("007F", 16)) +
+                                    ['IMPACT World+ ' + self.version + chr(int("007F", 16)) +
+                                     'New categories:' + chr(int("007F", 16)) +
+                                     '- Resources services loss' + chr(int("007F", 16)) +
+                                     '- Resources services loss (adaptation)' + chr(int("007F", 16)) +
                                      chr(int("007F", 16)) +
+                                     'Deleted categories:' + chr(int("007F", 16)) +
+                                     '- Mineral resource use' + chr(int("007F", 16)) +
+                                     '- Fossil and nuclear energy use' + chr(int("007F", 16)) +
+                                     chr(int("007F", 16)) +
+                                     'Renamed categories' + chr(int("007F", 16)) +
+                                     '- Physical effect on biota (formerly Plastic physical effect on biota)' + chr(
+                                        int("007F", 16)) +
                                      'Updated categories:' + chr(int("007F", 16)) +
-                                     '- Climate change indicators with -1/+1 approach biogenic carbon' + chr(int("007F", 16)) +
-                                     '- Fossil and nuclear energy use'+chr(int("007F", 16)) +
-                                     '- Ozone layer depletion' + chr(int("007F", 16)) +
-                                     '- Particulate matter formation' + chr(int("007F", 16)) +
-                                     '- Photochemical ozone formation' + chr(int("007F", 16)) +
-                                     '- Water scarcity' + chr(int("007F", 16)) +
+                                     '- Acidification and eutrophication indicators' + chr(int("007F", 16)) +
+                                     '- Physical effect on biota' + chr(int("007F", 16)) +
+                                     '- Land occupation (biodiversity)' + chr(int("007F", 16)) +
+                                     '- Land transformation (biodiversity)' + chr(int("007F", 16)) +
                                      chr(int("007F", 16)) +
-                                     'For more information on IMPACT World+ and its methodology: https://www.impactworldplus.org.' + chr(int("007F", 16)) +
+                                     'For more information on IMPACT World+ and its methodology: https://www.impactworldplus.org.' + chr(
+                                        int("007F", 16)) +
                                      'Full list of changes available here: https://github.com/CIRAIG/IWP_Reborn/tree/master/Report_changes',
                                      '', '', '', '', ''], ['', '', '', '', '', ''],
                                     ['Category', '', '', '', '', ''], ['Others', '', '', '', '', ''],
@@ -465,23 +482,28 @@ class Parse:
                                   ['Name', '', '', '', '', ''],
                                   ['IMPACT World+ Expert ' + self.version + ' (incl. CO2 uptake)', '', '', '', '', ''],
                                   ['', '', '', '', '', ''], ['Version', '', '', '', '', ''],
-                                  ['2','2', '', '', '', ''],
+                                  ['2', '2', '', '', '', ''],
                                   ['', '', '', '', '', ''], ['Comment', '', '', '', '', ''],
-                                  ['IMPACT World+ Expert ' + self.version + ' (incl. CO2 uptake)' + chr(int("007F", 16)) + chr(int("007F", 16)) +
-                                   'New categories:' + chr(int("007F", 16)) + '- Marine ecotoxicity' + chr(int("007F", 16)) +
-                                   '- Terrestrial ecotoxicity' + chr(int("007F", 16)) + '- Fisheries' + chr(int("007F", 16)) +
-                                   '- Plastics physical effect on biota' + chr(int("007F", 16)) +
-                                   '- Phochemical ozone formation, ecosystem quality' + chr(int("007F", 16)) + chr(int("007F", 16)) +
-                                   'Updated categories:' + chr(int("007F", 16)) +
-                                   '- Climate change indicators with -1/+1 approach biogenic carbon' + chr(int("007F", 16)) +
-                                   '- Climate change damage indicators' + chr(int("007F", 16)) +
-                                   '- Ozone layer depletion' + chr(int("007F", 16)) +
-                                   '- Particulate matter formation' + chr(int("007F", 16)) +
-                                   '- Photochemical ozone formation' + chr(int("007F", 16)) +
-                                   '- Water availability, human health' + chr(int("007F", 16)) +
-                                   '- Water availability, terrestrial ecosystems' + chr(int("007F", 16))
+                                  ['IMPACT World+ ' + self.version + chr(int("007F", 16)) +
+                                   'New categories:' + chr(int("007F", 16)) +
+                                   '- Climate change, ecosystem quality, marine ecosystems (abbreviated as Climate change, EQ, mar)' + chr(
+                                      int("007F", 16)) +
+                                   '- Climate change, ecosystem quality, terrestrial ecosystems (abbreviated as Climate change, EQ, terr)' + chr(
+                                      int("007F", 16))
                                    + chr(int("007F", 16)) +
-                                   'For more information on IMPACT World+ and its methodology: https://www.impactworldplus.org.' + chr(int("007F", 16)) +
+                                   'Renamed categories' + chr(int("007F", 16)) +
+                                   '- Physical effect on biota (formerly Plastic physical effect on biota)' + chr(
+                                      int("007F", 16)) +
+                                   'Updated categories:' + chr(int("007F", 16)) +
+                                   '- Climate change damage indicators' + chr(int("007F", 16)) +
+                                   '- Acidification and eutrophication indicators' + chr(
+                                      int("007F", 16)) +
+                                   '- Physical effect on biota' + chr(int("007F", 16)) +
+                                   '- Land occupation (biodiversity)' + chr(int("007F", 16)) +
+                                   '- Land transformation (biodiversity)' + chr(int("007F", 16)) +
+                                   chr(int("007F", 16)) +
+                                   'For more information on IMPACT World+ and its methodology: https://www.impactworldplus.org.' + chr(
+                                      int("007F", 16)) +
                                    'Full list of changes available here: https://github.com/CIRAIG/IWP_Reborn/tree/master/Report_changes',
                                    '', '', '', '', ''], ['', '', '', '', '', ''],
                                   ['Category', '', '', '', '', ''], ['Others', '', '', '', '', ''],
@@ -498,28 +520,33 @@ class Parse:
                                     ['Name', '', '', '', '', ''],
                                     ['IMPACT World+ ' + self.version + ' (incl. CO2 uptake)', '', '', '', '', ''],
                                     ['', '', '', '', '', ''], ['Version', '', '', '', '', ''],
-                                    ['2','2', '', '', '', ''],
+                                    ['2', '2', '', '', '', ''],
                                     ['', '', '', '', '', ''], ['Comment', '', '', '', '', ''],
-                                    ['IMPACT World+ ' + self.version  + ' (incl. CO2 uptake)' + chr(int("007F", 16)) +
+                                    ['IMPACT World+ ' + self.version + chr(int("007F", 16)) +
                                      'New categories:' + chr(int("007F", 16)) +
-                                     '- Marine ecotoxicity' + chr(int("007F", 16)) +
-                                     '- Terrestrial ecotoxicity' + chr(int("007F", 16)) +
-                                     '- Fisheries' + chr(int("007F", 16)) +
-                                     '- Plastics physical effect on biota' + chr(int("007F", 16)) +
-                                     '- Phochemical ozone formation, ecosystem quality' + chr(int("007F", 16)) +
+                                     '- Climate change, ecosystem quality, marine ecosystems (abbreviated as Climate change, EQ, mar)' + chr(
+                                        int("007F", 16)) +
+                                     '- Climate change, ecosystem quality, terrestrial ecosystems (abbreviated as Climate change, EQ, terr)' + chr(
+                                        int("007F", 16)) +
+                                     '- Resources services loss' + chr(int("007F", 16)) +
+                                     '- Resources services loss (adaptation)' + chr(int("007F", 16)) +
                                      chr(int("007F", 16)) +
-                                     'Updated categories:' + chr(int("007F", 16)) +
-                                     '- Climate change indicators with -1/+1 approach biogenic carbon' + chr(int("007F", 16)) +
-                                     '- Climate change damage indicators' + chr(int("007F", 16)) +
+                                     'Deleted categories:' + chr(int("007F", 16)) +
+                                     '- Mineral resource use' + chr(int("007F", 16)) +
                                      '- Fossil and nuclear energy use' + chr(int("007F", 16)) +
-                                     '- Ozone layer depletion' + chr(int("007F", 16)) +
-                                     '- Particulate matter formation' + chr(int("007F", 16)) +
-                                     '- Photochemical ozone formation' + chr(int("007F", 16)) +
-                                     '- Water availability, human health' + chr(int("007F", 16)) +
-                                     '- Water availability, terrestrial ecosystems' + chr(int("007F", 16)) +
-                                     '- Water scarcity' + chr(int("007F", 16)) +
                                      chr(int("007F", 16)) +
-                                     'For more information on IMPACT World+ and its methodology: https://www.impactworldplus.org.' + chr(int("007F", 16)) +
+                                     'Renamed categories' + chr(int("007F", 16)) +
+                                     '- Physical effect on biota (formerly Plastic physical effect on biota)' + chr(
+                                        int("007F", 16)) +
+                                     'Updated categories:' + chr(int("007F", 16)) +
+                                     '- Climate change damage indicators' + chr(int("007F", 16)) +
+                                     '- Acidification and eutrophication indicators' + chr(int("007F", 16)) +
+                                     '- Physical effect on biota' + chr(int("007F", 16)) +
+                                     '- Land occupation (biodiversity)' + chr(int("007F", 16)) +
+                                     '- Land transformation (biodiversity)' + chr(int("007F", 16)) +
+                                     chr(int("007F", 16)) +
+                                     'For more information on IMPACT World+ and its methodology: https://www.impactworldplus.org.' + chr(
+                                        int("007F", 16)) +
                                      'Full list of changes available here: https://github.com/CIRAIG/IWP_Reborn/tree/master/Report_changes',
                                      '', '', '', '', ''], ['', '', '', '', '', ''],
                                     ['Category', '', '', '', '', ''], ['Others', '', '', '', '', ''],
@@ -533,199 +560,258 @@ class Parse:
                                     ['Use Addition', '', '', '', '', ''], ['Yes', '', '', '', '', '']]
         # metadata on the midpoint method
         midpoint_method_metadata_carboneutrality = [['Method', '', '', '', '', ''], ['', '', '', '', '', ''],
-                                    ['Name', '', '', '', '', ''],
-                                    ['IMPACT World+ Midpoint ' + self.version, '', '', '', '', ''],
-                                    ['', '', '', '', '', ''], ['Version', '', '', '', '', ''],
-                                    ['2','2', '', '', '', ''],
-                                    ['IMPACT World+ Midpoint ' + self.version + chr(int("007F", 16)) + chr(int("007F", 16)) +
-                                     'New category:' + chr(int("007F", 16)) +
-                                     '- Plastics physical effect on biota' + chr(int("007F", 16)) +
-                                     chr(int("007F", 16)) +
-                                     'Updated categories:' + chr(int("007F", 16)) +
-                                     '- Fossil and nuclear energy use'+chr(int("007F", 16)) +
-                                     '- Ozone layer depletion' + chr(int("007F", 16)) +
-                                     '- Particulate matter formation' + chr(int("007F", 16)) +
-                                     '- Photochemical ozone formation' + chr(int("007F", 16)) +
-                                     '- Water scarcity' + chr(int("007F", 16)) +
-                                     chr(int("007F", 16)) +
-                                     'For more information on IMPACT World+ and its methodology: https://www.impactworldplus.org.' + chr(int("007F", 16)) +
-                                     'Full list of changes available here: https://github.com/CIRAIG/IWP_Reborn/tree/master/Report_changes',
-                                     '', '', '', '', ''], ['', '', '', '', '', ''],
-                                    ['Category', '', '', '', '', ''], ['Others', '', '', '', '', ''],
-                                    ['', '', '', '', '', ''],
-                                    ['Use Damage Assessment', '', '', '', '', ''], ['No', '', '', '', '', ''],
-                                    ['', '', '', '', '', ''],
-                                    ['Use Normalization', '', '', '', '', ''], ['No', '', '', '', '', ''],
-                                    ['', '', '', '', '', ''],
-                                    ['Use Weighting', '', '', '', '', ''], ['No', '', '', '', '', ''],
-                                    ['', '', '', '', '', ''],
-                                    ['Use Addition', '', '', '', '', ''], ['No', '', '', '', '', '']]
+                                                    ['Name', '', '', '', '', ''],
+                                                    ['IMPACT World+ Midpoint ' + self.version, '', '', '', '', ''],
+                                                    ['', '', '', '', '', ''], ['Version', '', '', '', '', ''],
+                                                    ['2', '2', '', '', '', ''],
+                                                    ['IMPACT World+ ' + self.version + chr(int("007F", 16)) +
+                                                     'New categories:' + chr(int("007F", 16)) +
+                                                     '- Resources services loss' + chr(int("007F", 16)) +
+                                                     '- Resources services loss (adaptation)' + chr(int("007F", 16)) +
+                                                     chr(int("007F", 16)) +
+                                                     'Deleted categories:' + chr(int("007F", 16)) +
+                                                    '- Mineral resource use' + chr(int("007F", 16)) +
+                                                    '- Fossil and nuclear energy use' + chr(int("007F", 16)) +
+                                                     chr(int("007F", 16)) +
+                                                    'Renamed categories' + chr(int("007F", 16)) +
+                                                    '- Physical effect on biota (formerly Plastic physical effect on biota)' + chr(int("007F", 16)) +
+                                                     'Updated categories:' + chr(int("007F", 16)) +
+                                                     '- Acidification and eutrophication indicators' + chr(int("007F", 16)) +
+                                                     '- Physical effect on biota' + chr(int("007F", 16)) +
+                                                     '- Land occupation (biodiversity)' + chr(int("007F", 16)) +
+                                                     '- Land transformation (biodiversity)' + chr(int("007F", 16)) +
+                                                     chr(int("007F", 16)) +
+                                                     'For more information on IMPACT World+ and its methodology: https://www.impactworldplus.org.' + chr(
+                                                        int("007F", 16)) +
+                                                     'Full list of changes available here: https://github.com/CIRAIG/IWP_Reborn/tree/master/Report_changes',
+                                                     '', '', '', '', ''], ['', '', '', '', '', ''],
+                                                    ['Category', '', '', '', '', ''], ['Others', '', '', '', '', ''],
+                                                    ['', '', '', '', '', ''],
+                                                    ['Use Damage Assessment', '', '', '', '', ''],
+                                                    ['No', '', '', '', '', ''],
+                                                    ['', '', '', '', '', ''],
+                                                    ['Use Normalization', '', '', '', '', ''],
+                                                    ['No', '', '', '', '', ''],
+                                                    ['', '', '', '', '', ''],
+                                                    ['Use Weighting', '', '', '', '', ''], ['No', '', '', '', '', ''],
+                                                    ['', '', '', '', '', ''],
+                                                    ['Use Addition', '', '', '', '', ''], ['No', '', '', '', '', '']]
         # metadata on the damage method
         damage_method_metadata_carboneutrality = [['Method', '', '', '', '', ''], ['', '', '', '', '', ''],
-                                  ['Name', '', '', '', '', ''],
-                                  ['IMPACT World+ Expert ' + self.version, '', '', '', '', ''],
-                                  ['', '', '', '', '', ''], ['Version', '', '', '', '', ''],
-                                  ['2','2', '', '', '', ''],
-                                  ['', '', '', '', '', ''], ['Comment', '', '', '', '', ''],
-                                  ['IMPACT World+ Expert ' + self.version + chr(int("007F", 16)) + chr(int("007F", 16)) +
-                                   'New categories:' + chr(int("007F", 16)) + '- Marine ecotoxicity' + chr(int("007F", 16)) +
-                                   '- Terrestrial ecotoxicity' + chr(int("007F", 16)) + '- Fisheries' + chr(int("007F", 16)) +
-                                   '- Plastics physical effect on biota' + chr(int("007F", 16)) +
-                                   '- Phochemical ozone formation, ecosystem quality' + chr(int("007F", 16)) + chr(int("007F", 16)) +
-                                   'Updated categories:' + chr(int("007F", 16)) +
-                                   '- Climate change damage indicators' + chr(int("007F", 16)) +
-                                   '- Ozone layer depletion' + chr(int("007F", 16)) +
-                                   '- Particulate matter formation' + chr(int("007F", 16)) +
-                                   '- Photochemical ozone formation' + chr(int("007F", 16)) +
-                                   '- Water availability, human health' + chr(int("007F", 16)) +
-                                   '- Water availability, terrestrial ecosystems' + chr(int("007F", 16))
-                                   + chr(int("007F", 16)) +
-                                   'For more information on IMPACT World+ and its methodology: https://www.impactworldplus.org.' + chr(int("007F", 16)) +
-                                   'Full list of changes available here: https://github.com/CIRAIG/IWP_Reborn/tree/master/Report_changes',
-                                   '', '', '', '', ''], ['', '', '', '', '', ''],
-                                  ['Category', '', '', '', '', ''], ['Others', '', '', '', '', ''],
-                                  ['', '', '', '', '', ''],
-                                  ['Use Damage Assessment', '', '', '', '', ''], ['Yes', '', '', '', '', ''],
-                                  ['', '', '', '', '', ''],
-                                  ['Use Normalization', '', '', '', '', ''], ['Yes', '', '', '', '', ''],
-                                  ['', '', '', '', '', ''],
-                                  ['Use Weighting', '', '', '', '', ''], ['Yes', '', '', '', '', ''],
-                                  ['', '', '', '', '', ''],
-                                  ['Use Addition', '', '', '', '', ''], ['Yes', '', '', '', '', '']]
+                                                  ['Name', '', '', '', '', ''],
+                                                  ['IMPACT World+ Expert ' + self.version, '', '', '', '', ''],
+                                                  ['', '', '', '', '', ''], ['Version', '', '', '', '', ''],
+                                                  ['2', '2', '', '', '', ''],
+                                                  ['', '', '', '', '', ''], ['Comment', '', '', '', '', ''],
+                                                  ['IMPACT World+ ' + self.version + chr(int("007F", 16)) +
+                                                   'New categories:' + chr(int("007F", 16)) +
+                                                   '- Climate change, ecosystem quality, marine ecosystems (abbreviated as Climate change, EQ, mar)' + chr(
+                                                      int("007F", 16)) +
+                                                   '- Climate change, ecosystem quality, terrestrial ecosystems (abbreviated as Climate change, EQ, terr)' + chr(
+                                                      int("007F", 16))
+                                                   + chr(int("007F", 16)) +
+                                                   'Renamed categories' + chr(int("007F", 16)) +
+                                                   '- Physical effect on biota (formerly Plastic physical effect on biota)' + chr(
+                                                      int("007F", 16)) +
+                                                   'Updated categories:' + chr(int("007F", 16)) +
+                                                   '- Climate change damage indicators' + chr(int("007F", 16)) +
+                                                   '- Acidification and eutrophication indicators' + chr(
+                                                      int("007F", 16)) +
+                                                   '- Physical effect on biota' + chr(int("007F", 16)) +
+                                                   '- Land occupation (biodiversity)' + chr(int("007F", 16)) +
+                                                   '- Land transformation (biodiversity)' + chr(int("007F", 16)) +
+                                                   chr(int("007F", 16)) +
+                                                   'For more information on IMPACT World+ and its methodology: https://www.impactworldplus.org.' + chr(
+                                                      int("007F", 16)) +
+                                                   'Full list of changes available here: https://github.com/CIRAIG/IWP_Reborn/tree/master/Report_changes',
+                                                   '', '', '', '', ''], ['', '', '', '', '', ''],
+                                                  ['Category', '', '', '', '', ''], ['Others', '', '', '', '', ''],
+                                                  ['', '', '', '', '', ''],
+                                                  ['Use Damage Assessment', '', '', '', '', ''],
+                                                  ['Yes', '', '', '', '', ''],
+                                                  ['', '', '', '', '', ''],
+                                                  ['Use Normalization', '', '', '', '', ''],
+                                                  ['Yes', '', '', '', '', ''],
+                                                  ['', '', '', '', '', ''],
+                                                  ['Use Weighting', '', '', '', '', ''], ['Yes', '', '', '', '', ''],
+                                                  ['', '', '', '', '', ''],
+                                                  ['Use Addition', '', '', '', '', ''], ['Yes', '', '', '', '', '']]
         # metadata on the combined method
         combined_method_metadata_carboneutrality = [['Method', '', '', '', '', ''], ['', '', '', '', '', ''],
-                                    ['Name', '', '', '', '', ''],
-                                    ['IMPACT World+ ' + self.version, '', '', '', '', ''],
-                                    ['', '', '', '', '', ''], ['Version', '', '', '', '', ''],
-                                    ['2','2', '', '', '', ''],
-                                    ['', '', '', '', '', ''], ['Comment', '', '', '', '', ''],
-                                    ['IMPACT World+ ' + self.version + chr(int("007F", 16)) +
-                                     'New categories:' + chr(int("007F", 16)) +
-                                     '- Marine ecotoxicity' + chr(int("007F", 16)) +
-                                     '- Terrestrial ecotoxicity' + chr(int("007F", 16)) +
-                                     '- Fisheries' + chr(int("007F", 16)) +
-                                     '- Plastics physical effect on biota' + chr(int("007F", 16)) +
-                                     '- Phochemical ozone formation, ecosystem quality' + chr(int("007F", 16)) +
-                                     chr(int("007F", 16)) +
-                                     'Updated categories:' + chr(int("007F", 16)) +
-                                     '- Climate change damage indicators' + chr(int("007F", 16)) +
-                                     '- Fossil and nuclear energy use' + chr(int("007F", 16)) +
-                                     '- Ozone layer depletion' + chr(int("007F", 16)) +
-                                     '- Particulate matter formation' + chr(int("007F", 16)) +
-                                     '- Photochemical ozone formation' + chr(int("007F", 16)) +
-                                     '- Water availability, human health' + chr(int("007F", 16)) +
-                                     '- Water availability, terrestrial ecosystems' + chr(int("007F", 16)) +
-                                     '- Water scarcity' + chr(int("007F", 16)) +
-                                     chr(int("007F", 16)) +
-                                     'For more information on IMPACT World+ and its methodology: https://www.impactworldplus.org.' + chr(int("007F", 16)) +
-                                     'Full list of changes available here: https://github.com/CIRAIG/IWP_Reborn/tree/master/Report_changes',
-                                     '', '', '', '', ''], ['', '', '', '', '', ''],
-                                    ['Category', '', '', '', '', ''], ['Others', '', '', '', '', ''],
-                                    ['', '', '', '', '', ''],
-                                    ['Use Damage Assessment', '', '', '', '', ''], ['Yes', '', '', '', '', ''],
-                                    ['', '', '', '', '', ''],
-                                    ['Use Normalization', '', '', '', '', ''], ['Yes', '', '', '', '', ''],
-                                    ['', '', '', '', '', ''],
-                                    ['Use Weighting', '', '', '', '', ''], ['Yes', '', '', '', '', ''],
-                                    ['', '', '', '', '', ''],
-                                    ['Use Addition', '', '', '', '', ''], ['Yes', '', '', '', '', '']]
+                                                    ['Name', '', '', '', '', ''],
+                                                    ['IMPACT World+ ' + self.version, '', '', '', '', ''],
+                                                    ['', '', '', '', '', ''], ['Version', '', '', '', '', ''],
+                                                    ['2', '2', '', '', '', ''],
+                                                    ['', '', '', '', '', ''], ['Comment', '', '', '', '', ''],
+                                                    ['IMPACT World+ ' + self.version + chr(int("007F", 16)) +
+                                                     'New categories:' + chr(int("007F", 16)) +
+                                                     '- Climate change, ecosystem quality, marine ecosystems (abbreviated as Climate change, EQ, mar)' + chr(int("007F", 16)) +
+                                                     '- Climate change, ecosystem quality, terrestrial ecosystems (abbreviated as Climate change, EQ, terr)' + chr(int("007F", 16)) +
+                                                     '- Resources services loss' + chr(int("007F", 16)) +
+                                                     '- Resources services loss (adaptation)' + chr(int("007F", 16)) +
+                                                     chr(int("007F", 16)) +
+                                                     'Deleted categories:' + chr(int("007F", 16)) +
+                                                    '- Mineral resource use' + chr(int("007F", 16)) +
+                                                    '- Fossil and nuclear energy use' + chr(int("007F", 16)) +
+                                                     chr(int("007F", 16)) +
+                                                    'Renamed categories' + chr(int("007F", 16)) +
+                                                    '- Physical effect on biota (formerly Plastic physical effect on biota)' + chr(int("007F", 16)) +
+                                                     'Updated categories:' + chr(int("007F", 16)) +
+                                                     '- Climate change damage indicators' + chr(int("007F", 16)) +
+                                                     '- Acidification and eutrophication indicators' + chr(int("007F", 16)) +
+                                                     '- Physical effect on biota' + chr(int("007F", 16)) +
+                                                     '- Land occupation (biodiversity)' + chr(int("007F", 16)) +
+                                                     '- Land transformation (biodiversity)' + chr(int("007F", 16)) +
+                                                     chr(int("007F", 16)) +
+                                                     'For more information on IMPACT World+ and its methodology: https://www.impactworldplus.org.' + chr(
+                                                        int("007F", 16)) +
+                                                     'Full list of changes available here: https://github.com/CIRAIG/IWP_Reborn/tree/master/Report_changes',
+                                                     '', '', '', '', ''], ['', '', '', '', '', ''],
+                                                    ['Category', '', '', '', '', ''], ['Others', '', '', '', '', ''],
+                                                    ['', '', '', '', '', ''],
+                                                    ['Use Damage Assessment', '', '', '', '', ''],
+                                                    ['Yes', '', '', '', '', ''],
+                                                    ['', '', '', '', '', ''],
+                                                    ['Use Normalization', '', '', '', '', ''],
+                                                    ['Yes', '', '', '', '', ''],
+                                                    ['', '', '', '', '', ''],
+                                                    ['Use Weighting', '', '', '', '', ''], ['Yes', '', '', '', '', ''],
+                                                    ['', '', '', '', '', ''],
+                                                    ['Use Addition', '', '', '', '', ''], ['Yes', '', '', '', '', '']]
         # metadata on the simplified method
         simplified_method_metadata = [['Method', '', '', '', '', ''], ['', '', '', '', '', ''],
-                                    ['Name', '', '', '', '', ''],
-                                    ['IMPACT World+ Footprint ' + self.version, '', '', '', '', ''],
-                                    ['', '', '', '', '', ''], ['Version', '', '', '', '', ''],
-                                    ['2','2', '', '', '', ''],
-                                    ['', '', '', '', '', ''], ['Comment', '', '', '', '', ''],
-                                    ['IMPACT World+ Footprint ' + self.version + chr(int("007F", 16)) +
-                                     'Updated categories:' + chr(int("007F", 16)) +
-                                     '- Fossil and nuclear energy use' + chr(int("007F", 16)) +
-                                     '- Water footprint - Scarcity' + chr(int("007F", 16)) +
-                                     '- Human health (residual)' + chr(int("007F", 16)) +
-                                     '- Ecosystem quality (residual)' + chr(int("007F", 16)) +
-                                     'For details on what the footprint version of IW+ entails, please consult this page: '
-                                     'https://www.impactworldplus.org/version-2-0-1/' + chr(int("007F", 16)) +
-                                     'For more information on IMPACT World+ and its methodology: https://www.impactworldplus.org.'  + chr(int("007F", 16)) +
-                                     'Full list of changes available here: https://github.com/CIRAIG/IWP_Reborn/tree/master/Report_changes',
-                                     '', '', '', '', ''], ['', '', '', '', '', ''],
-                                    ['Category', '', '', '', '', ''], ['Others', '', '', '', '', ''],
-                                    ['', '', '', '', '', ''],
-                                    ['Use Damage Assessment', '', '', '', '', ''], ['No', '', '', '', '', ''],
-                                    ['', '', '', '', '', ''],
-                                    ['Use Normalization', '', '', '', '', ''], ['No', '', '', '', '', ''],
-                                    ['', '', '', '', '', ''],
-                                    ['Use Weighting', '', '', '', '', ''], ['No', '', '', '', '', ''],
-                                    ['', '', '', '', '', ''],
-                                    ['Use Addition', '', '', '', '', ''], ['No', '', '', '', '', '']]
+                                      ['Name', '', '', '', '', ''],
+                                      ['IMPACT World+ Footprint ' + self.version, '', '', '', '', ''],
+                                      ['', '', '', '', '', ''], ['Version', '', '', '', '', ''],
+                                      ['2', '2', '', '', '', ''],
+                                      ['', '', '', '', '', ''], ['Comment', '', '', '', '', ''],
+                                      ['IMPACT World+ Footprint ' + self.version + chr(int("007F", 16)) +
+                                       'New categories:' + chr(int("007F", 16)) +
+                                       '- Resources services loss' + chr(int("007F", 16)) +
+                                       '- Resources services loss (adaptation)' + chr(int("007F", 16)) +
+                                       chr(int("007F", 16)) +
+                                       'Deleted categories:' + chr(int("007F", 16)) +
+                                       '- Mineral resource use' + chr(int("007F", 16)) +
+                                       '- Fossil and nuclear energy use' + chr(int("007F", 16)) +
+                                       chr(int("007F", 16)) +
+                                       'Updated categories:' + chr(int("007F", 16)) +
+                                       '- Human health (residual)' + chr(int("007F", 16)) +
+                                       '- Ecosystem quality (residual)' + chr(int("007F", 16)) +
+                                       'For details on what the footprint version of IW+ entails, please consult this page: '
+                                       'https://www.impactworldplus.org/version-2-0-1/' + chr(int("007F", 16)) +
+                                       'For more information on IMPACT World+ and its methodology: https://www.impactworldplus.org.' + chr(
+                                          int("007F", 16)) +
+                                       'Full list of changes available here: https://github.com/CIRAIG/IWP_Reborn/tree/master/Report_changes',
+                                       '', '', '', '', ''], ['', '', '', '', '', ''],
+                                      ['Category', '', '', '', '', ''], ['Others', '', '', '', '', ''],
+                                      ['', '', '', '', '', ''],
+                                      ['Use Damage Assessment', '', '', '', '', ''], ['No', '', '', '', '', ''],
+                                      ['', '', '', '', '', ''],
+                                      ['Use Normalization', '', '', '', '', ''], ['No', '', '', '', '', ''],
+                                      ['', '', '', '', '', ''],
+                                      ['Use Weighting', '', '', '', '', ''], ['No', '', '', '', '', ''],
+                                      ['', '', '', '', '', ''],
+                                      ['Use Addition', '', '', '', '', ''], ['No', '', '', '', '', '']]
 
         # data for weighting and normalizing
         df = pd.read_csv(pkg_resources.resource_filename(
             __name__, '/Data/weighting_normalizing/weighting_and_normalization.csv'),
             header=None, delimiter=';').fillna('')
-        weighting_info_damage_carboneutrality = [[df.loc[i].tolist()[0], df.loc[i].tolist()[1], '', '', '', ''] for i in df.index]
+        weighting_info_damage_carboneutrality = [[df.loc[i].tolist()[0], df.loc[i].tolist()[1], '', '', '', ''] for i in
+                                                 df.index]
+        weighting_info_damage_carboneutrality[4] = ['Climate change, HH, LT', '1.00E+00', '', '', '', '']
+        weighting_info_damage_carboneutrality[5] = ['Climate change, HH, ST', '1.00E+00', '', '', '', '']
         weighting_info_damage_carboneutrality[10] = ['Ionizing radiations, human health', '1.00E+00', '', '', '', '']
-        weighting_info_damage_carboneutrality[13] = ['Photochemical ozone formation, human health', '1.00E+00', '', '', '', '']
+        weighting_info_damage_carboneutrality[13] = ['Photochemical ozone formation, human health', '1.00E+00', '', '',
+                                                     '', '']
         weighting_info_damage_carboneutrality.insert(22, ['Fisheries impact', '1.00E+00', '', '', '', ''])
-        weighting_info_damage_carboneutrality[27] = ['Ionizing radiations, ecosystem quality', '1.00E+00', '', '', '', '']
+        weighting_info_damage_carboneutrality[27] = ['Ionizing radiations, ecosystem quality', '1.00E+00', '', '', '',
+                                                     '']
         weighting_info_damage_carboneutrality.insert(32, ['Marine ecotoxicity, long term', '1.00E+00', '', '', '', ''])
         weighting_info_damage_carboneutrality.insert(33, ['Marine ecotoxicity, short term', '1.00E+00', '', '', '', ''])
-        weighting_info_damage_carboneutrality.insert(35, ['Photochemical ozone formation, ecosystem quality', '1.00E+00', '', '', '', ''])
+        weighting_info_damage_carboneutrality.insert(35,
+                                                     ['Photochemical ozone formation, ecosystem quality', '1.00E+00',
+                                                      '', '', '', ''])
         weighting_info_damage_carboneutrality.insert(36, ['Physical effects on biota', '1.00E+00', '', '', '', ''])
-        weighting_info_damage_carboneutrality.insert(38, ['Terrestrial ecotoxicity, long term', '1.00E+00', '', '', '', ''])
-        weighting_info_damage_carboneutrality.insert(39, ['Terrestrial ecotoxicity, short term', '1.00E+00', '', '', '', ''])
+        weighting_info_damage_carboneutrality.insert(38,
+                                                     ['Terrestrial ecotoxicity, long term', '1.00E+00', '', '', '', ''])
+        weighting_info_damage_carboneutrality.insert(39, ['Terrestrial ecotoxicity, short term', '1.00E+00', '', '', '',
+                                                          ''])
+        weighting_info_damage_carboneutrality[20] = ['Climate change, EQ, terr, LT', '1.00E+00', '', '', '', '']
+        weighting_info_damage_carboneutrality[21] = ['Climate change, EQ, terr, ST', '1.00E+00', '', '', '', '']
+        weighting_info_damage_carboneutrality.insert(22,  ['Climate change, EQ, mar, LT', '1.00E+00', '', '', '', ''])
+        weighting_info_damage_carboneutrality.insert(23, ['Climate change, EQ, mar, ST', '1.00E+00', '', '', '', ''])
 
         weighting_info_combined_carboneutrality = weighting_info_damage_carboneutrality.copy()
         weighting_info_combined_carboneutrality[11] = ['Ozone layer depletion (damage)', '1.00E+00', '', '', '', '']
-        weighting_info_combined_carboneutrality[12] = ['Particulate matter formation (damage)', '1.00E+00', '', '', '', '']
-        weighting_info_combined_carboneutrality[23] = ['Freshwater acidification (damage)', '1.00E+00', '', '', '', '']
-        weighting_info_combined_carboneutrality[26] = ['Freshwater eutrophication (damage)', '1.00E+00', '', '', '', '']
-        weighting_info_combined_carboneutrality[28] = ['Land occupation, biodiversity (damage)', '1.00E+00', '', '', '', '']
-        weighting_info_combined_carboneutrality[29] = ['Land transformation, biodiversity (damage)', '1.00E+00', '', '', '', '']
-        weighting_info_combined_carboneutrality[34] = ['Marine eutrophication (damage)', '1.00E+00', '', '', '', '']
-        weighting_info_combined_carboneutrality[36] = ['Physical effects on biota (damage)', '1.00E+00', '', '', '', '']
-        weighting_info_combined_carboneutrality[37] = ['Terrestrial acidification (damage)', '1.00E+00', '', '', '', '']
+        weighting_info_combined_carboneutrality[12] = ['Particulate matter formation (damage)', '1.00E+00', '', '', '',
+                                                       '']
+        weighting_info_combined_carboneutrality[25] = ['Freshwater acidification (damage)', '1.00E+00', '', '', '', '']
+        weighting_info_combined_carboneutrality[28] = ['Freshwater eutrophication (damage)', '1.00E+00', '', '', '', '']
+        weighting_info_combined_carboneutrality[30] = ['Land occupation, biodiversity (damage)', '1.00E+00', '', '', '',
+                                                       '']
+        weighting_info_combined_carboneutrality[31] = ['Land transformation, biodiversity (damage)', '1.00E+00', '', '',
+                                                       '', '']
+        weighting_info_combined_carboneutrality[36] = ['Marine eutrophication (damage)', '1.00E+00', '', '', '', '']
+        weighting_info_combined_carboneutrality[38] = ['Physical effects on biota (damage)', '1.00E+00', '', '', '', '']
+        weighting_info_combined_carboneutrality[39] = ['Terrestrial acidification (damage)', '1.00E+00', '', '', '', '']
 
         weighting_info_damage = [[df.loc[i].tolist()[0], df.loc[i].tolist()[1], '', '', '', ''] for i in df.index]
         weighting_info_damage[4] = ['Climate change, HH, LT, fossil', '1.00E+00', '', '', '', '']
         weighting_info_damage[5] = ['Climate change, HH, ST, fossil', '1.00E+00', '', '', '', '']
         weighting_info_damage[10] = ['Ionizing radiations, human health', '1.00E+00', '', '', '', '']
         weighting_info_damage[13] = ['Photochemical ozone formation, human health', '1.00E+00', '', '', '', '']
-        weighting_info_damage[20] = ['Climate change, EQ, LT, fossil', '1.00E+00', '', '', '', '']
-        weighting_info_damage[21] = ['Climate change, EQ, ST, fossil', '1.00E+00', '', '', '', '']
-        weighting_info_damage.insert(22, ['Fisheries impact', '1.00E+00', '', '', '', ''])
-        weighting_info_damage[27] = ['Ionizing radiations, ecosystem quality', '1.00E+00', '', '', '', '']
-        weighting_info_damage.insert(32, ['Marine ecotoxicity, long term', '1.00E+00', '', '', '', ''])
-        weighting_info_damage.insert(33, ['Marine ecotoxicity, short term', '1.00E+00', '', '', '', ''])
-        weighting_info_damage.insert(35, ['Photochemical ozone formation, ecosystem quality', '1.00E+00', '', '', '', ''])
-        weighting_info_damage.insert(36, ['Physical effects on biota', '1.00E+00', '', '', '', ''])
-        weighting_info_damage.insert(38, ['Terrestrial ecotoxicity, long term', '1.00E+00', '', '', '', ''])
-        weighting_info_damage.insert(39, ['Terrestrial ecotoxicity, short term', '1.00E+00', '', '', '', ''])
+        weighting_info_damage[20] = ['Climate change, EQ, terr, LT, fossil', '1.00E+00', '', '', '', '']
+        weighting_info_damage[21] = ['Climate change, EQ, terr, ST, fossil', '1.00E+00', '', '', '', '']
+        weighting_info_damage.insert(22, ['Climate change, EQ, mar, LT, fossil', '1.00E+00', '', '', '', ''])
+        weighting_info_damage.insert(23, ['Climate change, EQ, mar, ST, fossil', '1.00E+00', '', '', '', ''])
+        weighting_info_damage.insert(24, ['Fisheries impact', '1.00E+00', '', '', '', ''])
+        weighting_info_damage[29] = ['Ionizing radiations, ecosystem quality', '1.00E+00', '', '', '', '']
+        weighting_info_damage.insert(34, ['Marine ecotoxicity, long term', '1.00E+00', '', '', '', ''])
+        weighting_info_damage.insert(35, ['Marine ecotoxicity, short term', '1.00E+00', '', '', '', ''])
+        weighting_info_damage.insert(37,
+                                     ['Photochemical ozone formation, ecosystem quality', '1.00E+00', '', '', '', ''])
+        weighting_info_damage.insert(38, ['Physical effects on biota', '1.00E+00', '', '', '', ''])
+        weighting_info_damage.insert(40, ['Terrestrial ecotoxicity, long term', '1.00E+00', '', '', '', ''])
+        weighting_info_damage.insert(41, ['Terrestrial ecotoxicity, short term', '1.00E+00', '', '', '', ''])
         weighting_info_damage.insert(6, ['Climate change, HH, LT, biogenic', '1.00E+00', '', '', '', ''])
         weighting_info_damage.insert(7, ['Climate change, HH, ST, biogenic', '1.00E+00', '', '', '', ''])
         weighting_info_damage.insert(8, ['Climate change, HH, LT, CO2 uptake', '1.00E+00', '', '', '', ''])
         weighting_info_damage.insert(9, ['Climate change, HH, ST, CO2 uptake', '1.00E+00', '', '', '', ''])
         weighting_info_damage.insert(10, ['Climate change, HH, LT, land transformation', '1.00E+00', '', '', '', ''])
         weighting_info_damage.insert(11, ['Climate change, HH, ST, land transformation', '1.00E+00', '', '', '', ''])
-        weighting_info_damage.insert(28, ['Climate change, EQ, LT, biogenic', '1.00E+00', '', '', '', ''])
-        weighting_info_damage.insert(29, ['Climate change, EQ, ST, biogenic', '1.00E+00', '', '', '', ''])
-        weighting_info_damage.insert(30, ['Climate change, EQ, LT, CO2 uptake', '1.00E+00', '', '', '', ''])
-        weighting_info_damage.insert(31, ['Climate change, EQ, ST, CO2 uptake', '1.00E+00', '', '', '', ''])
-        weighting_info_damage.insert(32, ['Climate change, EQ, LT, land transformation', '1.00E+00', '', '', '', ''])
-        weighting_info_damage.insert(33, ['Climate change, EQ, ST, land transformation', '1.00E+00', '', '', '', ''])
+        weighting_info_damage.insert(28, ['Climate change, EQ, terr, LT, biogenic', '1.00E+00', '', '', '', ''])
+        weighting_info_damage.insert(29, ['Climate change, EQ, terr, ST, biogenic', '1.00E+00', '', '', '', ''])
+        weighting_info_damage.insert(30, ['Climate change, EQ, terr, LT, CO2 uptake', '1.00E+00', '', '', '', ''])
+        weighting_info_damage.insert(31, ['Climate change, EQ, terr, ST, CO2 uptake', '1.00E+00', '', '', '', ''])
+        weighting_info_damage.insert(32,
+                                     ['Climate change, EQ, terr, LT, land transformation', '1.00E+00', '', '', '', ''])
+        weighting_info_damage.insert(33,
+                                     ['Climate change, EQ, terr, ST, land transformation', '1.00E+00', '', '', '', ''])
+        weighting_info_damage.insert(36, ['Climate change, EQ, mar, LT, biogenic', '1.00E+00', '', '', '', ''])
+        weighting_info_damage.insert(37, ['Climate change, EQ, mar, ST, biogenic', '1.00E+00', '', '', '', ''])
+        weighting_info_damage.insert(38, ['Climate change, EQ, mar, LT, CO2 uptake', '1.00E+00', '', '', '', ''])
+        weighting_info_damage.insert(39, ['Climate change, EQ, mar, ST, CO2 uptake', '1.00E+00', '', '', '', ''])
+        weighting_info_damage.insert(40,
+                                     ['Climate change, EQ, mar, LT, land transformation', '1.00E+00', '', '', '', ''])
+        weighting_info_damage.insert(41,
+                                     ['Climate change, EQ, mar, ST, land transformation', '1.00E+00', '', '', '', ''])
 
         weighting_info_combined = weighting_info_damage.copy()
         weighting_info_combined[17] = ['Ozone layer depletion (damage)', '1.00E+00', '', '', '', '']
         weighting_info_combined[18] = ['Particulate matter formation (damage)', '1.00E+00', '', '', '', '']
-        weighting_info_combined[35] = ['Freshwater acidification (damage)', '1.00E+00', '', '', '', '']
-        weighting_info_combined[38] = ['Freshwater eutrophication (damage)', '1.00E+00', '', '', '', '']
-        weighting_info_combined[40] = ['Land occupation, biodiversity (damage)', '1.00E+00', '', '', '', '']
-        weighting_info_combined[41] = ['Land transformation, biodiversity (damage)', '1.00E+00', '', '', '', '']
-        weighting_info_combined[46] = ['Marine eutrophication (damage)', '1.00E+00', '', '', '', '']
-        weighting_info_combined[48] = ['Physical effects on biota (damage)', '1.00E+00', '', '', '', '']
-        weighting_info_combined[49] = ['Terrestrial acidification (damage)', '1.00E+00', '', '', '', '']
+        weighting_info_combined[43] = ['Freshwater acidification (damage)', '1.00E+00', '', '', '', '']
+        weighting_info_combined[46] = ['Freshwater eutrophication (damage)', '1.00E+00', '', '', '', '']
+        weighting_info_combined[48] = ['Land occupation, biodiversity (damage)', '1.00E+00', '', '', '', '']
+        weighting_info_combined[49] = ['Land transformation, biodiversity (damage)', '1.00E+00', '', '', '', '']
+        weighting_info_combined[54] = ['Marine eutrophication (damage)', '1.00E+00', '', '', '', '']
+        weighting_info_combined[56] = ['Physical effects on biota (damage)', '1.00E+00', '', '', '', '']
+        weighting_info_combined[57] = ['Terrestrial acidification (damage)', '1.00E+00', '', '', '', '']
 
         # extracting midpoint CFs
         d_ic_unit = self.iw_sp.loc[self.iw_sp['MP or Damage'] == 'Midpoint',
-                              ['Impact category', 'CF unit']].drop_duplicates().set_index('Impact category').iloc[:,
+                                   ['Impact category', 'CF unit']].drop_duplicates().set_index('Impact category').iloc[
+                    :,
                     0].to_dict()
         midpoint_values = []
         for j in d_ic_unit.keys():
@@ -743,7 +829,8 @@ class Parse:
                 midpoint_values.append(df.loc[i].tolist())
 
         d_ic_unit = self.iw_sp_carbon_neutrality.loc[self.iw_sp_carbon_neutrality['MP or Damage'] == 'Midpoint',
-                              ['Impact category', 'CF unit']].drop_duplicates().set_index('Impact category').iloc[:,
+                                                     ['Impact category', 'CF unit']].drop_duplicates().set_index(
+            'Impact category').iloc[:,
                     0].to_dict()
         midpoint_values_carboneutrality = []
         for j in d_ic_unit.keys():
@@ -762,7 +849,8 @@ class Parse:
 
         # extracting damage CFs
         d_ic_unit = self.iw_sp.loc[self.iw_sp['MP or Damage'] == 'Damage',
-                              ['Impact category', 'CF unit']].drop_duplicates().set_index('Impact category').iloc[:,
+                                   ['Impact category', 'CF unit']].drop_duplicates().set_index('Impact category').iloc[
+                    :,
                     0].to_dict()
         damage_values = []
         for j in d_ic_unit.keys():
@@ -780,7 +868,8 @@ class Parse:
                 damage_values.append(df.loc[i].tolist())
 
         d_ic_unit = self.iw_sp_carbon_neutrality.loc[self.iw_sp_carbon_neutrality['MP or Damage'] == 'Damage',
-                              ['Impact category', 'CF unit']].drop_duplicates().set_index('Impact category').iloc[:,
+                                                     ['Impact category', 'CF unit']].drop_duplicates().set_index(
+            'Impact category').iloc[:,
                     0].to_dict()
         damage_values_carboneutrality = []
         for j in d_ic_unit.keys():
@@ -799,28 +888,28 @@ class Parse:
 
         # extracting combined CFs
         ic_unit = self.iw_sp.loc[:, ['Impact category', 'CF unit']].drop_duplicates()
-        same_names = ['Freshwater acidification','Freshwater eutrophication','Land occupation, biodiversity',
-                      'Land transformation, biodiversity','Marine eutrophication','Ozone layer depletion',
-                      'Particulate matter formation','Terrestrial acidification',
+        same_names = ['Freshwater acidification', 'Freshwater eutrophication', 'Land occupation, biodiversity',
+                      'Land transformation, biodiversity', 'Marine eutrophication', 'Ozone layer depletion',
+                      'Particulate matter formation', 'Terrestrial acidification',
                       'Physical effects on biota']
         combined_values = []
         for j in ic_unit.index:
             combined_values.append(['', '', '', '', '', ''])
             combined_values.append(['Impact category', '', '', '', '', ''])
-            if ic_unit.loc[j,'Impact category'] in same_names:
-                if ic_unit.loc[j,'CF unit'] in ['DALY','PDF.m2.yr']:
-                    combined_values.append([ic_unit.loc[j,'Impact category']+' (damage)',
-                                            ic_unit.loc[j,'CF unit'], '', '', '', ''])
+            if ic_unit.loc[j, 'Impact category'] in same_names:
+                if ic_unit.loc[j, 'CF unit'] in ['DALY', 'PDF.m2.yr']:
+                    combined_values.append([ic_unit.loc[j, 'Impact category'] + ' (damage)',
+                                            ic_unit.loc[j, 'CF unit'], '', '', '', ''])
                 else:
-                    combined_values.append([ic_unit.loc[j,'Impact category']+' (midpoint)',
-                                            ic_unit.loc[j,'CF unit'], '', '', '', ''])
+                    combined_values.append([ic_unit.loc[j, 'Impact category'] + ' (midpoint)',
+                                            ic_unit.loc[j, 'CF unit'], '', '', '', ''])
             else:
                 combined_values.append([ic_unit.loc[j, 'Impact category'],
                                         ic_unit.loc[j, 'CF unit'], '', '', '', ''])
             combined_values.append(['', '', '', '', '', ''])
             combined_values.append(['Substances', '', '', '', '', ''])
             df = self.iw_sp.loc[[i for i in self.iw_sp.index if (
-                    self.iw_sp.loc[i,'Impact category'] == ic_unit.loc[j,'Impact category'] and
+                    self.iw_sp.loc[i, 'Impact category'] == ic_unit.loc[j, 'Impact category'] and
                     self.iw_sp.loc[i, 'CF unit'] == ic_unit.loc[j, 'CF unit'])]]
             df = df[['Compartment', 'Sub-compartment', 'Elem flow name', 'CAS number', 'CF value', 'Elem flow unit']]
             for i in df.index:
@@ -829,28 +918,28 @@ class Parse:
                 combined_values.append(df.loc[i].tolist())
 
         ic_unit = self.iw_sp_carbon_neutrality.loc[:, ['Impact category', 'CF unit']].drop_duplicates()
-        same_names = ['Freshwater acidification','Freshwater eutrophication','Land occupation, biodiversity',
-                      'Land transformation, biodiversity','Marine eutrophication','Ozone layer depletion',
-                      'Particulate matter formation','Terrestrial acidification',
+        same_names = ['Freshwater acidification', 'Freshwater eutrophication', 'Land occupation, biodiversity',
+                      'Land transformation, biodiversity', 'Marine eutrophication', 'Ozone layer depletion',
+                      'Particulate matter formation', 'Terrestrial acidification',
                       'Physical effects on biota']
         combined_values_carboneutrality = []
         for j in ic_unit.index:
             combined_values_carboneutrality.append(['', '', '', '', '', ''])
             combined_values_carboneutrality.append(['Impact category', '', '', '', '', ''])
-            if ic_unit.loc[j,'Impact category'] in same_names:
-                if ic_unit.loc[j,'CF unit'] in ['DALY','PDF.m2.yr']:
-                    combined_values_carboneutrality.append([ic_unit.loc[j,'Impact category']+' (damage)',
-                                            ic_unit.loc[j,'CF unit'], '', '', '', ''])
+            if ic_unit.loc[j, 'Impact category'] in same_names:
+                if ic_unit.loc[j, 'CF unit'] in ['DALY', 'PDF.m2.yr']:
+                    combined_values_carboneutrality.append([ic_unit.loc[j, 'Impact category'] + ' (damage)',
+                                                            ic_unit.loc[j, 'CF unit'], '', '', '', ''])
                 else:
-                    combined_values_carboneutrality.append([ic_unit.loc[j,'Impact category']+' (midpoint)',
-                                            ic_unit.loc[j,'CF unit'], '', '', '', ''])
+                    combined_values_carboneutrality.append([ic_unit.loc[j, 'Impact category'] + ' (midpoint)',
+                                                            ic_unit.loc[j, 'CF unit'], '', '', '', ''])
             else:
                 combined_values_carboneutrality.append([ic_unit.loc[j, 'Impact category'],
-                                        ic_unit.loc[j, 'CF unit'], '', '', '', ''])
+                                                        ic_unit.loc[j, 'CF unit'], '', '', '', ''])
             combined_values_carboneutrality.append(['', '', '', '', '', ''])
             combined_values_carboneutrality.append(['Substances', '', '', '', '', ''])
             df = self.iw_sp_carbon_neutrality.loc[[i for i in self.iw_sp_carbon_neutrality.index if (
-                    self.iw_sp_carbon_neutrality.loc[i,'Impact category'] == ic_unit.loc[j,'Impact category'] and
+                    self.iw_sp_carbon_neutrality.loc[i, 'Impact category'] == ic_unit.loc[j, 'Impact category'] and
                     self.iw_sp_carbon_neutrality.loc[i, 'CF unit'] == ic_unit.loc[j, 'CF unit'])]]
             df = df[['Compartment', 'Sub-compartment', 'Elem flow name', 'CAS number', 'CF value', 'Elem flow unit']]
             for i in df.index:
@@ -901,652 +990,119 @@ class Parse:
 
         self.logger.info("Exporting to openLCA...")
 
-        # --------------------- GENERAL METADATA OF IW+ ------------------------
-        id_category = str(uuid.uuid4())
+        locations = self.olca_client.get_all(schema.Location)
+        locations = {i.code: i.to_ref() for i in locations}
+        flows = self.olca_client.get_all(schema.Flow)
+        flows = {i.id: i.to_ref() for i in flows}
+        locations_undefined_in_olca = []
 
-        category_metadata = {"@context": "http://greendelta.github.io/olca-schema/context.jsonld",
-                             "@type": "Category",
-                             "@id": id_category,
-                             "name": "IMPACT World+",
-                             "version": "2.1",
-                             "modelType": "IMPACT_METHOD"}
+        def write_to_olca(olca_db, new_impact_method):
+            for impact_category in tqdm(set(olca_db.loc[:, 'Impact category'])):
+                # select impact category in IW+
+                dff = olca_db.loc[olca_db.loc[:, 'Impact category'] == impact_category].copy()
+                # create the impact category in oLCA
+                new_impact_category = schema.new_impact_category(impact_category)
+                new_impact_category.category = new_impact_method.category + '/' + new_impact_method.name
+                new_impact_category.ref_unit = dff.loc[:, 'CF unit'].iloc[0]
+                new_impact_category.impact_factors = []
+                # add the category to the method
+                new_impact_method.impact_categories.append(new_impact_category.to_ref())
 
-        # -----------------------IW+ VERSION METADATA --------------------------
-        category_names = {(i[0], i[1]): str(uuid.uuid4()) for i in
-                          set(list(zip(self.olca_iw.loc[:, 'Impact category'], self.olca_iw.loc[:, 'CF unit'])))}
-        category_names_damage = {k: v for k, v in category_names.items() if k[1] in ['DALY', 'PDF.m2.yr']}
-        category_names_midpoint = {k: v for k, v in category_names.items() if k[1] not in ['DALY', 'PDF.m2.yr']}
-        category_names_footprint = {(i[0], i[1]): str(uuid.uuid4()) for i in set(list(
-            zip(self.simplified_version_olca.loc[:, 'Impact category'],
-                self.simplified_version_olca.loc[:, 'CF unit'])))}
-        category_names_carboneutrality = {(i[0], i[1]): str(uuid.uuid4()) for i in
-                                          set(list(zip(self.olca_iw_carbon_neutrality.loc[:, 'Impact category'],
-                                                       self.olca_iw_carbon_neutrality.loc[:, 'CF unit'])))}
-        category_names_damage_carboneutrality = {k: v for k, v in category_names_carboneutrality.items() if
-                                                 k[1] in ['DALY', 'PDF.m2.yr']}
-        category_names_midpoint_carboneutrality = {k: v for k, v in category_names_carboneutrality.items() if
-                                                   k[1] not in ['DALY', 'PDF.m2.yr']}
-        # need to differentiate midpoint from endpoint with the names of the categories
-        category_names_combined = {}
-        for category in category_names:
-            if category[1] in ['DALY', 'PDF.m2.yr']:
-                category_names_combined[(category[0] + ' (damage)', category[1])] = category_names[category]
-            else:
-                category_names_combined[(category[0] + ' (midpoint)', category[1])] = category_names[category]
+                # loop through the IW+ CFs
+                for ix in dff.index:
+                    # for every row, it's a CF we need to create
+                    new_impact_factor = schema.ImpactFactor()
+                    # we find the flow "item" in oLCA
+                    new_impact_factor.flow = flows[dff.loc[ix, 'flow_id']]
+                    # dump in the CF value
+                    new_impact_factor.value = dff.loc[ix, 'CF value']
+                    # for regionalized impact categories, we need to add the location
+                    if type(dff.loc[ix, 'Location']) == str:
+                        if dff.loc[ix, 'Location'] in locations.keys():
+                            # for the locations that exist in oLCA, add the location
+                            new_impact_factor.location = locations[dff.loc[ix, 'Location']]
+                            # finally we add the CF to the impact category
+                            new_impact_category.impact_factors.append(new_impact_factor)
+                            # if the location does not exist in oLCA, we do not create the CF
+                        else:
+                            locations_undefined_in_olca.append(dff.loc[ix, 'Location'])
+                    else:
+                        new_impact_category.impact_factors.append(new_impact_factor)
+                self.olca_client.put(new_impact_category)
 
-        category_names_combined_carboneutrality = {}
-        for category in category_names_carboneutrality:
-            if category[1] in ['DALY', 'PDF.m2.yr']:
-                category_names_combined_carboneutrality[(category[0] + ' (damage)', category[1])] = \
-                category_names_carboneutrality[category]
-            else:
-                category_names_combined_carboneutrality[(category[0] + ' (midpoint)', category[1])] = \
-                category_names_carboneutrality[category]
+            self.olca_client.put(new_impact_method)
 
-        id_iw_damage = str(uuid.uuid4())
-        id_iw_midpoint = str(uuid.uuid4())
-        id_iw_footprint = str(uuid.uuid4())
-        id_iw_combined = str(uuid.uuid4())
-        norm_weight_id = str(uuid.uuid4())
-        norm_weight_id_carboneutrality = str(uuid.uuid4())
-        id_iw_damage_carboneutrality = str(uuid.uuid4())
-        id_iw_midpoint_carboneutrality = str(uuid.uuid4())
-        id_iw_combined_carboneutrality = str(uuid.uuid4())
+        df = self.olca_iw_carbon_neutrality.copy()
+        same_names = ['Freshwater acidification', 'Freshwater eutrophication', 'Land occupation, biodiversity',
+                      'Land transformation, biodiversity', 'Marine eutrophication', 'Ozone layer depletion',
+                      'Particulate matter formation', 'Terrestrial acidification',
+                      'Physical effects on biota']
+        df.loc[(df.loc[:, 'Impact category'].isin(same_names) & (
+                    df.loc[:, 'MP or Damage'] == 'Midpoint')), 'Impact category'] += ' (midpoint)'
+        df.loc[(df.loc[:, 'Impact category'].isin(same_names) & (
+                    df.loc[:, 'MP or Damage'] == 'Damage')), 'Impact category'] += ' (damage)'
+        new_method = schema.ImpactMethod()
+        new_method.category = 'IMPACT World+ LCIA Methods'
+        new_method.version = '2.2'
+        new_method.name = 'IMPACT World+ v2.2'
+        new_method.description = 'For more information on IMPACT World+, check our website: https://www.impactworldplus.org/'
+        new_method.impact_categories = []
+        write_to_olca(df, new_method)
 
-        metadata_iw_damage = {
-            "@context": "http://greendelta.github.io/olca-schema/context.jsonld",
-            "@type": "ImpactMethod",
-            "@id": id_iw_damage,
-            "name": "IMPACT World+ Expert v" + self.version + ' (incl. CO2 uptake)',
-            "lastChange": "2024-09-15T17:25:43.725-05:00",
-            "category": {
-                "@type": "Category",
-                "@id": id_category,
-                "name": "IMPACT World+",
-                "categoryType": "ImpactMethod"},
-            'impactCategories': [],
-            'nwSets': [{
-                "@type": "NwSet",
-                "@id": norm_weight_id,
-                "name": "IMPACT World+ (Stepwise 2006 values)"
-            }]
-        }
+        df = self.olca_iw.loc[self.olca_iw.loc[:, 'MP or Damage'] == 'Damage'].copy()
+        new_method = schema.ImpactMethod()
+        new_method.category = 'IMPACT World+ LCIA Methods'
+        new_method.version = '2.2'
+        new_method.name = 'IMPACT World+ v2.2 - Expert - incl. CO2 uptake'
+        new_method.description = 'For more information on IMPACT World+, check our website: https://www.impactworldplus.org/'
+        new_method.impact_categories = []
+        write_to_olca(df, new_method)
 
-        metadata_iw_midpoint = {
-            "@context": "http://greendelta.github.io/olca-schema/context.jsonld",
-            "@type": "ImpactMethod",
-            "@id": id_iw_midpoint,
-            "name": "IMPACT World+ Midpoint v" + self.version + ' (incl. CO2 uptake)',
-            "lastChange": "2024-09-15T17:25:43.725-05:00",
-            "category": {
-                "@type": "Category",
-                "@id": id_category,
-                "name": "IMPACT World+",
-                "categoryType": "ImpactMethod"},
-            'impactCategories': []
-        }
+        df = self.olca_iw.loc[self.olca_iw.loc[:, 'MP or Damage'] == 'Midpoint'].copy()
+        new_method = schema.ImpactMethod()
+        new_method.category = 'IMPACT World+ LCIA Methods'
+        new_method.version = '2.2'
+        new_method.name = 'IMPACT World+ v2.2 - Midpoint - incl. CO2 uptake'
+        new_method.description = 'For more information on IMPACT World+, check our website: https://www.impactworldplus.org/'
+        new_method.impact_categories = []
+        write_to_olca(df, new_method)
 
-        metadata_iw_footprint = {
-            "@context": "http://greendelta.github.io/olca-schema/context.jsonld",
-            "@type": "ImpactMethod",
-            "@id": id_iw_footprint,
-            "name": "IMPACT World+ Footprint v" + self.version,
-            "lastChange": "2024-09-15T17:25:43.725-05:00",
-            "category": {
-                "@type": "Category",
-                "@id": id_category,
-                "name": "CIRAIG methods",
-                "categoryType": "ImpactMethod"},
-            'impactCategories': []
-        }
+        df = self.olca_iw_carbon_neutrality.loc[
+            self.olca_iw_carbon_neutrality.loc[:, 'MP or Damage'] == 'Damage'].copy()
+        new_method = schema.ImpactMethod()
+        new_method.category = 'IMPACT World+ LCIA Methods'
+        new_method.version = '2.2'
+        new_method.name = 'IMPACT World+ v2.2 - Expert'
+        new_method.description = 'For more information on IMPACT World+, check our website: https://www.impactworldplus.org/'
+        new_method.impact_categories = []
+        write_to_olca(df, new_method)
 
-        metadata_iw_combined = {
-            "@context": "http://greendelta.github.io/olca-schema/context.jsonld",
-            "@type": "ImpactMethod",
-            "@id": id_iw_combined,
-            "name": "IMPACT World+ Combined v" + self.version + ' (incl. CO2 uptake)',
-            "lastChange": "2024-09-15T17:25:43.725-05:00",
-            "category": {
-                "@type": "Category",
-                "@id": id_category,
-                "name": "IMPACT World+",
-                "categoryType": "ImpactMethod"},
-            'impactCategories': [],
-            'nwSets': [{
-                "@type": "NwSet",
-                "@id": norm_weight_id,
-                "name": "IMPACT World+ (Stepwise 2006 values)"
-            }]
-        }
+        df = self.olca_iw_carbon_neutrality.loc[
+            self.olca_iw_carbon_neutrality.loc[:, 'MP or Damage'] == 'Midpoint'].copy()
+        new_method = schema.ImpactMethod()
+        new_method.category = 'IMPACT World+ LCIA Methods'
+        new_method.version = '2.2'
+        new_method.name = 'IMPACT World+ v2.2 - Midpoint'
+        new_method.description = 'For more information on IMPACT World+, check our website: https://www.impactworldplus.org/'
+        new_method.impact_categories = []
+        write_to_olca(df, new_method)
 
-        metadata_iw_damage_carboneutrality = {
-            "@context": "http://greendelta.github.io/olca-schema/context.jsonld",
-            "@type": "ImpactMethod",
-            "@id": id_iw_damage_carboneutrality,
-            "name": "IMPACT World+ Expert v" + self.version,
-            "lastChange": "2024-09-15T17:25:43.725-05:00",
-            "category": {
-                "@type": "Category",
-                "@id": id_category,
-                "name": "IMPACT World+",
-                "categoryType": "ImpactMethod"},
-            'impactCategories': [],
-            'nwSets': [{
-                "@type": "NwSet",
-                "@id": norm_weight_id,
-                "name": "IMPACT World+ (Stepwise 2006 values)"
-            }]
-        }
-
-        metadata_iw_midpoint_carboneutrality = {
-            "@context": "http://greendelta.github.io/olca-schema/context.jsonld",
-            "@type": "ImpactMethod",
-            "@id": id_iw_midpoint_carboneutrality,
-            "name": "IMPACT World+ Midpoint v" + self.version,
-            "lastChange": "2024-09-15T17:25:43.725-05:00",
-            "category": {
-                "@type": "Category",
-                "@id": id_category,
-                "name": "IMPACT World+",
-                "categoryType": "ImpactMethod"},
-            'impactCategories': []
-        }
-
-        metadata_iw_combined_carboneutrality = {
-            "@context": "http://greendelta.github.io/olca-schema/context.jsonld",
-            "@type": "ImpactMethod",
-            "@id": id_iw_combined_carboneutrality,
-            "name": "IMPACT World+ Combined v" + self.version,
-            "lastChange": "2024-09-15T17:25:43.725-05:00",
-            "category": {
-                "@type": "Category",
-                "@id": id_category,
-                "name": "IMPACT World+",
-                "categoryType": "ImpactMethod"},
-            'impactCategories': [],
-            'nwSets': [{
-                "@type": "NwSet",
-                "@id": norm_weight_id,
-                "name": "IMPACT World+ (Stepwise 2006 values)"
-            }]
-        }
-
-        # ------------------------- IMPACT CATEGORIES METADATA -----------------
-        for cat in category_names_damage:
-            metadata_iw_damage['impactCategories'].append(
-                {"@type": "ImpactCategory",
-                 "@id": category_names_damage[cat],
-                 "name": cat[0],
-                 "refUnit": cat[1]}
-            )
-
-        for cat in category_names_midpoint:
-            metadata_iw_midpoint['impactCategories'].append(
-                {"@type": "ImpactCategory",
-                 "@id": category_names_midpoint[cat],
-                 "name": cat[0],
-                 "refUnit": cat[1]}
-            )
-
-        for cat in category_names_footprint:
-            metadata_iw_footprint['impactCategories'].append(
-                {"@type": "ImpactCategory",
-                 "@id": category_names_footprint[cat],
-                 "name": cat[0],
-                 "refUnit": cat[1]}
-            )
-
-        for cat in category_names_combined:
-            metadata_iw_combined['impactCategories'].append(
-                {"@type": "ImpactCategory",
-                 "@id": category_names_combined[cat],
-                 "name": cat[0],
-                 "refUnit": cat[1]}
-            )
-
-        for cat in category_names_damage_carboneutrality:
-            metadata_iw_damage_carboneutrality['impactCategories'].append(
-                {"@type": "ImpactCategory",
-                 "@id": category_names_damage_carboneutrality[cat],
-                 "name": cat[0],
-                 "refUnit": cat[1]}
-            )
-
-        for cat in category_names_midpoint_carboneutrality:
-            metadata_iw_midpoint_carboneutrality['impactCategories'].append(
-                {"@type": "ImpactCategory",
-                 "@id": category_names_midpoint_carboneutrality[cat],
-                 "name": cat[0],
-                 "refUnit": cat[1]}
-            )
-
-        for cat in category_names_combined_carboneutrality:
-            metadata_iw_combined_carboneutrality['impactCategories'].append(
-                {"@type": "ImpactCategory",
-                 "@id": category_names_combined_carboneutrality[cat],
-                 "name": cat[0],
-                 "refUnit": cat[1]}
-            )
-
-        # --------------------------------- UNIT METADATA -------------------------
-        # hardcoded, obtained from going inside the json files of an exported oLCA method
-        unit_groups = {
-            'kg': '93a60a57-a4c8-11da-a746-0800200c9a66',
-            'm2*a': '93a60a57-a3c8-20da-a746-0800200c9a66',
-            'm2': '93a60a57-a3c8-18da-a746-0800200c9a66',
-            'kBq': '93a60a57-a3c8-16da-a746-0800200c9a66',
-            'm3': '93a60a57-a3c8-12da-a746-0800200c9a66',
-            'MJ': '93a60a57-a3c8-11da-a746-0800200c9a66',
-            'kg*a': '59f191d6-5dd3-4553-af88-1a32accfe308'
-        }
-        flow_properties = {
-            'm3': '93a60a56-a3c8-22da-a746-0800200c9a66',
-            'm2*a': '93a60a56-a3c8-21da-a746-0800200c9a66',
-            'm2': '93a60a56-a3c8-19da-a746-0800200c9a66',
-            'kBq': '93a60a56-a3c8-17da-a746-0800200c9a66',
-            'kg': '93a60a56-a3c8-11da-a746-0800200b9a66',
-            'MJ': 'f6811440-ee37-11de-8a39-0800200c9a66',
-            'kg*a': '4e10f566-0358-489a-8e3a-d687b66c50e6'
-        }
-
-        # ------------------------- INTEGRATE CHARACTERIZATION FACTORS -----------------
-        cf_dict_damage = {}
-        for cat in category_names_damage:
-            cf_values = {
-                "@context": "http://greendelta.github.io/olca-schema/context.jsonld",
-                "@type": "ImpactCategory",
-                "@id": category_names_damage[cat],
-                "name": cat[0],
-                "category": metadata_iw_damage["name"],
-                "version": '2.1',
-                "refUnit": cat[1],
-                "impactFactors": []
-            }
-
-            dff = self.olca_iw.loc[self.olca_iw.loc[:, 'Impact category'] == cat[0]].loc[
-                self.olca_iw.loc[:, 'CF unit'] == cat[1]].copy()
-
-            for i in dff.index:
-                cf_values["impactFactors"].append({
-                    "@type": "ImpactFactor",
-                    "value": dff.loc[i, 'CF value'],
-                    "flow": {
-                        "@type": "Flow",
-                        "@id": dff.loc[i, 'flow_id'],
-                        "name": dff.loc[i, 'Elem flow name'],
-                        "category": "Elementary flows/" + dff.loc[i, 'Compartment'] + '/' + dff.loc[
-                            i, 'Sub-compartment'],
-                        "flowType": "ELEMENTARY_FLOW",
-                        "refUnit": dff.loc[i, 'Elem flow unit']
-                    },
-                    "unit": {
-                        "@type": "Unit",
-                        "@id": unit_groups[dff.loc[i, 'Elem flow unit']],
-                        "name": dff.loc[i, 'Elem flow unit']
-                    },
-                    "flowProperty": {
-                        "@type": "FlowProperty",
-                        "@id": flow_properties[dff.loc[i, 'Elem flow unit']],
-                        "category": "Technical flow properties",
-                        "refUnit": dff.loc[i, 'Elem flow unit']
-                    }
-                })
-
-            cf_dict_damage[cat] = cf_values
-
-        cf_dict_midpoint = {}
-        for cat in category_names_midpoint:
-            cf_values = {
-                "@context": "http://greendelta.github.io/olca-schema/context.jsonld",
-                "@type": "ImpactCategory",
-                "@id": category_names_midpoint[cat],
-                "name": cat[0],
-                "category": metadata_iw_midpoint["name"],
-                "version": '2.1',
-                "refUnit": cat[1],
-                "impactFactors": []
-            }
-
-            dff = self.olca_iw.loc[self.olca_iw.loc[:, 'Impact category'] == cat[0]].loc[
-                self.olca_iw.loc[:, 'CF unit'] == cat[1]].copy()
-
-            for i in dff.index:
-                cf_values["impactFactors"].append({
-                    "@type": "ImpactFactor",
-                    "value": dff.loc[i, 'CF value'],
-                    "flow": {
-                        "@type": "Flow",
-                        "@id": dff.loc[i, 'flow_id'],
-                        "name": dff.loc[i, 'Elem flow name'],
-                        "category": "Elementary flows/" + dff.loc[i, 'Compartment'] + '/' + dff.loc[
-                            i, 'Sub-compartment'],
-                        "flowType": "ELEMENTARY_FLOW",
-                        "refUnit": dff.loc[i, 'Elem flow unit']
-                    },
-                    "unit": {
-                        "@type": "Unit",
-                        "@id": unit_groups[dff.loc[i, 'Elem flow unit']],
-                        "name": dff.loc[i, 'Elem flow unit']
-                    },
-                    "flowProperty": {
-                        "@type": "FlowProperty",
-                        "@id": flow_properties[dff.loc[i, 'Elem flow unit']],
-                        "category": "Technical flow properties",
-                        "refUnit": dff.loc[i, 'Elem flow unit']
-                    }
-                })
-
-            cf_dict_midpoint[cat] = cf_values
-
-        cf_dict_footprint = {}
-        for cat in category_names_footprint:
-            cf_values = {
-                "@context": "http://greendelta.github.io/olca-schema/context.jsonld",
-                "@type": "ImpactCategory",
-                "@id": category_names_footprint[cat],
-                "name": cat[0],
-                "category": metadata_iw_footprint["name"],
-                "version": '2.1',
-                "refUnit": cat[1],
-                "impactFactors": []
-            }
-
-            dff = self.simplified_version_olca.loc[self.simplified_version_olca.loc[:, 'Impact category'] == cat[0]].loc[
-                self.simplified_version_olca.loc[:, 'CF unit'] == cat[1]].copy()
-
-            for i in dff.index:
-                cf_values["impactFactors"].append({
-                    "@type": "ImpactFactor",
-                    "value": dff.loc[i, 'CF value'],
-                    "flow": {
-                        "@type": "Flow",
-                        "@id": dff.loc[i, 'flow_id'],
-                        "name": dff.loc[i, 'Elem flow name'],
-                        "category": "Elementary flows/" + dff.loc[i, 'Compartment'] + '/' + dff.loc[
-                            i, 'Sub-compartment'],
-                        "flowType": "ELEMENTARY_FLOW",
-                        "refUnit": dff.loc[i, 'Elem flow unit']
-                    },
-                    "unit": {
-                        "@type": "Unit",
-                        "@id": unit_groups[dff.loc[i, 'Elem flow unit']],
-                        "name": dff.loc[i, 'Elem flow unit']
-                    },
-                    "flowProperty": {
-                        "@type": "FlowProperty",
-                        "@id": flow_properties[dff.loc[i, 'Elem flow unit']],
-                        "category": "Technical flow properties",
-                        "refUnit": dff.loc[i, 'Elem flow unit']
-                    }
-                })
-
-            cf_dict_footprint[cat] = cf_values
-
-        cf_dict_combined = {}
-        for cat in category_names_combined:
-            cf_values = {
-                "@context": "http://greendelta.github.io/olca-schema/context.jsonld",
-                "@type": "ImpactCategory",
-                "@id": category_names_combined[cat],
-                "name": cat[0],
-                "category": metadata_iw_combined["name"],
-                "version": '2.1',
-                "refUnit": cat[1],
-                "impactFactors": []
-            }
-
-            dff = self.olca_iw.loc[self.olca_iw.loc[:, 'Impact category'] == cat[0].split(' (')[0]].loc[
-                self.olca_iw.loc[:, 'CF unit'] == cat[1]].copy()
-
-            for i in dff.index:
-                cf_values["impactFactors"].append({
-                    "@type": "ImpactFactor",
-                    "value": dff.loc[i, 'CF value'],
-                    "flow": {
-                        "@type": "Flow",
-                        "@id": dff.loc[i, 'flow_id'],
-                        "name": dff.loc[i, 'Elem flow name'],
-                        "category": "Elementary flows/" + dff.loc[i, 'Compartment'] + '/' + dff.loc[
-                            i, 'Sub-compartment'],
-                        "flowType": "ELEMENTARY_FLOW",
-                        "refUnit": dff.loc[i, 'Elem flow unit']
-                    },
-                    "unit": {
-                        "@type": "Unit",
-                        "@id": unit_groups[dff.loc[i, 'Elem flow unit']],
-                        "name": dff.loc[i, 'Elem flow unit']
-                    },
-                    "flowProperty": {
-                        "@type": "FlowProperty",
-                        "@id": flow_properties[dff.loc[i, 'Elem flow unit']],
-                        "category": "Technical flow properties",
-                        "refUnit": dff.loc[i, 'Elem flow unit']
-                    }
-                })
-
-            cf_dict_combined[cat] = cf_values
-
-        cf_dict_damage_carboneutrality = {}
-        for cat in category_names_damage_carboneutrality:
-            cf_values = {
-                "@context": "http://greendelta.github.io/olca-schema/context.jsonld",
-                "@type": "ImpactCategory",
-                "@id": category_names_damage_carboneutrality[cat],
-                "name": cat[0],
-                "category": metadata_iw_damage_carboneutrality["name"],
-                "version": '2.1',
-                "refUnit": cat[1],
-                "impactFactors": []
-            }
-
-            dff = self.olca_iw_carbon_neutrality.loc[self.olca_iw_carbon_neutrality.loc[:, 'Impact category'] == cat[0]].loc[
-                self.olca_iw_carbon_neutrality.loc[:, 'CF unit'] == cat[1]].copy()
-
-            for i in dff.index:
-                cf_values["impactFactors"].append({
-                    "@type": "ImpactFactor",
-                    "value": dff.loc[i, 'CF value'],
-                    "flow": {
-                        "@type": "Flow",
-                        "@id": dff.loc[i, 'flow_id'],
-                        "name": dff.loc[i, 'Elem flow name'],
-                        "category": "Elementary flows/" + dff.loc[i, 'Compartment'] + '/' + dff.loc[
-                            i, 'Sub-compartment'],
-                        "flowType": "ELEMENTARY_FLOW",
-                        "refUnit": dff.loc[i, 'Elem flow unit']
-                    },
-                    "unit": {
-                        "@type": "Unit",
-                        "@id": unit_groups[dff.loc[i, 'Elem flow unit']],
-                        "name": dff.loc[i, 'Elem flow unit']
-                    },
-                    "flowProperty": {
-                        "@type": "FlowProperty",
-                        "@id": flow_properties[dff.loc[i, 'Elem flow unit']],
-                        "category": "Technical flow properties",
-                        "refUnit": dff.loc[i, 'Elem flow unit']
-                    }
-                })
-
-            cf_dict_damage_carboneutrality[cat] = cf_values
-
-        cf_dict_midpoint_carboneutrality = {}
-        for cat in category_names_midpoint_carboneutrality:
-            cf_values = {
-                "@context": "http://greendelta.github.io/olca-schema/context.jsonld",
-                "@type": "ImpactCategory",
-                "@id": category_names_midpoint_carboneutrality[cat],
-                "name": cat[0],
-                "category": metadata_iw_midpoint_carboneutrality["name"],
-                "version": '2.1',
-                "refUnit": cat[1],
-                "impactFactors": []
-            }
-
-            dff = self.olca_iw_carbon_neutrality.loc[self.olca_iw_carbon_neutrality.loc[:, 'Impact category'] == cat[0]].loc[
-                self.olca_iw_carbon_neutrality.loc[:, 'CF unit'] == cat[1]].copy()
-
-            for i in dff.index:
-                cf_values["impactFactors"].append({
-                    "@type": "ImpactFactor",
-                    "value": dff.loc[i, 'CF value'],
-                    "flow": {
-                        "@type": "Flow",
-                        "@id": dff.loc[i, 'flow_id'],
-                        "name": dff.loc[i, 'Elem flow name'],
-                        "category": "Elementary flows/" + dff.loc[i, 'Compartment'] + '/' + dff.loc[
-                            i, 'Sub-compartment'],
-                        "flowType": "ELEMENTARY_FLOW",
-                        "refUnit": dff.loc[i, 'Elem flow unit']
-                    },
-                    "unit": {
-                        "@type": "Unit",
-                        "@id": unit_groups[dff.loc[i, 'Elem flow unit']],
-                        "name": dff.loc[i, 'Elem flow unit']
-                    },
-                    "flowProperty": {
-                        "@type": "FlowProperty",
-                        "@id": flow_properties[dff.loc[i, 'Elem flow unit']],
-                        "category": "Technical flow properties",
-                        "refUnit": dff.loc[i, 'Elem flow unit']
-                    }
-                })
-
-            cf_dict_midpoint_carboneutrality[cat] = cf_values
-
-        cf_dict_combined_carboneutrality = {}
-        for cat in category_names_combined_carboneutrality:
-            cf_values = {
-                "@context": "http://greendelta.github.io/olca-schema/context.jsonld",
-                "@type": "ImpactCategory",
-                "@id": category_names_combined_carboneutrality[cat],
-                "name": cat[0],
-                "category": metadata_iw_combined_carboneutrality["name"],
-                "version": '2.1',
-                "refUnit": cat[1],
-                "impactFactors": []
-            }
-
-            dff = self.olca_iw_carbon_neutrality.loc[self.olca_iw_carbon_neutrality.loc[:, 'Impact category'] == cat[0].split(' (')[0]].loc[
-                self.olca_iw_carbon_neutrality.loc[:, 'CF unit'] == cat[1]].copy()
-
-            for i in dff.index:
-                cf_values["impactFactors"].append({
-                    "@type": "ImpactFactor",
-                    "value": dff.loc[i, 'CF value'],
-                    "flow": {
-                        "@type": "Flow",
-                        "@id": dff.loc[i, 'flow_id'],
-                        "name": dff.loc[i, 'Elem flow name'],
-                        "category": "Elementary flows/" + dff.loc[i, 'Compartment'] + '/' + dff.loc[
-                            i, 'Sub-compartment'],
-                        "flowType": "ELEMENTARY_FLOW",
-                        "refUnit": dff.loc[i, 'Elem flow unit']
-                    },
-                    "unit": {
-                        "@type": "Unit",
-                        "@id": unit_groups[dff.loc[i, 'Elem flow unit']],
-                        "name": dff.loc[i, 'Elem flow unit']
-                    },
-                    "flowProperty": {
-                        "@type": "FlowProperty",
-                        "@id": flow_properties[dff.loc[i, 'Elem flow unit']],
-                        "category": "Technical flow properties",
-                        "refUnit": dff.loc[i, 'Elem flow unit']
-                    }
-                })
-
-            cf_dict_combined_carboneutrality[cat] = cf_values
-
-        # ------------------------- NORMALIZATION AND WEIGHTING -------------------
-        norm = {}
-        for i in category_names:
-            if i[1] == 'DALY':
-                norm[(i[0], i[1], category_names[i])] = {"normalisationFactor": 13.7, "weightingFactor": 5401.459854}
-            elif i[1] == 'PDF.m2.yr':
-                norm[(i[0], i[1], category_names[i])] = {"normalisationFactor": 1.01E-4, "weightingFactor": 1386.138614}
-
-        normalization = {
-            "@context": "http://greendelta.github.io/olca-schema/context.jsonld",
-            "@type": "NwSet",
-            "@id": norm_weight_id,
-            "name": "IMPACT World+ (Stepwise 2006 values)",
-            "version": "0.00.000",
-            "weightedScoreUnit": "EUR2003",
-            "factors": []}
-
-        for x in norm:
-            normalization['factors'].append(
-                {
-                    "@type": "NwFactor",
-                    "impactCategory": {
-                        "@type": "ImpactCategory",
-                        "@id": x[2],
-                        "name": x[0],
-                        "refUnit": x[1]
-                    },
-                    "normalisationFactor": norm[x]['normalisationFactor'],
-                    "weightingFactor": norm[x]['weightingFactor']
-                }
-            )
-
-        norm_carboneutrality = {}
-        for i in category_names_carboneutrality:
-            if i[1] == 'DALY':
-                norm_carboneutrality[(i[0], i[1], category_names_carboneutrality[i])] = {"normalisationFactor": 13.7,
-                                                                                         "weightingFactor": 5401.459854}
-            elif i[1] == 'PDF.m2.yr':
-                norm_carboneutrality[(i[0], i[1], category_names_carboneutrality[i])] = {"normalisationFactor": 1.01E-4,
-                                                                                         "weightingFactor": 1386.138614}
-
-        normalization_carboneutrality = {
-            "@context": "http://greendelta.github.io/olca-schema/context.jsonld",
-            "@type": "NwSet",
-            "@id": norm_weight_id_carboneutrality,
-            "name": "IMPACT World+ (Stepwise 2006 values)",
-            "version": "0.00.000",
-            "weightedScoreUnit": "EUR2003",
-            "factors": []}
-
-        for x in norm_carboneutrality:
-            normalization_carboneutrality['factors'].append(
-                {
-                    "@type": "NwFactor",
-                    "impactCategory": {
-                        "@type": "ImpactCategory",
-                        "@id": x[2],
-                        "name": x[0],
-                        "refUnit": x[1]
-                    },
-                    "normalisationFactor": norm_carboneutrality[x]['normalisationFactor'],
-                    "weightingFactor": norm_carboneutrality[x]['weightingFactor']
-                }
-            )
-
-        # ------------------------- STORE ALL DATA IN DICTIONARY ----------------------
-        self.olca_data = {'category_metadata': category_metadata,
-                          'metadata_iw_damage': metadata_iw_damage,
-                          'metadata_iw_midpoint': metadata_iw_midpoint,
-                          'metadata_iw_footprint': metadata_iw_footprint,
-                          'metadata_iw_combined': metadata_iw_combined,
-                          'cf_dict_damage': cf_dict_damage,
-                          'cf_dict_midpoint': cf_dict_midpoint,
-                          'cf_dict_footprint': cf_dict_footprint,
-                          'cf_dict_combined': cf_dict_combined,
-                          'normalization': normalization,
-                          'metadata_iw_damage_carboneutrality': metadata_iw_damage_carboneutrality,
-                          'metadata_iw_midpoint_carboneutrality': metadata_iw_midpoint_carboneutrality,
-                          'metadata_iw_combined_carboneutrality': metadata_iw_combined_carboneutrality,
-                          'cf_dict_damage_carboneutrality': cf_dict_damage_carboneutrality,
-                          'cf_dict_midpoint_carboneutrality': cf_dict_midpoint_carboneutrality,
-                          'cf_dict_combined_carboneutrality': cf_dict_combined_carboneutrality,
-                          'normalization_carboneutrality': normalization_carboneutrality}
+        df = self.simplified_version_olca.copy()
+        new_method = schema.ImpactMethod()
+        new_method.category = 'IMPACT World+ LCIA Methods'
+        new_method.version = '2.2'
+        new_method.name = 'IMPACT World+ v2.2 - Footprint'
+        new_method.description = 'For more information on IMPACT World+, check our website: https://www.impactworldplus.org/'
+        new_method.impact_categories = []
+        write_to_olca(df, new_method)
 
     def produce_files(self):
         """
         Function producing the different IW+ files for the different versions.
         :return: the IW+ files
         """
+
+        # Note, for openLCA we just export the files directly from the software
 
         self.logger.info("Creating all the files...")
 
@@ -1571,14 +1127,20 @@ class Parse:
         self.master_db_carbon_neutrality.to_excel(path + '/Dev/impact_world_plus_' + self.version + '_dev.xlsx')
 
         # ecoinvent versions in Excel format
-        self.ei310_iw.to_excel(path + '/ecoinvent/impact_world_plus_' + self.version + ' (incl. CO2 uptake)_expert_version_ecoinvent_v310.xlsx')
-        self.ei311_iw.to_excel(path + '/ecoinvent/impact_world_plus_' + self.version + ' (incl. CO2 uptake)_expert_version_ecoinvent_v311.xlsx')
-        self.ei310_iw_carbon_neutrality.to_excel(path + '/ecoinvent/impact_world_plus_' + self.version + '_expert_version_ecoinvent_v310.xlsx')
-        self.ei311_iw_carbon_neutrality.to_excel(path + '/ecoinvent/impact_world_plus_' + self.version + '_expert_version_ecoinvent_v311.xlsx')
+        self.ei310_iw.to_excel(
+            path + '/ecoinvent/impact_world_plus_' + self.version + ' (incl. CO2 uptake)_expert_version_ecoinvent_v310.xlsx')
+        self.ei311_iw.to_excel(
+            path + '/ecoinvent/impact_world_plus_' + self.version + ' (incl. CO2 uptake)_expert_version_ecoinvent_v311.xlsx')
+        self.ei310_iw_carbon_neutrality.to_excel(
+            path + '/ecoinvent/impact_world_plus_' + self.version + '_expert_version_ecoinvent_v310.xlsx')
+        self.ei311_iw_carbon_neutrality.to_excel(
+            path + '/ecoinvent/impact_world_plus_' + self.version + '_expert_version_ecoinvent_v311.xlsx')
 
         # ecoinvent version in DataFrame format
-        self.simplified_version_ei310.to_excel(path + '/ecoinvent/impact_world_plus_' + self.version + '_footprint_version_ecoinvent_v310.xlsx')
-        self.simplified_version_ei311.to_excel(path + '/ecoinvent/impact_world_plus_' + self.version + '_footprint_version_ecoinvent_v311.xlsx')
+        self.simplified_version_ei310.to_excel(
+            path + '/ecoinvent/impact_world_plus_' + self.version + '_footprint_version_ecoinvent_v310.xlsx')
+        self.simplified_version_ei311.to_excel(
+            path + '/ecoinvent/impact_world_plus_' + self.version + '_footprint_version_ecoinvent_v311.xlsx')
 
         # exiobase version in DataFrame format
         self.exio_iw_38.to_excel(path + '/exiobase/impact_world_plus_' + self.version +
@@ -1590,444 +1152,145 @@ class Parse:
         for project in self.bw2_projects:
             bd.projects.set_current(project)
             if '3.10' in project:
-                IW_ic = [bd.Method(ic) for ic in list(bd.methods) if ('IMPACT World+' in ic[0] and 'Footprint' not in ic[0] and
-                                                                        self.version in ic[0] and "for ecoinvent" in ic[0] and
-                                                                        ' (incl. CO2 uptake)' in ic[0])]
+                IW_ic = [bd.Method(ic) for ic in list(bd.methods) if
+                         ('IMPACT World+' in ic[0] and 'Footprint' not in ic[0] and
+                          self.version in ic[0] and "for ecoinvent" in ic[0] and
+                          ' (incl. CO2 uptake)' in ic[0] and 'regionalized' not in ic[0])]
                 bi.package.BW2Package.export_objs(IW_ic, filename='impact_world_plus_' + self.version +
-                                                                     ' (incl. CO2 uptake)_brightway' + self.bw_version +
-                                                                  '_expert_version_ei310',
-                                                     folder=path + '/bw' + self.bw_version.replace('.', '') + '/')
-                IW_ic = [bd.Method(ic) for ic in list(bd.methods) if ('IMPACT World+' in ic[0] and 'Footprint' not in ic[0] and
-                                                                        self.version in ic[0] and "for ecoinvent" in ic[0] and
-                                                                        ' (incl. CO2 uptake)' not in ic[0])]
-                bi.package.BW2Package.export_objs(IW_ic, filename='impact_world_plus_' + self.version +
-                                                                     '_brightway' + self.bw_version +
+                                                                  ' (incl. CO2 uptake)_brightway' + self.bw_version +
                                                                   '_expert_version_ei310',
                                                   folder=path + '/bw' + self.bw_version.replace('.', '') + '/')
-                IW_ic = [bd.Method(ic) for ic in list(bd.methods) if ('IMPACT World+' in ic[0] and 'Footprint' in ic[0] and
-                                                                        self.version in ic[0] and "for ecoinvent" in ic[0])]
+                IW_ic = [bd.Method(ic) for ic in list(bd.methods) if
+                         ('IMPACT World+' in ic[0] and 'Footprint' not in ic[0] and
+                          self.version in ic[0] and "for ecoinvent" in ic[0] and
+                          ' (incl. CO2 uptake)' not in ic[0] and 'regionalized' not in ic[0])]
                 bi.package.BW2Package.export_objs(IW_ic, filename='impact_world_plus_' + self.version +
-                                                                     '_brightway' + self.bw_version +
+                                                                  '_brightway' + self.bw_version +
+                                                                  '_expert_version_ei310',
+                                                  folder=path + '/bw' + self.bw_version.replace('.', '') + '/')
+                IW_ic = [bd.Method(ic) for ic in list(bd.methods) if
+                         ('IMPACT World+' in ic[0] and 'Footprint' in ic[0] and
+                          self.version in ic[0] and "for ecoinvent" in ic[0] and 'regionalized' not in ic[0])]
+                bi.package.BW2Package.export_objs(IW_ic, filename='impact_world_plus_' + self.version +
+                                                                  '_brightway' + self.bw_version +
                                                                   '_footprint_version_ei310',
                                                   folder=path + '/bw' + self.bw_version.replace('.', '') + '/')
             elif '3.11' in project:
-                IW_ic = [bd.Method(ic) for ic in list(bd.methods) if ('IMPACT World+' in ic[0] and 'Footprint' not in ic[0] and
-                                                                        self.version in ic[0] and "for ecoinvent" in ic[0] and
-                                                                        ' (incl. CO2 uptake)' in ic[0])]
+                IW_ic = [bd.Method(ic) for ic in list(bd.methods) if
+                         ('IMPACT World+' in ic[0] and 'Footprint' not in ic[0] and
+                          self.version in ic[0] and "for ecoinvent" in ic[0] and
+                          ' (incl. CO2 uptake)' in ic[0] and 'regionalized' not in ic[0])]
                 bi.package.BW2Package.export_objs(IW_ic, filename='impact_world_plus_' + self.version +
-                                                                     ' (incl. CO2 uptake)_brightway' + self.bw_version +
-                                                                  '_expert_version_ei311',
-                                                     folder=path + '/bw' + self.bw_version.replace('.', '') + '/')
-                IW_ic = [bd.Method(ic) for ic in list(bd.methods) if ('IMPACT World+' in ic[0] and 'Footprint' not in ic[0] and
-                                                                        self.version in ic[0] and "for ecoinvent" in ic[0] and
-                                                                        ' (incl. CO2 uptake)' not in ic[0])]
-                bi.package.BW2Package.export_objs(IW_ic, filename='impact_world_plus_' + self.version +
-                                                                     '_brightway' + self.bw_version +
+                                                                  ' (incl. CO2 uptake)_brightway' + self.bw_version +
                                                                   '_expert_version_ei311',
                                                   folder=path + '/bw' + self.bw_version.replace('.', '') + '/')
-                IW_ic = [bd.Method(ic) for ic in list(bd.methods) if ('IMPACT World+' in ic[0] and 'Footprint' in ic[0] and
-                                                                        self.version in ic[0] and "for ecoinvent" in ic[0])]
+                IW_ic = [bd.Method(ic) for ic in list(bd.methods) if
+                         ('IMPACT World+' in ic[0] and 'Footprint' not in ic[0] and
+                          self.version in ic[0] and "for ecoinvent" in ic[0] and
+                          ' (incl. CO2 uptake)' not in ic[0] and 'regionalized' not in ic[0])]
                 bi.package.BW2Package.export_objs(IW_ic, filename='impact_world_plus_' + self.version +
-                                                                     '_brightway' + self.bw_version +
+                                                                  '_brightway' + self.bw_version +
+                                                                  '_expert_version_ei311',
+                                                  folder=path + '/bw' + self.bw_version.replace('.', '') + '/')
+                IW_ic = [bd.Method(ic) for ic in list(bd.methods) if
+                         ('IMPACT World+' in ic[0] and 'Footprint' in ic[0] and
+                          self.version in ic[0] and "for ecoinvent" in ic[0] and 'regionalized' not in ic[0])]
+                bi.package.BW2Package.export_objs(IW_ic, filename='impact_world_plus_' + self.version +
+                                                                  '_brightway' + self.bw_version +
                                                                   '_footprint_version_ei311',
+                                                  folder=path + '/bw' + self.bw_version.replace('.', '') + '/')
+            elif '3.12' in project:
+                IW_ic = [bd.Method(ic) for ic in list(bd.methods) if
+                         ('IMPACT World+' in ic[0] and 'Footprint' not in ic[0] and
+                          self.version in ic[0] and "for ecoinvent" in ic[0] and
+                          ' (incl. CO2 uptake)' in ic[0] and 'regionalized' not in ic[0])]
+                bi.package.BW2Package.export_objs(IW_ic, filename='impact_world_plus_' + self.version +
+                                                                  ' (incl. CO2 uptake)_brightway' + self.bw_version +
+                                                                  '_expert_version_ei312',
+                                                  folder=path + '/bw' + self.bw_version.replace('.', '') + '/')
+                IW_ic = [bd.Method(ic) for ic in list(bd.methods) if
+                         ('IMPACT World+' in ic[0] and 'Footprint' not in ic[0] and
+                          self.version in ic[0] and "for ecoinvent" in ic[0] and
+                          ' (incl. CO2 uptake)' not in ic[0] and 'regionalized' not in ic[0])]
+                bi.package.BW2Package.export_objs(IW_ic, filename='impact_world_plus_' + self.version +
+                                                                  '_brightway' + self.bw_version +
+                                                                  '_expert_version_ei312',
+                                                  folder=path + '/bw' + self.bw_version.replace('.', '') + '/')
+                IW_ic = [bd.Method(ic) for ic in list(bd.methods) if
+                         ('IMPACT World+' in ic[0] and 'Footprint' in ic[0] and
+                          self.version in ic[0] and "for ecoinvent" in ic[0] and 'regionalized' not in ic[0])]
+                bi.package.BW2Package.export_objs(IW_ic, filename='impact_world_plus_' + self.version +
+                                                                  '_brightway' + self.bw_version +
+                                                                  '_footprint_version_ei312',
                                                   folder=path + '/bw' + self.bw_version.replace('.', '') + '/')
 
         # SimaPro version in csv format
-        with open(path+'/SimaPro/impact_world_plus_'+self.version+' (incl. CO2 uptake)_midpoint_version_simapro.csv', 'w', newline='') as f:
+        with open(
+                path + '/SimaPro/impact_world_plus_' + self.version + ' (incl. CO2 uptake)_midpoint_version_simapro.csv',
+                'w', newline='', encoding='utf-8') as f:
             writer = csv.writer(f, delimiter=";")
             writer.writerows(
                 self.sp_data['metadata'] + [['', '', '', '', '', '']] + self.sp_data['midpoint_method_metadata'] +
                 self.sp_data['midpoint_values'] + [['', '', '', '', '', '']])
             writer.writerows([['End', '', '', '', '', '']])
-        with open(path+'/SimaPro/impact_world_plus_'+self.version+' (incl. CO2 uptake)_expert_version_simapro.csv', 'w', newline='') as f:
+        with open(
+                path + '/SimaPro/impact_world_plus_' + self.version + ' (incl. CO2 uptake)_expert_version_simapro.csv',
+                'w', newline='', encoding='utf-8') as f:
             writer = csv.writer(f, delimiter=";")
             writer.writerows(
                 self.sp_data['metadata'] + [['', '', '', '', '', '']] + self.sp_data['damage_method_metadata'] +
                 self.sp_data['damage_values'] + [['', '', '', '', '', '']])
             writer.writerows(self.sp_data['weighting_info_damage'] + [['', '', '', '', '', '']])
             writer.writerows([['End', '', '', '', '', '']])
-        with open(path+'/SimaPro/impact_world_plus_'+self.version+' (incl. CO2 uptake)_simapro.csv', 'w', newline='') as f:
+        with open(path + '/SimaPro/impact_world_plus_' + self.version + ' (incl. CO2 uptake)_simapro.csv', 'w',
+                  newline='', encoding='utf-8') as f:
             writer = csv.writer(f, delimiter=";")
             writer.writerows(
                 self.sp_data['metadata'] + [['', '', '', '', '', '']] + self.sp_data['combined_method_metadata'] +
                 self.sp_data['combined_values'] + [['', '', '', '', '', '']])
             writer.writerows(self.sp_data['weighting_info_combined'] + [['', '', '', '', '', '']])
             writer.writerows([['End', '', '', '', '', '']])
-        with open(path+'/SimaPro/impact_world_plus_'+self.version+'_footprint_version_simapro.csv', 'w', newline='') as f:
+        with open(path + '/SimaPro/impact_world_plus_' + self.version + '_footprint_version_simapro.csv', 'w',
+                  newline='', encoding='utf-8') as f:
             writer = csv.writer(f, delimiter=";")
             writer.writerows(
                 self.sp_data['metadata'] + [['', '', '', '', '', '']] + self.sp_data['simplified_method_metadata'] +
                 self.sp_data['simplified_values'] + [['', '', '', '', '', '']])
             writer.writerows([['End', '', '', '', '', '']])
-        with open(path+'/SimaPro/impact_world_plus_'+self.version+'_midpoint_version_simapro.csv', 'w', newline='') as f:
+        with open(path + '/SimaPro/impact_world_plus_' + self.version + '_midpoint_version_simapro.csv', 'w',
+                  newline='', encoding='utf-8') as f:
             writer = csv.writer(f, delimiter=";")
             writer.writerows(
-                self.sp_data['metadata'] + [['', '', '', '', '', '']] + self.sp_data['midpoint_method_metadata_carboneutrality'] +
+                self.sp_data['metadata'] + [['', '', '', '', '', '']] + self.sp_data[
+                    'midpoint_method_metadata_carboneutrality'] +
                 self.sp_data['midpoint_values_carboneutrality'] + [['', '', '', '', '', '']])
             writer.writerows([['End', '', '', '', '', '']])
-        with open(path+'/SimaPro/impact_world_plus_'+self.version+'_expert_version_simapro.csv', 'w', newline='') as f:
+        with open(path + '/SimaPro/impact_world_plus_' + self.version + '_expert_version_simapro.csv', 'w',
+                  newline='', encoding='utf-8') as f:
             writer = csv.writer(f, delimiter=";")
             writer.writerows(
-                self.sp_data['metadata'] + [['', '', '', '', '', '']] + self.sp_data['damage_method_metadata_carboneutrality'] +
+                self.sp_data['metadata'] + [['', '', '', '', '', '']] + self.sp_data[
+                    'damage_method_metadata_carboneutrality'] +
                 self.sp_data['damage_values_carboneutrality'] + [['', '', '', '', '', '']])
             writer.writerows(self.sp_data['weighting_info_damage_carboneutrality'] + [['', '', '', '', '', '']])
             writer.writerows([['End', '', '', '', '', '']])
-        with open(path+'/SimaPro/impact_world_plus_'+self.version+'_simapro.csv', 'w', newline='') as f:
+        with open(path + '/SimaPro/impact_world_plus_' + self.version + '_simapro.csv', 'w',
+                  newline='', encoding='utf-8') as f:
             writer = csv.writer(f, delimiter=";")
             writer.writerows(
-                self.sp_data['metadata'] + [['', '', '', '', '', '']] + self.sp_data['combined_method_metadata_carboneutrality'] +
+                self.sp_data['metadata'] + [['', '', '', '', '', '']] + self.sp_data[
+                    'combined_method_metadata_carboneutrality'] +
                 self.sp_data['combined_values_carboneutrality'] + [['', '', '', '', '', '']])
             writer.writerows(self.sp_data['weighting_info_combined_carboneutrality'] + [['', '', '', '', '', '']])
             writer.writerows([['End', '', '', '', '', '']])
 
-        # # create the openLCA version expert version (zip file)
-        # if not os.path.exists(path + '/openLCA/expert_version (incl. CO2 uptake)/'):
-        #     os.makedirs(path + '/openLCA/expert_version (incl. CO2 uptake)/')
-        # if os.path.exists(path + '/openLCA/expert_version (incl. CO2 uptake)/impact_world_plus'+self.version+
-        #                   ' (incl. CO2 uptake)_openLCA.zip'):
-        #     os.remove(path + '/openLCA/expert_version (incl. CO2 uptake)/impact_world_plus'+self.version+
-        #               ' (incl. CO2 uptake)_openLCA.zip')
-        # if os.path.exists(path + '/openLCA/expert_version (incl. CO2 uptake)/oLCA_folders'):
-        #     shutil.rmtree(path + '/openLCA/expert_version (incl. CO2 uptake)/oLCA_folders')
-        # zipObj = zipfile.ZipFile(path + '/openLCA/expert_version (incl. CO2 uptake)/impact_world_plus_'+self.version+
-        #                          ' (incl. CO2 uptake)_openLCA.zip', 'w')
-        #
-        # if not os.path.exists(path + '/openLCA/expert_version (incl. CO2 uptake)/oLCA_folders/categories/'):
-        #     os.makedirs(path + '/openLCA/expert_version (incl. CO2 uptake)/oLCA_folders/categories/')
-        # with open(path + '/openLCA/expert_version (incl. CO2 uptake)/oLCA_folders/categories/' +
-        #           self.olca_data['category_metadata']['@id']  + '.json', 'w') as f:
-        #     json.dump(self.olca_data['category_metadata'], f)
-        # zipObj.write(path + '/openLCA/expert_version (incl. CO2 uptake)/oLCA_folders/categories/' +
-        #              self.olca_data['category_metadata']['@id'] + '.json')
-        #
-        # if not os.path.exists(path + '/openLCA/expert_version (incl. CO2 uptake)/oLCA_folders/lcia_methods/'):
-        #     os.makedirs(path + '/openLCA/expert_version (incl. CO2 uptake)/oLCA_folders/lcia_methods/')
-        # with open(path + '/openLCA/expert_version (incl. CO2 uptake)/oLCA_folders/lcia_methods/' +
-        #           self.olca_data['metadata_iw_damage']['@id'] + '.json', 'w') as f:
-        #     json.dump(self.olca_data['metadata_iw_damage'], f)
-        # zipObj.write(path + '/openLCA/expert_version (incl. CO2 uptake)/oLCA_folders/lcia_methods/' +
-        #              self.olca_data['metadata_iw_damage']['@id'] + '.json')
-        #
-        # if not os.path.exists(path + '/openLCA/expert_version (incl. CO2 uptake)/oLCA_folders/lcia_categories/'):
-        #     os.makedirs(path + '/openLCA/expert_version (incl. CO2 uptake)/oLCA_folders/lcia_categories/')
-        # for cat in self.olca_data['cf_dict_damage'].keys():
-        #     with open(path + '/openLCA/expert_version (incl. CO2 uptake)/oLCA_folders/lcia_categories/' +
-        #               self.olca_data['cf_dict_damage'][cat]['@id'] + '.json', 'w') as f:
-        #         json.dump(self.olca_data['cf_dict_damage'][cat], f)
-        #     zipObj.write(path + '/openLCA/expert_version (incl. CO2 uptake)/oLCA_folders/lcia_categories/' +
-        #                  self.olca_data['cf_dict_damage'][cat]['@id'] + '.json')
-        #
-        # if not os.path.exists(path + '/openLCA/expert_version (incl. CO2 uptake)/oLCA_folders/nw_sets/'):
-        #     os.makedirs(path + '/openLCA/expert_version (incl. CO2 uptake)/oLCA_folders/nw_sets/')
-        # with open(path + '/openLCA/expert_version (incl. CO2 uptake)/oLCA_folders/nw_sets/' +
-        #           self.olca_data['normalization']['@id'] + '.json', 'w') as f:
-        #     json.dump(self.olca_data['normalization'], f)
-        # zipObj.write(path + '/openLCA/expert_version (incl. CO2 uptake)/oLCA_folders/nw_sets/' +
-        #              self.olca_data['normalization']['@id'] + '.json')
-        # zipObj.close()
-        # # use shutil to simplify the folder structure within the zip file
-        # shutil.make_archive(path + '/openLCA/expert_version (incl. CO2 uptake)/impact_world_plus_'+self.version+
-        #                     ' (incl. CO2 uptake)_expert_version_openLCA', 'zip', path +
-        #                     '/openLCA/expert_version (incl. CO2 uptake)/oLCA_folders/')
-        #
-        # # create the openLCA version midpoint version (zip file)
-        # if not os.path.exists(path + '/openLCA/midpoint_version (incl. CO2 uptake)/'):
-        #     os.makedirs(path + '/openLCA/midpoint_version (incl. CO2 uptake)/')
-        # if os.path.exists(path + '/openLCA/midpoint_version (incl. CO2 uptake)/impact_world_plus'+self.version+
-        #                   ' (incl. CO2 uptake)_openLCA.zip'):
-        #     os.remove(path + '/openLCA/midpoint_version (incl. CO2 uptake)/impact_world_plus'+self.version+
-        #               ' (incl. CO2 uptake)_openLCA.zip')
-        # if os.path.exists(path + '/openLCA/midpoint_version (incl. CO2 uptake)/oLCA_folders'):
-        #     shutil.rmtree(path + '/openLCA/midpoint_version (incl. CO2 uptake)/oLCA_folders')
-        # zipObj = zipfile.ZipFile(path + '/openLCA/midpoint_version (incl. CO2 uptake)/impact_world_plus_'+self.version+
-        #                          ' (incl. CO2 uptake)_openLCA.zip', 'w')
-        #
-        # if not os.path.exists(path + '/openLCA/midpoint_version (incl. CO2 uptake)/oLCA_folders/categories/'):
-        #     os.makedirs(path + '/openLCA/midpoint_version (incl. CO2 uptake)/oLCA_folders/categories/')
-        # with open(path + '/openLCA/midpoint_version (incl. CO2 uptake)/oLCA_folders/categories/' +
-        #           self.olca_data['category_metadata']['@id'] + '.json', 'w') as f:
-        #     json.dump(self.olca_data['category_metadata'], f)
-        # zipObj.write(path + '/openLCA/midpoint_version (incl. CO2 uptake)/oLCA_folders/categories/' +
-        #              self.olca_data['category_metadata']['@id'] + '.json')
-        #
-        # if not os.path.exists(path + '/openLCA/midpoint_version (incl. CO2 uptake)/oLCA_folders/lcia_methods/'):
-        #     os.makedirs(path + '/openLCA/midpoint_version (incl. CO2 uptake)/oLCA_folders/lcia_methods/')
-        # with open(path + '/openLCA/midpoint_version (incl. CO2 uptake)/oLCA_folders/lcia_methods/' +
-        #           self.olca_data['metadata_iw_midpoint']['@id'] + '.json', 'w') as f:
-        #     json.dump(self.olca_data['metadata_iw_midpoint'], f)
-        # zipObj.write(path + '/openLCA/midpoint_version (incl. CO2 uptake)/oLCA_folders/lcia_methods/' +
-        #              self.olca_data['metadata_iw_midpoint']['@id'] + '.json')
-        #
-        # if not os.path.exists(path + '/openLCA/midpoint_version (incl. CO2 uptake)/oLCA_folders/lcia_categories/'):
-        #     os.makedirs(path + '/openLCA/midpoint_version (incl. CO2 uptake)/oLCA_folders/lcia_categories/')
-        # for cat in self.olca_data['cf_dict_midpoint'].keys():
-        #     with open(path + '/openLCA/midpoint_version (incl. CO2 uptake)/oLCA_folders/lcia_categories/' +
-        #               self.olca_data['cf_dict_midpoint'][cat]['@id'] + '.json', 'w') as f:
-        #         json.dump(self.olca_data['cf_dict_midpoint'][cat], f)
-        #     zipObj.write(path + '/openLCA/midpoint_version (incl. CO2 uptake)/oLCA_folders/lcia_categories/' +
-        #                  self.olca_data['cf_dict_midpoint'][cat]['@id'] + '.json')
-        # zipObj.close()
-        # # use shutil to simplify the folder structure within the zip file
-        # shutil.make_archive(path + '/openLCA/midpoint_version (incl. CO2 uptake)/impact_world_plus_'+self.version+
-        #                     ' (incl. CO2 uptake)_midpoint_version_openLCA', 'zip', path +
-        #                     '/openLCA/midpoint_version (incl. CO2 uptake)/oLCA_folders/')
-        #
-        # # create the openLCA version footprint version (zip file)
-        # if not os.path.exists(path + '/openLCA/footprint_version/'):
-        #     os.makedirs(path + '/openLCA/footprint_version/')
-        # if os.path.exists(path + '/openLCA/footprint_version/impact_world_plus'+self.version+'_openLCA.zip'):
-        #     os.remove(path + '/openLCA/footprint_version/impact_world_plus'+self.version+'_openLCA.zip')
-        # if os.path.exists(path + '/openLCA/footprint_version/oLCA_folders'):
-        #     shutil.rmtree(path + '/openLCA/footprint_version/oLCA_folders')
-        # zipObj = zipfile.ZipFile(path + '/openLCA/footprint_version/impact_world_plus_'+self.version+'_openLCA.zip', 'w')
-        #
-        # if not os.path.exists(path + '/openLCA/footprint_version/oLCA_folders/categories/'):
-        #     os.makedirs(path + '/openLCA/footprint_version/oLCA_folders/categories/')
-        # with open(path + '/openLCA/footprint_version/oLCA_folders/categories/' + self.olca_data['category_metadata']['@id']
-        #           + '.json', 'w') as f:
-        #     json.dump(self.olca_data['category_metadata'], f)
-        # zipObj.write(path + '/openLCA/footprint_version/oLCA_folders/categories/' + self.olca_data['category_metadata'][
-        #     '@id'] + '.json')
-        #
-        # if not os.path.exists(path + '/openLCA/footprint_version/oLCA_folders/lcia_methods/'):
-        #     os.makedirs(path + '/openLCA/footprint_version/oLCA_folders/lcia_methods/')
-        # with open(path + '/openLCA/footprint_version/oLCA_folders/lcia_methods/' +
-        #           self.olca_data['metadata_iw_footprint']['@id'] + '.json', 'w') as f:
-        #     json.dump(self.olca_data['metadata_iw_footprint'], f)
-        # zipObj.write(path + '/openLCA/footprint_version/oLCA_folders/lcia_methods/' +
-        #              self.olca_data['metadata_iw_footprint']['@id'] + '.json')
-        #
-        # if not os.path.exists(path + '/openLCA/footprint_version/oLCA_folders/lcia_categories/'):
-        #     os.makedirs(path + '/openLCA/footprint_version/oLCA_folders/lcia_categories/')
-        # for cat in self.olca_data['cf_dict_footprint'].keys():
-        #     with open(path + '/openLCA/footprint_version/oLCA_folders/lcia_categories/' +
-        #               self.olca_data['cf_dict_footprint'][cat]['@id'] + '.json', 'w') as f:
-        #         json.dump(self.olca_data['cf_dict_footprint'][cat], f)
-        #     zipObj.write(path + '/openLCA/footprint_version/oLCA_folders/lcia_categories/' +
-        #                  self.olca_data['cf_dict_footprint'][cat]['@id'] + '.json')
-        # zipObj.close()
-        # # use shutil to simplify the folder structure within the zip file
-        # shutil.make_archive(path + '/openLCA/footprint_version/impact_world_plus_' + self.version +
-        #                     '_footprint_version_openLCA', 'zip', path + '/openLCA/footprint_version/oLCA_folders/')
-        #
-        # # create the openLCA version combined version (zip file)
-        # if not os.path.exists(path + '/openLCA/combined_version (incl. CO2 uptake)/'):
-        #     os.makedirs(path + '/openLCA/combined_version (incl. CO2 uptake)/')
-        # if os.path.exists(path + '/openLCA/combined_version (incl. CO2 uptake)/impact_world_plus'+self.version+
-        #                   ' (incl. CO2 uptake)_openLCA.zip'):
-        #     os.remove(path + '/openLCA/combined_version (incl. CO2 uptake)/impact_world_plus'+self.version+
-        #               ' (incl. CO2 uptake)_openLCA.zip')
-        # if os.path.exists(path + '/openLCA/combined_version (incl. CO2 uptake)/oLCA_folders'):
-        #     shutil.rmtree(path + '/openLCA/combined_version (incl. CO2 uptake)/oLCA_folders')
-        # zipObj = zipfile.ZipFile(path + '/openLCA/combined_version (incl. CO2 uptake)/impact_world_plus_'+self.version+
-        #                          ' (incl. CO2 uptake)_openLCA.zip', 'w')
-        #
-        # if not os.path.exists(path + '/openLCA/combined_version (incl. CO2 uptake)/oLCA_folders/categories/'):
-        #     os.makedirs(path + '/openLCA/combined_version (incl. CO2 uptake)/oLCA_folders/categories/')
-        # with open(path + '/openLCA/combined_version (incl. CO2 uptake)/oLCA_folders/categories/' +
-        #           self.olca_data['category_metadata']['@id'] + '.json', 'w') as f:
-        #     json.dump(self.olca_data['category_metadata'], f)
-        # zipObj.write(path + '/openLCA/combined_version (incl. CO2 uptake)/oLCA_folders/categories/' +
-        #              self.olca_data['category_metadata']['@id'] + '.json')
-        #
-        # if not os.path.exists(path + '/openLCA/combined_version (incl. CO2 uptake)/oLCA_folders/lcia_methods/'):
-        #     os.makedirs(path + '/openLCA/combined_version (incl. CO2 uptake)/oLCA_folders/lcia_methods/')
-        # with open(path + '/openLCA/combined_version (incl. CO2 uptake)/oLCA_folders/lcia_methods/' +
-        #           self.olca_data['metadata_iw_combined']['@id'] + '.json', 'w') as f:
-        #     json.dump(self.olca_data['metadata_iw_combined'], f)
-        # zipObj.write(path + '/openLCA/combined_version (incl. CO2 uptake)/oLCA_folders/lcia_methods/' +
-        #              self.olca_data['metadata_iw_combined']['@id'] + '.json')
-        #
-        # if not os.path.exists(path + '/openLCA/combined_version (incl. CO2 uptake)/oLCA_folders/lcia_categories/'):
-        #     os.makedirs(path + '/openLCA/combined_version (incl. CO2 uptake)/oLCA_folders/lcia_categories/')
-        # for cat in self.olca_data['cf_dict_combined'].keys():
-        #     with open(path + '/openLCA/combined_version (incl. CO2 uptake)/oLCA_folders/lcia_categories/' +
-        #               self.olca_data['cf_dict_combined'][cat]['@id'] + '.json', 'w') as f:
-        #         json.dump(self.olca_data['cf_dict_combined'][cat], f)
-        #     zipObj.write(path + '/openLCA/combined_version (incl. CO2 uptake)/oLCA_folders/lcia_categories/' +
-        #                  self.olca_data['cf_dict_combined'][cat]['@id'] + '.json')
-        #
-        # if not os.path.exists(path + '/openLCA/combined_version (incl. CO2 uptake)/oLCA_folders/nw_sets/'):
-        #     os.makedirs(path + '/openLCA/combined_version (incl. CO2 uptake)/oLCA_folders/nw_sets/')
-        # with open(path + '/openLCA/combined_version (incl. CO2 uptake)/oLCA_folders/nw_sets/' +
-        #           self.olca_data['normalization']['@id'] + '.json', 'w') as f:
-        #     json.dump(self.olca_data['normalization'], f)
-        # zipObj.write(path + '/openLCA/combined_version (incl. CO2 uptake)/oLCA_folders/nw_sets/' +
-        #              self.olca_data['normalization']['@id'] + '.json')
-        # zipObj.close()
-        # # use shutil to simplify the folder structure within the zip file
-        # shutil.make_archive(path + '/openLCA/combined_version (incl. CO2 uptake)/impact_world_plus_' + self.version +
-        #                     ' (incl. CO2 uptake)_combined_version_openLCA', 'zip', path +
-        #                     '/openLCA/combined_version (incl. CO2 uptake)/oLCA_folders/')
-        #
-        # # create the openLCA version carboneutrality expert version (zip file)
-        # if not os.path.exists(path + '/openLCA/expert_version/'):
-        #     os.makedirs(path + '/openLCA/expert_version/')
-        # if os.path.exists(path + '/openLCA/expert_version/impact_world_plus'+self.version+'_openLCA.zip'):
-        #     os.remove(path + '/openLCA/expert_version/impact_world_plus'+self.version+'_openLCA.zip')
-        # if os.path.exists(path + '/openLCA/expert_version/oLCA_folders'):
-        #     shutil.rmtree(path + '/openLCA/expert_version/oLCA_folders')
-        # zipObj = zipfile.ZipFile(path + '/openLCA/expert_version/impact_world_plus_'+self.version+'_openLCA.zip', 'w')
-        #
-        # if not os.path.exists(path + '/openLCA/expert_version/oLCA_folders/categories/'):
-        #     os.makedirs(path + '/openLCA/expert_version/oLCA_folders/categories/')
-        # with open(path + '/openLCA/expert_version/oLCA_folders/categories/' + self.olca_data['category_metadata']['@id']
-        #           + '.json', 'w') as f:
-        #     json.dump(self.olca_data['category_metadata'], f)
-        # zipObj.write(path + '/openLCA/expert_version/oLCA_folders/categories/' +
-        #              self.olca_data['category_metadata']['@id'] + '.json')
-        #
-        # if not os.path.exists(path + '/openLCA/expert_version/oLCA_folders/lcia_methods/'):
-        #     os.makedirs(path + '/openLCA/expert_version/oLCA_folders/lcia_methods/')
-        # with open(path + '/openLCA/expert_version/oLCA_folders/lcia_methods/' +
-        #           self.olca_data['metadata_iw_damage_carboneutrality']['@id'] + '.json', 'w') as f:
-        #     json.dump(self.olca_data['metadata_iw_damage_carboneutrality'], f)
-        # zipObj.write(path + '/openLCA/expert_version/oLCA_folders/lcia_methods/' +
-        #              self.olca_data['metadata_iw_damage_carboneutrality']['@id'] + '.json')
-        #
-        # if not os.path.exists(path + '/openLCA/expert_version/oLCA_folders/lcia_categories/'):
-        #     os.makedirs(path + '/openLCA/expert_version/oLCA_folders/lcia_categories/')
-        # for cat in self.olca_data['cf_dict_damage_carboneutrality'].keys():
-        #     with open(path + '/openLCA/expert_version/oLCA_folders/lcia_categories/' +
-        #               self.olca_data['cf_dict_damage_carboneutrality'][cat]['@id'] + '.json', 'w') as f:
-        #         json.dump(self.olca_data['cf_dict_damage_carboneutrality'][cat], f)
-        #     zipObj.write(path + '/openLCA/expert_version/oLCA_folders/lcia_categories/' +
-        #                  self.olca_data['cf_dict_damage_carboneutrality'][cat]['@id'] + '.json')
-        #
-        # if not os.path.exists(path + '/openLCA/expert_version/oLCA_folders/nw_sets/'):
-        #     os.makedirs(path + '/openLCA/expert_version/oLCA_folders/nw_sets/')
-        # with open(path + '/openLCA/expert_version/oLCA_folders/nw_sets/' +
-        #           self.olca_data['normalization_carboneutrality']['@id'] + '.json', 'w') as f:
-        #     json.dump(self.olca_data['normalization_carboneutrality'], f)
-        # zipObj.write(path + '/openLCA/expert_version/oLCA_folders/nw_sets/' +
-        #              self.olca_data['normalization_carboneutrality']['@id'] + '.json')
-        # zipObj.close()
-        # # use shutil to simplify the folder structure within the zip file
-        # shutil.make_archive(path + '/openLCA/expert_version/impact_world_plus_'+self.version+
-        #                     '_expert_version_openLCA', 'zip', path +
-        #                     '/openLCA/expert_version/oLCA_folders/')
-        #
-        # # create the openLCA version carboneutrality midpoint version (zip file)
-        # if not os.path.exists(path + '/openLCA/midpoint_version/'):
-        #     os.makedirs(path + '/openLCA/midpoint_version/')
-        # if os.path.exists(path + '/openLCA/midpoint_version/impact_world_plus'+self.version+'_openLCA.zip'):
-        #     os.remove(path + '/openLCA/midpoint_version/impact_world_plus'+self.version+'_openLCA.zip')
-        # if os.path.exists(path + '/openLCA/midpoint_version/oLCA_folders'):
-        #     shutil.rmtree(path + '/openLCA/midpoint_version/oLCA_folders')
-        # zipObj = zipfile.ZipFile(path + '/openLCA/midpoint_version/impact_world_plus_'+self.version+'_openLCA.zip', 'w')
-        #
-        # if not os.path.exists(path + '/openLCA/midpoint_version/oLCA_folders/categories/'):
-        #     os.makedirs(path + '/openLCA/midpoint_version/oLCA_folders/categories/')
-        # with open(path + '/openLCA/midpoint_version/oLCA_folders/categories/' +
-        #           self.olca_data['category_metadata']['@id'] + '.json', 'w') as f:
-        #     json.dump(self.olca_data['category_metadata'], f)
-        # zipObj.write(path + '/openLCA/midpoint_version/oLCA_folders/categories/' +
-        #              self.olca_data['category_metadata']['@id'] + '.json')
-        #
-        # if not os.path.exists(path + '/openLCA/midpoint_version/oLCA_folders/lcia_methods/'):
-        #     os.makedirs(path + '/openLCA/midpoint_version/oLCA_folders/lcia_methods/')
-        # with open(path + '/openLCA/midpoint_version/oLCA_folders/lcia_methods/' +
-        #           self.olca_data['metadata_iw_midpoint_carboneutrality']['@id'] + '.json', 'w') as f:
-        #     json.dump(self.olca_data['metadata_iw_midpoint_carboneutrality'], f)
-        # zipObj.write(path + '/openLCA/midpoint_version/oLCA_folders/lcia_methods/' +
-        #              self.olca_data['metadata_iw_midpoint_carboneutrality']['@id'] + '.json')
-        #
-        # if not os.path.exists(path + '/openLCA/midpoint_version /oLCA_folders/lcia_categories/'):
-        #     os.makedirs(path + '/openLCA/midpoint_version/oLCA_folders/lcia_categories/')
-        # for cat in self.olca_data['cf_dict_midpoint_carboneutrality'].keys():
-        #     with open(path + '/openLCA/midpoint_version/oLCA_folders/lcia_categories/' +
-        #               self.olca_data['cf_dict_midpoint_carboneutrality'][cat]['@id'] + '.json', 'w') as f:
-        #         json.dump(self.olca_data['cf_dict_midpoint_carboneutrality'][cat], f)
-        #     zipObj.write(path + '/openLCA/midpoint_version/oLCA_folders/lcia_categories/' +
-        #                  self.olca_data['cf_dict_midpoint_carboneutrality'][cat]['@id'] + '.json')
-        # zipObj.close()
-        # # use shutil to simplify the folder structure within the zip file
-        # shutil.make_archive(path + '/openLCA/midpoint_version/impact_world_plus_'+self.version+
-        #                     '_midpoint_version_openLCA', 'zip', path +
-        #                     '/openLCA/midpoint_version/oLCA_folders/')
-        #
-        # # create the openLCA version carboneutrality combined version (zip file)
-        # if not os.path.exists(path + '/openLCA/combined_version/'):
-        #     os.makedirs(path + '/openLCA/combined_version/')
-        # if os.path.exists(path + '/openLCA/combined_version/impact_world_plus'+self.version+'_openLCA.zip'):
-        #     os.remove(path + '/openLCA/combined_version/impact_world_plus'+self.version+'_openLCA.zip')
-        # if os.path.exists(path + '/openLCA/combined_version/oLCA_folders'):
-        #     shutil.rmtree(path + '/openLCA/combined_version/oLCA_folders')
-        # zipObj = zipfile.ZipFile(path + '/openLCA/combined_version/impact_world_plus_'+self.version+'_openLCA.zip', 'w')
-        #
-        # if not os.path.exists(path + '/openLCA/combined_version/oLCA_folders/categories/'):
-        #     os.makedirs(path + '/openLCA/combined_version/oLCA_folders/categories/')
-        # with open(path + '/openLCA/combined_version/oLCA_folders/categories/' +
-        #           self.olca_data['category_metadata']['@id'] + '.json', 'w') as f:
-        #     json.dump(self.olca_data['category_metadata'], f)
-        # zipObj.write(path + '/openLCA/combined_version/oLCA_folders/categories/' +
-        #              self.olca_data['category_metadata']['@id'] + '.json')
-        #
-        # if not os.path.exists(path + '/openLCA/combined_version/oLCA_folders/lcia_methods/'):
-        #     os.makedirs(path + '/openLCA/combined_version/oLCA_folders/lcia_methods/')
-        # with open(path + '/openLCA/combined_version/oLCA_folders/lcia_methods/' +
-        #           self.olca_data['metadata_iw_combined_carboneutrality']['@id'] + '.json', 'w') as f:
-        #     json.dump(self.olca_data['metadata_iw_combined_carboneutrality'], f)
-        # zipObj.write(path + '/openLCA/combined_version/oLCA_folders/lcia_methods/' +
-        #              self.olca_data['metadata_iw_combined_carboneutrality']['@id'] + '.json')
-        #
-        # if not os.path.exists(path + '/openLCA/combined_version/oLCA_folders/lcia_categories/'):
-        #     os.makedirs(path + '/openLCA/combined_version/oLCA_folders/lcia_categories/')
-        # for cat in self.olca_data['cf_dict_combined_carboneutrality'].keys():
-        #     with open(path + '/openLCA/combined_version/oLCA_folders/lcia_categories/' +
-        #               self.olca_data['cf_dict_combined_carboneutrality'][cat]['@id'] + '.json', 'w') as f:
-        #         json.dump(self.olca_data['cf_dict_combined_carboneutrality'][cat], f)
-        #     zipObj.write(path + '/openLCA/combined_version/oLCA_folders/lcia_categories/' +
-        #                  self.olca_data['cf_dict_combined_carboneutrality'][cat]['@id'] + '.json')
-        #
-        # if not os.path.exists(path + '/openLCA/combined_version /oLCA_folders/nw_sets/'):
-        #     os.makedirs(path + '/openLCA/combined_version/oLCA_folders/nw_sets/')
-        # with open(path + '/openLCA/combined_version/oLCA_folders/nw_sets/' +
-        #           self.olca_data['normalization_carboneutrality']['@id'] + '.json', 'w') as f:
-        #     json.dump(self.olca_data['normalization_carboneutrality'], f)
-        # zipObj.write(path + '/openLCA/combined_version/oLCA_folders/nw_sets/' +
-        #              self.olca_data['normalization_carboneutrality']['@id'] + '.json')
-        # zipObj.close()
-        # # use shutil to simplify the folder structure within the zip file
-        # shutil.make_archive(path + '/openLCA/combined_version/impact_world_plus_' + self.version +
-        #                     '_combined_version_openLCA', 'zip', path +
-        #                     '/openLCA/combined_version/oLCA_folders/')
-
-    def produce_files_hybrid_ecoinvent(self):
-        """Specific method to create the files matching with hybrid-ecoinvent (pylcaio)."""
-
-        path = pkg_resources.resource_filename(__name__, '/Databases/Impact_world_' + self.version)
-
-        if not os.path.exists(path + '/for_hybrid_ecoinvent/ei35/'):
-            os.makedirs(path + '/for_hybrid_ecoinvent/ei35/')
-        if not os.path.exists(path + '/for_hybrid_ecoinvent/ei36/'):
-            os.makedirs(path + '/for_hybrid_ecoinvent/ei36/')
-        if not os.path.exists(path + '/for_hybrid_ecoinvent/ei371/'):
-            os.makedirs(path + '/for_hybrid_ecoinvent/ei371/')
-        if not os.path.exists(path + '/for_hybrid_ecoinvent/ei38/'):
-            os.makedirs(path + '/for_hybrid_ecoinvent/ei38/')
-        if not os.path.exists(path + '/for_hybrid_ecoinvent/ei39/'):
-            os.makedirs(path + '/for_hybrid_ecoinvent/ei39/')
-
-        scipy.sparse.save_npz(path+'/for_hybrid_ecoinvent/ei35/Ecoinvent_not_regionalized.npz',
-                              scipy.sparse.csr_matrix(self.ei35_iw_as_matrix))
-        scipy.sparse.save_npz(path+'/for_hybrid_ecoinvent/ei36/Ecoinvent_not_regionalized.npz',
-                              scipy.sparse.csr_matrix(self.ei36_iw_as_matrix))
-        scipy.sparse.save_npz(path+'/for_hybrid_ecoinvent/ei371/Ecoinvent_not_regionalized.npz',
-                              scipy.sparse.csr_matrix(self.ei371_iw_as_matrix))
-        scipy.sparse.save_npz(path+'/for_hybrid_ecoinvent/ei38/Ecoinvent_not_regionalized.npz',
-                              scipy.sparse.csr_matrix(self.ei38_iw_as_matrix))
-        scipy.sparse.save_npz(path+'/for_hybrid_ecoinvent/ei39/Ecoinvent_not_regionalized.npz',
-                              scipy.sparse.csr_matrix(self.ei39_iw_as_matrix))
-
-# ----------------------------------------- Secondary methods ----------------------------------------------------------
+    # ----------------------------------------- Secondary methods -----------------------------------------------------
 
     def load_basic_cfs(self):
         """
         Loading the basic CFs. By basic we mean that these CFs do not require further treatment.
 
         Concerned impact categories:
-            - Fossil and nuclear energy use
             - Freshwater ecotoxicity
             - Freshwater ecotoxicity, long term
             - Freshwater ecotoxicity, short term
@@ -2046,7 +1309,6 @@ class Parse:
             - Ionizing radiations
             - Marine acidification, short term
             = Marine acidification, long term
-            - Mineral resources use
 
         :return: updated master_db
         """
@@ -2056,9 +1318,6 @@ class Parse:
 
         self.logger.info("Loading marine acidification characterization factors...")
         mar_acid = pd.read_sql(sql='SELECT * FROM [CF - not regionalized - MarineAcidification]', con=self.conn)
-
-        self.logger.info("Loading fossil resources characterization factors...")
-        fossils = pd.read_sql(sql='SELECT * FROM [CF - not regionalized - FossilResources]', con=self.conn)
 
         elem_flow_list = pd.read_sql(sql='SELECT * FROM [SI - Mapping with elementary flows]', con=self.conn)
 
@@ -2071,8 +1330,9 @@ class Parse:
 
         self.logger.info("Loading freshwater ecotoxicity characterization factors...")
         fw_ecotoxicity = pd.read_sql(sql='SELECT * FROM [CF - not regionalized - FreshwaterEcotox]', con=self.conn)
-        fw_ecotoxicity = fw_ecotoxicity.merge(elem_flow_list.loc[:, ['Name IW+', 'CAS-Usetox2_FW']], left_on=['CAS number'],
-                                        right_on=['CAS-Usetox2_FW'], how='left').drop_duplicates()
+        fw_ecotoxicity = fw_ecotoxicity.merge(elem_flow_list.loc[:, ['Name IW+', 'CAS-Usetox2_FW']],
+                                              left_on=['CAS number'],
+                                              right_on=['CAS-Usetox2_FW'], how='left').drop_duplicates()
         fw_ecotoxicity = fw_ecotoxicity.drop(['Elem flow name', 'CAS number'], axis=1)
         fw_ecotoxicity = fw_ecotoxicity.rename(columns={'Name IW+': 'Elem flow name', 'CAS-Usetox2_FW': 'CAS number'})
 
@@ -2088,14 +1348,13 @@ class Parse:
         self.logger.info("Loading terrestrial ecotoxicity characterization factors...")
         terr_ecotoxicity = pd.read_sql('SELECT * FROM [CF - not regionalized - TerrestrialEcotox]', self.conn)
         terr_ecotoxicity = terr_ecotoxicity.merge(elem_flow_list.loc[:, ['Name IW+', 'CAS-Usetox2_Mar_Terr']],
-                                                left_on=['CAS number'],
-                                                right_on=['CAS-Usetox2_Mar_Terr'], how='left').drop_duplicates()
+                                                  left_on=['CAS number'],
+                                                  right_on=['CAS-Usetox2_Mar_Terr'], how='left').drop_duplicates()
         terr_ecotoxicity = terr_ecotoxicity.drop(['Elem flow name', 'CAS number'], axis=1)
         terr_ecotoxicity = terr_ecotoxicity.rename(
             columns={'Name IW+': 'Elem flow name', 'CAS-Usetox2_Mar_Terr': 'CAS number'})
 
-        self.master_db = pd.concat([ionizing, mar_acid, fossils, toxicity,
-                                    fw_ecotoxicity, mar_ecotoxicity, terr_ecotoxicity])
+        self.master_db = pd.concat([ionizing, mar_acid, toxicity, fw_ecotoxicity, mar_ecotoxicity, terr_ecotoxicity])
 
         self.master_db = clean_up_dataframe(self.master_db)
 
@@ -2108,13 +1367,16 @@ class Parse:
             - Climate change, long term
             - Climate change, human health, short term
             - Climate change, human health, long term
-            - Climate change, ecosystem quality, short term
-            - Climate change, ecosystem quality, long term
+            - Climate change, ecosystem quality, terrestrial ecosystem, short term
+            - Climate change, ecosystem quality, terrestrial ecosystem, long term
+            - Climate change, ecosystem quality, marine ecosystem, short term
+            - Climate change, ecosystem quality, marine ecosystem, long term
 
         :return: updated master_db
         """
 
         data = pd.read_sql('SELECT * FROM "CF - not regionalized - ClimateChange"', con=self.conn)
+
         # add carbon monoxide, which is based on the (C) stoechiometric ratio between CO2 and CO (1.57)
         monoxide = data.loc[data.Name == 'Carbon dioxide'].copy()
         monoxide.Name = 'Carbon monoxide'
@@ -2155,137 +1417,20 @@ class Parse:
 
         # ---------------------------- Climate change damage indicators -----------------------------------------------
 
-        # atmosphere properties
-        M_ATMOS = 5.1352E18  # kg
-        M_AIR = 28.97E-3  # kg/mol
-        # ppm concentrations in the air
-        co2 = 409.9
-        ch4 = 1866.3
-        n2o = 332.1
-
-        # calculate molecular mass of each GHG
-        data.loc[:, 'Molecular Mass (kg/mol)'] = [molmass.Formula(i).mass / 1000 for i in data.Formula]
-        # convert radiative efficiencies from W/m2/ppb to W/m2/kg for all GHGs
-        data.loc[:, 'Radiative Efficiency (W/m2/kg)'] = data.loc[:, 'Radiative Efficiency (W/m2/ppb)'] / (
-                    1E-9 * (data.loc[:, 'Molecular Mass (kg/mol)'] / M_AIR) * M_ATMOS)
-        # set index and create column
-        data = data.set_index('Name IW+')
-        data.loc[:, 'AGTP cumulative 100 years'] = 0
-        data.loc[:, 'AGTP cumulative 500 years'] = 0
-
-        # calculate the cumulative AGTPs for both time horizons (100 and 500 years)
-        for H in [100, 500]:
-            # Value for CO2
-            rf_co2, agwp_co2, agtp_co2, iagtp_co2 = co2_analytical(
-                np.linspace(0, H, H + 1),
-                d=np.array([3.424102092311, 285.003477841911]),
-                q=np.array([0.443767728883447, 0.313998206372015]),
-                co2=co2, n2o=n2o,
-                a=np.array([0.2173, 0.2240, 0.2824, 0.2763]),
-                alpha_co2=np.array([0, 394.4, 36.54, 4.304]),
-                co2_ra=0.05
-            )
-            # write CO2 data value in dataframe
-            if H == 100:
-                data.loc['Carbon dioxide, fossil', 'AGTP cumulative 100 years'] = sum(agtp_co2)
-            elif H == 500:
-                data.loc['Carbon dioxide, fossil', 'AGTP cumulative 500 years'] = sum(agtp_co2)
-
-            # value for CH4
-            rf_ch4, agwp_ch4, agtp_ch4, iagtp_ch4 = ch4_analytical(
-                np.linspace(0, H, H + 1),
-                d=np.array([3.424102092311, 285.003477841911]),
-                q=np.array([0.443767728883447, 0.313998206372015]),
-                co2=co2, ch4=ch4, n2o=n2o,
-                ch4_ra=-0.14,
-                alpha_ch4=11.8,
-                ch4_o3=1.4e-4,
-                ch4_h2o=0.00004
-            )
-
-            rf_cc, agwp_cc, agtp_cc = carbon_cycle_adjustment(
-                H=np.linspace(0, H, H + 1),
-                agtp=agtp_ch4,
-                co2=co2,
-                n2o=n2o,
-                co2_ra=0.05,
-                d=np.array([3.424102092311, 285.003477841911]),
-                q=np.array([0.443767728883447, 0.313998206372015]),
-            )
-
-            # write CH4 data value in dataframe
-            if H == 100:
-                data.loc['Methane, fossil', 'AGTP cumulative 100 years'] = sum(agtp_ch4 + agtp_cc)
-            elif H == 500:
-                data.loc['Methane, fossil', 'AGTP cumulative 500 years'] = sum(agtp_ch4 + agtp_cc)
-
-            # for N2O
-            rf_n2o, agwp_n2o, agtp_n2o, iagtp_n2o = n2o_analytical(
-                np.linspace(0, H, H + 1),
-                d=np.array([3.424102092311, 285.003477841911]),
-                q=np.array([0.443767728883447, 0.313998206372015]),
-                co2=co2, ch4=ch4, n2o=n2o
-            )
-            rf_cc, agwp_cc, agtp_cc = carbon_cycle_adjustment(
-                H=np.linspace(0, H, H + 1),
-                agtp=agtp_n2o,
-                co2=co2,
-                n2o=n2o,
-                co2_ra=0.05,
-                d=np.array([3.424102092311, 285.003477841911]),
-                q=np.array([0.443767728883447, 0.313998206372015]),
-            )
-            # write N2O data value in dataframe
-            if H == 100:
-                data.loc['Dinitrogen monoxide', 'AGTP cumulative 100 years'] = sum(agtp_n2o + agtp_cc)
-            elif H == 500:
-                data.loc['Dinitrogen monoxide', 'AGTP cumulative 500 years'] = sum(agtp_n2o + agtp_cc)
-
-            # for other GHGs
-            for ghg in data.index:
-                if ghg not in ['Carbon dioxide, fossil', 'Methane, fossil', 'Methane, biogenic', 'Dinitrogen monoxide']:
-                    if data.loc[ghg, 'Lifetime (yr)'] != 0:
-                        alpha = data.loc[ghg, 'Lifetime (yr)']
-                        re = data.loc[ghg, 'Radiative Efficiency (W/m2/ppb)']
-                        mass = data.loc[ghg, 'Molecular Mass (kg/mol)']
-
-                        if ghg in ['Methane, trichlorofluoro-, CFC-11', 'Methane, dichlorodifluoro-, CFC-12']:
-                            cfc_ra = 0.12
-                        else:
-                            cfc_ra = 0
-
-                        rf, agwp, agtp, iagtp = halogen_analytical(
-                            H=np.linspace(0, H, H + 1),
-                            alpha=alpha,
-                            re=re,
-                            mass=mass,
-                            d=np.array([3.424102092311, 285.003477841911]),
-                            q=np.array([0.443767728883447, 0.313998206372015]),
-                            halogen_ra=cfc_ra
-                        )
-                        rf_cc, agwp_cc, agtp_cc = carbon_cycle_adjustment(
-                            H=np.linspace(0, H, H + 1),
-                            agtp=agtp,
-                            co2=co2,
-                            n2o=n2o,
-                            co2_ra=0.05,
-                            d=np.array([3.424102092311, 285.003477841911]),
-                            q=np.array([0.443767728883447, 0.313998206372015]),
-                        )
-                        # write data in dataframe
-                        if H == 100:
-                            data.loc[ghg, 'AGTP cumulative 100 years'] = sum(agtp + agtp_cc)
-                        elif H == 500:
-                            data.loc[ghg, 'AGTP cumulative 500 years'] = sum(agtp + agtp_cc)
+        # get fate factors
+        fate_factors = pd.read_sql('SELECT * FROM "SI - Climate change - fate factors (K/kg)"',
+                                   con=self.conn).set_index(['Name IW+', 'CAS IW+'])
 
         # get effect factors
-        effect_factors = pd.read_sql('SELECT * FROM "SI - Climate change - effect factors"', con=self.conn).set_index('index')
-        HH_effect_factor = effect_factors.loc['Total', 'DALY/°C/yr']
-        EQ_effect_factor = effect_factors.loc['Total', 'PDF.m2.yr/K/yr']
+        effect_factors = pd.read_sql('SELECT * FROM "SI - Climate change - effect factors"', con=self.conn).set_index(
+            'index')
+        HH_effect_factor = effect_factors.loc['Total', 'Human health (DALY/K/yr)']
+        EQ_terr_effect_factor = effect_factors.loc['Total', 'Ecosystem quality - terrestrial species (PDF.m2/K/yr)']
+        EQ_mar_effect_factor = effect_factors.loc['Total', 'Ecosystem quality - marine species (PDF.m2/K/yr)']
 
         # Climate change, human health, short term
-        GWP_damage_HH_short = data.reset_index().loc[:, ['Name IW+', 'AGTP cumulative 100 years', 'CAS IW+']].copy()
-        GWP_damage_HH_short.columns = ['Elem flow name', 'CF value', 'CAS number']
+        GWP_damage_HH_short = (fate_factors.iloc[:, :101].sum(1) * HH_effect_factor).reset_index()
+        GWP_damage_HH_short.columns = ['Elem flow name', 'CAS number', 'CF value']
         GWP_damage_HH_short.loc[:, 'Impact category'] = 'Climate change, human health, short term'
         GWP_damage_HH_short.loc[:, 'CF unit'] = 'DALY'
         GWP_damage_HH_short.loc[:, 'Compartment'] = 'Air'
@@ -2293,12 +1438,10 @@ class Parse:
         GWP_damage_HH_short.loc[:, 'Elem flow unit'] = 'kg'
         GWP_damage_HH_short.loc[:, 'MP or Damage'] = 'Damage'
         GWP_damage_HH_short.loc[:, 'Native geographical resolution scale'] = 'Global'
-        GWP_damage_HH_short.loc[:, 'CF value'] *= HH_effect_factor
 
         # Climate change, human health, long term
-        GWP_damage_HH_long = data.reset_index().loc[:, ['Name IW+', 'AGTP cumulative 100 years', 'AGTP cumulative 500 years',
-                                          'CAS IW+']].copy()
-        GWP_damage_HH_long = GWP_damage_HH_long.rename(columns={'Name IW+': 'Elem flow name','CAS IW+':'CAS number'})
+        GWP_damage_HH_long = (fate_factors.iloc[:, 101:].sum(1) * HH_effect_factor).reset_index()
+        GWP_damage_HH_long.columns = ['Elem flow name', 'CAS number', 'CF value']
         GWP_damage_HH_long.loc[:, 'Impact category'] = 'Climate change, human health, long term'
         GWP_damage_HH_long.loc[:, 'CF unit'] = 'DALY'
         GWP_damage_HH_long.loc[:, 'Compartment'] = 'Air'
@@ -2306,38 +1449,71 @@ class Parse:
         GWP_damage_HH_long.loc[:, 'Elem flow unit'] = 'kg'
         GWP_damage_HH_long.loc[:, 'MP or Damage'] = 'Damage'
         GWP_damage_HH_long.loc[:, 'Native geographical resolution scale'] = 'Global'
-        GWP_damage_HH_long.loc[:, 'CF value'] = (GWP_damage_HH_long.loc[:,'AGTP cumulative 500 years'] -
-                                                 GWP_damage_HH_long.loc[:,'AGTP cumulative 100 years']) * HH_effect_factor
-        GWP_damage_HH_long = GWP_damage_HH_long.drop(['AGTP cumulative 100 years', 'AGTP cumulative 500 years'], axis=1)
 
-        # Climate change, ecosystem quality, short term
-        GWP_damage_EQ_short = data.reset_index().loc[:, ['Name IW+', 'AGTP cumulative 100 years', 'CAS IW+']]
-        GWP_damage_EQ_short.columns = ['Elem flow name', 'CF value', 'CAS number']
-        GWP_damage_EQ_short.loc[:, 'Impact category'] = 'Climate change, ecosystem quality, short term'
-        GWP_damage_EQ_short.loc[:, 'CF unit'] = 'PDF.m2.yr'
-        GWP_damage_EQ_short.loc[:, 'Compartment'] = 'Air'
-        GWP_damage_EQ_short.loc[:, 'Sub-compartment'] = '(unspecified)'
-        GWP_damage_EQ_short.loc[:, 'Elem flow unit'] = 'kg'
-        GWP_damage_EQ_short.loc[:, 'MP or Damage'] = 'Damage'
-        GWP_damage_EQ_short.loc[:, 'Native geographical resolution scale'] = 'Global'
-        GWP_damage_EQ_short.loc[:, 'CF value'] *= EQ_effect_factor
+        # Climate change, ecosystem quality, terrestrial ecosystem, short term
+        GWP_damage_EQ_terr_short = (fate_factors.iloc[:, :101].sum(1) * EQ_terr_effect_factor).reset_index()
+        GWP_damage_EQ_terr_short.columns = ['Elem flow name', 'CAS number', 'CF value']
+        GWP_damage_EQ_terr_short.loc[:, 'Impact category'] = 'Climate change, ecosystem quality, terrestrial ecosystem, short term'
+        GWP_damage_EQ_terr_short.loc[:, 'CF unit'] = 'PDF.m2.yr'
+        GWP_damage_EQ_terr_short.loc[:, 'Compartment'] = 'Air'
+        GWP_damage_EQ_terr_short.loc[:, 'Sub-compartment'] = '(unspecified)'
+        GWP_damage_EQ_terr_short.loc[:, 'Elem flow unit'] = 'kg'
+        GWP_damage_EQ_terr_short.loc[:, 'MP or Damage'] = 'Damage'
+        GWP_damage_EQ_terr_short.loc[:, 'Native geographical resolution scale'] = 'Global'
 
-        # Climate change, ecosystem quality, long term
-        GWP_damage_EQ_long = data.reset_index().loc[:, ['Name IW+', 'AGTP cumulative 100 years', 'AGTP cumulative 500 years',
-                                          'CAS IW+']].copy()
-        GWP_damage_EQ_long = GWP_damage_EQ_long.rename(columns={'Name IW+': 'Elem flow name','CAS IW+':'CAS number'})
-        GWP_damage_EQ_long.loc[:, 'Impact category'] = 'Climate change, ecosystem quality, long term'
-        GWP_damage_EQ_long.loc[:, 'CF unit'] = 'PDF.m2.yr'
-        GWP_damage_EQ_long.loc[:, 'Compartment'] = 'Air'
-        GWP_damage_EQ_long.loc[:, 'Sub-compartment'] = '(unspecified)'
-        GWP_damage_EQ_long.loc[:, 'Elem flow unit'] = 'kg'
-        GWP_damage_EQ_long.loc[:, 'MP or Damage'] = 'Damage'
-        GWP_damage_EQ_long.loc[:, 'Native geographical resolution scale'] = 'Global'
-        GWP_damage_EQ_long.loc[:, 'CF value'] = (GWP_damage_EQ_long.loc[:,'AGTP cumulative 500 years'] -
-                                                 GWP_damage_EQ_long.loc[:,'AGTP cumulative 100 years']) * EQ_effect_factor
-        GWP_damage_EQ_long = GWP_damage_EQ_long.drop(['AGTP cumulative 100 years', 'AGTP cumulative 500 years'], axis=1)
+        # Climate change, ecosystem quality, terrestrial ecosystem, long term
+        GWP_damage_EQ_terr_long = (fate_factors.iloc[:, 101:].sum(1) * EQ_terr_effect_factor).reset_index()
+        GWP_damage_EQ_terr_long.columns = ['Elem flow name', 'CAS number', 'CF value']
+        GWP_damage_EQ_terr_long.loc[:, 'Impact category'] = 'Climate change, ecosystem quality, terrestrial ecosystem, long term'
+        GWP_damage_EQ_terr_long.loc[:, 'CF unit'] = 'PDF.m2.yr'
+        GWP_damage_EQ_terr_long.loc[:, 'Compartment'] = 'Air'
+        GWP_damage_EQ_terr_long.loc[:, 'Sub-compartment'] = '(unspecified)'
+        GWP_damage_EQ_terr_long.loc[:, 'Elem flow unit'] = 'kg'
+        GWP_damage_EQ_terr_long.loc[:, 'MP or Damage'] = 'Damage'
+        GWP_damage_EQ_terr_long.loc[:, 'Native geographical resolution scale'] = 'Global'
 
-        self.master_db = pd.concat([self.master_db, GWP_midpoint, GTP_midpoint, GWP_damage_EQ_short, GWP_damage_EQ_long,
+        # Climate change, ecosystem quality, marine ecosystem, short term
+        GWP_damage_EQ_mar_short = (fate_factors.iloc[:, :101].sum(1) * EQ_mar_effect_factor).reset_index()
+        GWP_damage_EQ_mar_short.columns = ['Elem flow name', 'CAS number', 'CF value']
+        GWP_damage_EQ_mar_short.loc[:, 'Impact category'] = 'Climate change, ecosystem quality, marine ecosystem, short term'
+        GWP_damage_EQ_mar_short.loc[:, 'CF unit'] = 'PDF.m2.yr'
+        GWP_damage_EQ_mar_short.loc[:, 'Compartment'] = 'Air'
+        GWP_damage_EQ_mar_short.loc[:, 'Sub-compartment'] = '(unspecified)'
+        GWP_damage_EQ_mar_short.loc[:, 'Elem flow unit'] = 'kg'
+        GWP_damage_EQ_mar_short.loc[:, 'MP or Damage'] = 'Damage'
+        GWP_damage_EQ_mar_short.loc[:, 'Native geographical resolution scale'] = 'Global'
+
+        # Climate change, ecosystem quality, marine ecosystem, long term
+        GWP_damage_EQ_mar_long = (fate_factors.iloc[:, 101:].sum(1) * EQ_mar_effect_factor).reset_index()
+        GWP_damage_EQ_mar_long.columns = ['Elem flow name', 'CAS number', 'CF value']
+        GWP_damage_EQ_mar_long.loc[:, 'Impact category'] = 'Climate change, ecosystem quality, marine ecosystem, long term'
+        GWP_damage_EQ_mar_long.loc[:, 'CF unit'] = 'PDF.m2.yr'
+        GWP_damage_EQ_mar_long.loc[:, 'Compartment'] = 'Air'
+        GWP_damage_EQ_mar_long.loc[:, 'Sub-compartment'] = '(unspecified)'
+        GWP_damage_EQ_mar_long.loc[:, 'Elem flow unit'] = 'kg'
+        GWP_damage_EQ_mar_long.loc[:, 'MP or Damage'] = 'Damage'
+        GWP_damage_EQ_mar_long.loc[:, 'Native geographical resolution scale'] = 'Global'
+
+        # deal with biogenic methane
+        def add_biogenic_methane(df):
+            dff = df.loc[df.loc[:, 'Elem flow name'] == 'Methane, fossil'].copy()
+            dff.loc[:, 'Elem flow name'] = 'Methane, biogenic'
+            dff.loc[:, 'CF value'] *= (
+                        GWP_midpoint.loc[GWP_midpoint.loc[:, 'Elem flow name'] == 'Methane, biogenic', 'CF value'].iloc[0] /
+                        GWP_midpoint.loc[GWP_midpoint.loc[:, 'Elem flow name'] == 'Methane, fossil', 'CF value'].iloc[0])
+            df = pd.concat([df, dff])
+            return df
+
+        GWP_damage_HH_short = add_biogenic_methane(GWP_damage_HH_short)
+        GWP_damage_HH_long = add_biogenic_methane(GWP_damage_HH_long)
+        GWP_damage_EQ_terr_short = add_biogenic_methane(GWP_damage_EQ_terr_short)
+        GWP_damage_EQ_terr_long = add_biogenic_methane(GWP_damage_EQ_terr_long)
+        GWP_damage_EQ_mar_short = add_biogenic_methane(GWP_damage_EQ_mar_short)
+        GWP_damage_EQ_mar_long = add_biogenic_methane(GWP_damage_EQ_mar_long)
+
+        self.master_db = pd.concat([self.master_db, GWP_midpoint, GTP_midpoint,
+                                    GWP_damage_EQ_terr_short, GWP_damage_EQ_terr_long,
+                                    GWP_damage_EQ_mar_short, GWP_damage_EQ_mar_long,
                                     GWP_damage_HH_short, GWP_damage_HH_long])
         self.master_db = clean_up_dataframe(self.master_db)
 
@@ -2822,20 +1998,76 @@ class Parse:
         self.master_db = pd.concat([self.master_db, concat_data])
         self.master_db = clean_up_dataframe(self.master_db)
 
-    def load_mineral_resource_use_cfs(self):
+    def load_resources_services_loss_cfs(self):
         """
-        Loading the CFs for the mineral resource use impact category.
+        Loading the CFs for the resources services loss adaptation impact category.
 
         Concerned impact categories:
-            - Mineral resource use
+            - Resources services loss
+            - Resources services loss adaptation
 
         :return: updated master_db
         """
 
-        # read in and format data
-        data = pd.read_sql('SELECT * FROM [CF - not regionalized - MineralResources]', self.conn)
-        data.columns = ['Elem flow name', 'CAS number', 'Elem flow unit', 'CF value']
-        data.loc[:, 'Impact category'] = 'Mineral resource use'
+        # ----------------------------- RESEDA ----------------------------------------
+
+        data = pd.read_sql('SELECT * FROM [CF - not regionalized - ResourcesServicesLoss]', self.conn)
+        data.columns = ['Elem flow name', 'CAS number', 'CF value', 'Status', 'Elem flow unit']
+
+        # if you want to remove isotopes
+        data = data[data.Status != 'isotope']
+        data = data.drop('Status', axis=1)
+
+        # add metadata
+        data.loc[:, 'Impact category'] = 'Resources services loss'
+        data.loc[:, 'CF unit'] = 'MJ'
+        data.loc[:, 'MP or Damage'] = 'Midpoint'
+        data.loc[:, 'Native geographical resolution scale'] = 'Not regionalized'
+
+        # the CFs must be created for all compartments and sub-compartments possible
+        data.loc[:, 'Compartment'] = 'Air'
+        data.loc[:, 'Sub-compartment'] = '(unspecified)'
+        water_comp_data = data.copy()
+        water_comp_data.loc[:, 'Compartment'] = 'Water'
+        soil_comp_data = data.copy()
+        soil_comp_data.loc[:, 'Compartment'] = 'Soil'
+
+        data = pd.concat([data, water_comp_data, soil_comp_data]).reset_index().drop('index', axis=1)
+
+        subcomps_air = ['high. pop.', 'indoor', 'low. pop.', 'low. pop., long-term', 'stratosphere + troposphere']
+        subcomps_water = ['lake', 'river', 'ocean', 'groundwater', 'groundwater, long-term']
+        subcomps_soil = ['agricultural', 'forestry', 'industrial']
+
+        for subcomp in subcomps_air:
+            df = data[data.Compartment == 'Air'].copy()
+            df.loc[:, 'Sub-compartment'] = subcomp
+            data = pd.concat([data, df])
+        for subcomp in subcomps_water:
+            df = data[data.Compartment == 'Water'].copy()
+            df.loc[:, 'Sub-compartment'] = subcomp
+            data = pd.concat([data, df])
+        for subcomp in subcomps_soil:
+            df = data[data.Compartment == 'Soil'].copy()
+            df.loc[:, 'Sub-compartment'] = subcomp
+            data = pd.concat([data, df])
+
+        data = data.reset_index().drop('index', axis=1)
+
+        # concat with master_db
+        self.master_db = pd.concat([self.master_db, data])
+        self.master_db = clean_up_dataframe(self.master_db)
+
+        # ------------------------------ ACP ----------------------------------------
+
+        data = pd.read_sql('SELECT * FROM [CF - not regionalized - ResourcesServicesLossAdaptation]', self.conn)
+        data.columns = ['Elem flow name', 'CAS number', 'CF value', 'Status', 'Elem flow unit']
+
+        # if you want to remove isotopes
+        data = data[data.Status != 'isotope']
+        data = data.drop('Status', axis=1)
+
+        # add metadata
+        data.loc[:, 'Impact category'] = 'Resources services loss (adaptation)'
         data.loc[:, 'CF unit'] = 'MJ'
         data.loc[:, 'MP or Damage'] = 'Midpoint'
         data.loc[:, 'Native geographical resolution scale'] = 'Not regionalized'
@@ -2966,9 +2198,16 @@ class Parse:
 
         # calculate midpoint values
         midpoint_data = data.copy()
-        midpoint_data.loc[:, 'CF value'] /= (
+        midpoint_data.loc[[i for i in midpoint_data.index if 'Occupation' in midpoint_data.loc[i, 'Elem flow name']],
+                          'CF value'] /= (
             midpoint_data.loc[midpoint_data.loc[:, 'Elem flow name'] ==
                               'Occupation, annual crops, GLO', 'CF value'].iloc[0]
+        )
+        midpoint_data.loc[
+            [i for i in midpoint_data.index if 'Transformation' in midpoint_data.loc[i, 'Elem flow name']],
+            'CF value'] /= abs(
+            midpoint_data.loc[midpoint_data.loc[:, 'Elem flow name'] ==
+                              'Transformation, from annual crops, GLO', 'CF value'].iloc[0]
         )
         midpoint_data.loc[:, 'MP or Damage'] = 'Midpoint'
         midpoint_data.loc[
@@ -3018,7 +2257,7 @@ class Parse:
         # first we need to aggregate sub-regions to country level for a few countries which otherwise undefined
         countries_of_subregions_to_aggregate = ['Gabon', 'Kenya', 'Somalia', 'Uganda', 'South Africa', 'Russia',
                                                 'Norway', 'Spain', 'United Kingdom', 'Mexico', 'Saudi Arabia', 'Canada',
-                                                'United States', 'Australia','Brazil', 'China', 'India', 'Indonesia']
+                                                'United States', 'Australia', 'Brazil', 'China', 'India', 'Indonesia']
 
         for country in countries_of_subregions_to_aggregate:
             CF_urban = ((data.loc[[i for i in data.index if (data.loc[i, 'Country'] == country and data.loc[
@@ -3112,9 +2351,9 @@ class Parse:
 
         # third we need to determine unspecified intake fractions for everyone based on population
         data.loc[:, 'iF unspecified'] = (data.loc[:, 'iF urban'] * data.loc[:, 'Population urban'] / (
-                    data.loc[:, 'Population urban'] + data.loc[:, 'Population rural']) +
+                data.loc[:, 'Population urban'] + data.loc[:, 'Population rural']) +
                                          data.loc[:, 'iF rural'] * data.loc[:, 'Population rural'] / (
-                                                     data.loc[:, 'Population urban'] + data.loc[:, 'Population rural']))
+                                                 data.loc[:, 'Population urban'] + data.loc[:, 'Population rural']))
 
         # add ISO 2-letter codes to countries
         coco_logger = coco.logging.getLogger()
@@ -3238,12 +2477,12 @@ class Parse:
                 if conc[region] in list(data.Country):
                     if so2.loc[flow, 'Sub-compartment'] == 'high. pop.':
                         so2.loc[flow, 'CF value'] = (
-                                    so2.loc[flow, 'CF value'] / data.loc[data.Country == conc[region], 'iF urban'].iloc[
-                                0] * secondary_pm_if.loc['SO2', 'urban'])
+                                so2.loc[flow, 'CF value'] / data.loc[data.Country == conc[region], 'iF urban'].iloc[
+                            0] * secondary_pm_if.loc['SO2', 'urban'])
                     elif so2.loc[flow, 'Sub-compartment'] == 'low. pop.':
                         so2.loc[flow, 'CF value'] = (
-                                    so2.loc[flow, 'CF value'] / data.loc[data.Country == conc[region], 'iF rural'].iloc[
-                                0] * secondary_pm_if.loc['SO2', 'rural'])
+                                so2.loc[flow, 'CF value'] / data.loc[data.Country == conc[region], 'iF rural'].iloc[
+                            0] * secondary_pm_if.loc['SO2', 'rural'])
                     elif so2.loc[flow, 'Sub-compartment'] == '(unspecified)':
                         so2.loc[flow, 'CF value'] = (so2.loc[flow, 'CF value'] /
                                                      data.loc[data.Country == conc[region], 'iF unspecified'].iloc[0] *
@@ -3264,12 +2503,12 @@ class Parse:
             elif region in data.Country_code:
                 if so2.loc[flow, 'Sub-compartment'] == 'high. pop.':
                     so2.loc[flow, 'CF value'] = (
-                                so2.loc[flow, 'CF value'] / data.loc[data.Country_code == region, 'iF urban'].iloc[0] *
-                                secondary_pm_if.loc['SO2', 'urban'])
+                            so2.loc[flow, 'CF value'] / data.loc[data.Country_code == region, 'iF urban'].iloc[0] *
+                            secondary_pm_if.loc['SO2', 'urban'])
                 elif so2.loc[flow, 'Sub-compartment'] == 'low. pop.':
                     so2.loc[flow, 'CF value'] = (
-                                so2.loc[flow, 'CF value'] / data.loc[data.Country_code == region, 'iF rural'].iloc[0] *
-                                secondary_pm_if.loc['SO2', 'rural'])
+                            so2.loc[flow, 'CF value'] / data.loc[data.Country_code == region, 'iF rural'].iloc[0] *
+                            secondary_pm_if.loc['SO2', 'rural'])
                 elif so2.loc[flow, 'Sub-compartment'] == '(unspecified)':
                     so2.loc[flow, 'CF value'] = (so2.loc[flow, 'CF value'] /
                                                  data.loc[data.Country_code == region, 'iF unspecified'].iloc[0] *
@@ -3278,16 +2517,16 @@ class Parse:
                 # for RoW and GLO
                 if so2.loc[flow, 'Sub-compartment'] == 'high. pop.':
                     so2.loc[flow, 'CF value'] = (
-                                so2.loc[flow, 'CF value'] / data.loc[data.Continent == 'Global', 'iF urban'].iloc[0] *
-                                secondary_pm_if.loc['SO2', 'urban'])
+                            so2.loc[flow, 'CF value'] / data.loc[data.Continent == 'Global', 'iF urban'].iloc[0] *
+                            secondary_pm_if.loc['SO2', 'urban'])
                 elif so2.loc[flow, 'Sub-compartment'] == 'low. pop.':
                     so2.loc[flow, 'CF value'] = (
-                                so2.loc[flow, 'CF value'] / data.loc[data.Continent == 'Global', 'iF rural'].iloc[0] *
-                                secondary_pm_if.loc['SO2', 'rural'])
+                            so2.loc[flow, 'CF value'] / data.loc[data.Continent == 'Global', 'iF rural'].iloc[0] *
+                            secondary_pm_if.loc['SO2', 'rural'])
                 elif so2.loc[flow, 'Sub-compartment'] == '(unspecified)':
                     so2.loc[flow, 'CF value'] = (
-                                so2.loc[flow, 'CF value'] / data.loc[data.Continent == 'Global', 'iF unspecified'].iloc[
-                            0] * secondary_pm_if.loc['SO2', 'unspecified'])
+                            so2.loc[flow, 'CF value'] / data.loc[data.Continent == 'Global', 'iF unspecified'].iloc[
+                        0] * secondary_pm_if.loc['SO2', 'unspecified'])
 
         nh3 = particulate_damage.copy()
         nh3.loc[:, 'Elem flow name'] = [i.replace('Particulates, < 2.5 um', 'Ammonia') for i in
@@ -3300,12 +2539,12 @@ class Parse:
                 if conc[region] in list(data.Country):
                     if nh3.loc[flow, 'Sub-compartment'] == 'high. pop.':
                         nh3.loc[flow, 'CF value'] = (
-                                    nh3.loc[flow, 'CF value'] / data.loc[data.Country == conc[region], 'iF urban'].iloc[
-                                0] * secondary_pm_if.loc['NH3', 'urban'])
+                                nh3.loc[flow, 'CF value'] / data.loc[data.Country == conc[region], 'iF urban'].iloc[
+                            0] * secondary_pm_if.loc['NH3', 'urban'])
                     elif nh3.loc[flow, 'Sub-compartment'] == 'low. pop.':
                         nh3.loc[flow, 'CF value'] = (
-                                    nh3.loc[flow, 'CF value'] / data.loc[data.Country == conc[region], 'iF rural'].iloc[
-                                0] * secondary_pm_if.loc['NH3', 'rural'])
+                                nh3.loc[flow, 'CF value'] / data.loc[data.Country == conc[region], 'iF rural'].iloc[
+                            0] * secondary_pm_if.loc['NH3', 'rural'])
                     elif nh3.loc[flow, 'Sub-compartment'] == '(unspecified)':
                         nh3.loc[flow, 'CF value'] = (nh3.loc[flow, 'CF value'] /
                                                      data.loc[data.Country == conc[region], 'iF unspecified'].iloc[0] *
@@ -3340,16 +2579,16 @@ class Parse:
                 # for RoW and GLO
                 if nh3.loc[flow, 'Sub-compartment'] == 'high. pop.':
                     nh3.loc[flow, 'CF value'] = (
-                                nh3.loc[flow, 'CF value'] / data.loc[data.Continent == 'Global', 'iF urban'].iloc[0] *
-                                secondary_pm_if.loc['NH3', 'urban'])
+                            nh3.loc[flow, 'CF value'] / data.loc[data.Continent == 'Global', 'iF urban'].iloc[0] *
+                            secondary_pm_if.loc['NH3', 'urban'])
                 elif nh3.loc[flow, 'Sub-compartment'] == 'low. pop.':
                     nh3.loc[flow, 'CF value'] = (
-                                nh3.loc[flow, 'CF value'] / data.loc[data.Continent == 'Global', 'iF rural'].iloc[0] *
-                                secondary_pm_if.loc['NH3', 'rural'])
+                            nh3.loc[flow, 'CF value'] / data.loc[data.Continent == 'Global', 'iF rural'].iloc[0] *
+                            secondary_pm_if.loc['NH3', 'rural'])
                 elif nh3.loc[flow, 'Sub-compartment'] == '(unspecified)':
                     nh3.loc[flow, 'CF value'] = (
-                                nh3.loc[flow, 'CF value'] / data.loc[data.Continent == 'Global', 'iF unspecified'].iloc[
-                            0] * secondary_pm_if.loc['NH3', 'unspecified'])
+                            nh3.loc[flow, 'CF value'] / data.loc[data.Continent == 'Global', 'iF unspecified'].iloc[
+                        0] * secondary_pm_if.loc['NH3', 'unspecified'])
 
         nox = particulate_damage.copy()
         nox.loc[:, 'Elem flow name'] = [i.replace('Particulates, < 2.5 um', 'Nitrogen oxides') for i in
@@ -3362,12 +2601,12 @@ class Parse:
                 if conc[region] in list(data.Country):
                     if nox.loc[flow, 'Sub-compartment'] == 'high. pop.':
                         nox.loc[flow, 'CF value'] = (
-                                    nox.loc[flow, 'CF value'] / data.loc[data.Country == conc[region], 'iF urban'].iloc[
-                                0] * secondary_pm_if.loc['NOx', 'urban'])
+                                nox.loc[flow, 'CF value'] / data.loc[data.Country == conc[region], 'iF urban'].iloc[
+                            0] * secondary_pm_if.loc['NOx', 'urban'])
                     elif nox.loc[flow, 'Sub-compartment'] == 'low. pop.':
                         nox.loc[flow, 'CF value'] = (
-                                    nox.loc[flow, 'CF value'] / data.loc[data.Country == conc[region], 'iF rural'].iloc[
-                                0] * secondary_pm_if.loc['NOx', 'rural'])
+                                nox.loc[flow, 'CF value'] / data.loc[data.Country == conc[region], 'iF rural'].iloc[
+                            0] * secondary_pm_if.loc['NOx', 'rural'])
                     elif nox.loc[flow, 'Sub-compartment'] == '(unspecified)':
                         nox.loc[flow, 'CF value'] = (nox.loc[flow, 'CF value'] /
                                                      data.loc[data.Country == conc[region], 'iF unspecified'].iloc[0] *
@@ -3388,12 +2627,12 @@ class Parse:
             elif region in data.Country_code:
                 if nox.loc[flow, 'Sub-compartment'] == 'high. pop.':
                     nox.loc[flow, 'CF value'] = (
-                                nox.loc[flow, 'CF value'] / data.loc[data.Country_code == region, 'iF urban'].iloc[0] *
-                                secondary_pm_if.loc['NOx', 'urban'])
+                            nox.loc[flow, 'CF value'] / data.loc[data.Country_code == region, 'iF urban'].iloc[0] *
+                            secondary_pm_if.loc['NOx', 'urban'])
                 elif nox.loc[flow, 'Sub-compartment'] == 'low. pop.':
                     nox.loc[flow, 'CF value'] = (
-                                nox.loc[flow, 'CF value'] / data.loc[data.Country_code == region, 'iF rural'].iloc[0] *
-                                secondary_pm_if.loc['NOx', 'rural'])
+                            nox.loc[flow, 'CF value'] / data.loc[data.Country_code == region, 'iF rural'].iloc[0] *
+                            secondary_pm_if.loc['NOx', 'rural'])
                 elif nox.loc[flow, 'Sub-compartment'] == '(unspecified)':
                     nox.loc[flow, 'CF value'] = (nox.loc[flow, 'CF value'] /
                                                  data.loc[data.Country_code == region, 'iF unspecified'].iloc[0] *
@@ -3402,24 +2641,24 @@ class Parse:
                 # for RoW and GLO
                 if nox.loc[flow, 'Sub-compartment'] == 'high. pop.':
                     nox.loc[flow, 'CF value'] = (
-                                nox.loc[flow, 'CF value'] / data.loc[data.Continent == 'Global', 'iF urban'].iloc[0] *
-                                secondary_pm_if.loc['NOx', 'urban'])
+                            nox.loc[flow, 'CF value'] / data.loc[data.Continent == 'Global', 'iF urban'].iloc[0] *
+                            secondary_pm_if.loc['NOx', 'urban'])
                 elif nox.loc[flow, 'Sub-compartment'] == 'low. pop.':
                     nox.loc[flow, 'CF value'] = (
-                                nox.loc[flow, 'CF value'] / data.loc[data.Continent == 'Global', 'iF rural'].iloc[0] *
-                                secondary_pm_if.loc['NOx', 'rural'])
+                            nox.loc[flow, 'CF value'] / data.loc[data.Continent == 'Global', 'iF rural'].iloc[0] *
+                            secondary_pm_if.loc['NOx', 'rural'])
                 elif nox.loc[flow, 'Sub-compartment'] == '(unspecified)':
                     nox.loc[flow, 'CF value'] = (
-                                nox.loc[flow, 'CF value'] / data.loc[data.Continent == 'Global', 'iF unspecified'].iloc[
-                            0] * secondary_pm_if.loc['NOx', 'unspecified'])
+                            nox.loc[flow, 'CF value'] / data.loc[data.Continent == 'Global', 'iF unspecified'].iloc[
+                        0] * secondary_pm_if.loc['NOx', 'unspecified'])
 
         # concat everything
         particulate_damage = clean_up_dataframe(pd.concat([particulate_damage, pm10_particulate_damage, so2, nh3, nox]))
 
         # determine the midpoint
         reference_value = particulate_damage.loc[[i for i in particulate_damage.index if (
-                    particulate_damage.loc[i, 'Elem flow name'] == 'Particulates, < 2.5 um, GLO' and
-                    particulate_damage.loc[i, 'Sub-compartment'] == '(unspecified)')], 'CF value'].iloc[0]
+                particulate_damage.loc[i, 'Elem flow name'] == 'Particulates, < 2.5 um, GLO' and
+                particulate_damage.loc[i, 'Sub-compartment'] == '(unspecified)')], 'CF value'].iloc[0]
         particulate_midpoint = particulate_damage.copy()
         particulate_midpoint.loc[:, 'CF value'] /= reference_value
         particulate_midpoint.loc[:, 'MP or Damage'] = 'Midpoint'
@@ -3490,11 +2729,14 @@ class Parse:
                 else:
                     for j in range(0, len(conc.loc[data.ecoinvent_shortname[i]])):
                         if data.loc[i, 'Water type'] == 'unspecified':
-                            water_data.loc[str(i + j), 'Elem flow name'] = 'Water, ' + conc.loc[data.ecoinvent_shortname[i]].iloc[j]
+                            water_data.loc[str(i + j), 'Elem flow name'] = 'Water, ' + \
+                                                                           conc.loc[data.ecoinvent_shortname[i]].iloc[j]
                         elif data.loc[i, 'Water type'] == 'agri':
-                            water_data.loc[str(i + j), 'Elem flow name'] = 'Water, agri, ' + conc.loc[data.ecoinvent_shortname[i]].iloc[j]
+                            water_data.loc[str(i + j), 'Elem flow name'] = 'Water, agri, ' + \
+                                                                           conc.loc[data.ecoinvent_shortname[i]].iloc[j]
                         elif data.loc[i, 'Water type'] == 'non-agri':
-                            water_data.loc[str(i + j), 'Elem flow name'] = 'Water, non-agri, ' + conc.loc[data.ecoinvent_shortname[i]].iloc[j]
+                            water_data.loc[str(i + j), 'Elem flow name'] = 'Water, non-agri, ' + \
+                                                                           conc.loc[data.ecoinvent_shortname[i]].iloc[j]
                         water_data.loc[str(i + j), 'CF value'] = data.loc[i, 'Annual']
             else:
                 if data.loc[i, 'Water type'] == 'unspecified':
@@ -3531,18 +2773,20 @@ class Parse:
                                                     'RLA' in all_data.loc[i, 'Elem flow name'] or
                                                     'OCE' in all_data.loc[i, 'Elem flow name'] or
                                                     'RNA' in all_data.loc[i, 'Elem flow name'])],
-                         'Native geographical resolution scale'] = 'Continent'
+                     'Native geographical resolution scale'] = 'Continent'
         all_data.loc[[i for i in all_data.index if 'GLO' in all_data.loc[i, 'Elem flow name']],
-                         'Native geographical resolution scale'] = 'Global'
+                     'Native geographical resolution scale'] = 'Global'
         all_data.loc[[i for i in all_data.index if ('RoW' in all_data.loc[i, 'Elem flow name'] or
                                                     'Akrotiri' in all_data.loc[i, 'Elem flow name'] or
                                                     'Asia without China' in all_data.loc[i, 'Elem flow name'] or
-                                                    'Australia, including overseas territories' in all_data.loc[i, 'Elem flow name'] or
+                                                    'Australia, including overseas territories' in all_data.loc[
+                                                        i, 'Elem flow name'] or
                                                     'BALTSO' in all_data.loc[i, 'Elem flow name'] or
                                                     'CENTREL' in all_data.loc[i, 'Elem flow name'] or
                                                     'CUSMA/T-MEC/USMCA' in all_data.loc[i, 'Elem flow name'] or
                                                     'Canada without Alberta' in all_data.loc[i, 'Elem flow name'] or
-                                                    'Canada without Alberta and Quebec' in all_data.loc[i, 'Elem flow name'] or
+                                                    'Canada without Alberta and Quebec' in all_data.loc[
+                                                        i, 'Elem flow name'] or
                                                     'Canada without Quebec' in all_data.loc[i, 'Elem flow name'] or
                                                     'Canary Islands' in all_data.loc[i, 'Elem flow name'] or
                                                     'Central Asia' in all_data.loc[i, 'Elem flow name'] or
@@ -3552,30 +2796,41 @@ class Parse:
                                                     'Dhekelia Base' in all_data.loc[i, 'Elem flow name'] or
                                                     'ENTSO-E' in all_data.loc[i, 'Elem flow name'] or
                                                     'Europe without Austria' in all_data.loc[i, 'Elem flow name'] or
-                                                    'Europe without NORDEL (NCPA)' in all_data.loc[i, 'Elem flow name'] or
+                                                    'Europe without NORDEL (NCPA)' in all_data.loc[
+                                                        i, 'Elem flow name'] or
                                                     'Europe without Switzerland' in all_data.loc[i, 'Elem flow name'] or
-                                                    'Europe without Switzerland and Austria' in all_data.loc[i, 'Elem flow name'] or
-                                                    'Europe without Switzerland and France' in all_data.loc[i, 'Elem flow name'] or
-                                                    'Europe, without Russia and Türkiye' in all_data.loc[i, 'Elem flow name'] or
+                                                    'Europe without Switzerland and Austria' in all_data.loc[
+                                                        i, 'Elem flow name'] or
+                                                    'Europe without Switzerland and France' in all_data.loc[
+                                                        i, 'Elem flow name'] or
+                                                    'Europe, without Russia and Türkiye' in all_data.loc[
+                                                        i, 'Elem flow name'] or
                                                     'FSU' in all_data.loc[i, 'Elem flow name'] or
-                                                    'France, including overseas territories' in all_data.loc[i, 'Elem flow name'] or
+                                                    'France, including overseas territories' in all_data.loc[
+                                                        i, 'Elem flow name'] or
                                                     'Guantanamo Bay' in all_data.loc[i, 'Elem flow name'] or
                                                     'IAI Area, Africa' in all_data.loc[i, 'Elem flow name'] or
-                                                    'IAI Area, Asia, without China and GCC' in all_data.loc[i, 'Elem flow name'] or
+                                                    'IAI Area, Asia, without China and GCC' in all_data.loc[
+                                                        i, 'Elem flow name'] or
                                                     'IAI Area, EU27 & EFTA' in all_data.loc[i, 'Elem flow name'] or
-                                                    'IAI Area, Gulf Cooperation Council' in all_data.loc[i, 'Elem flow name'] or
+                                                    'IAI Area, Gulf Cooperation Council' in all_data.loc[
+                                                        i, 'Elem flow name'] or
                                                     'IAI Area, North America' in all_data.loc[i, 'Elem flow name'] or
-                                                    'IAI Area, North America, without Quebec' in all_data.loc[i, 'Elem flow name'] or
-                                                    'IAI Area, Russia & RER w/o EU27 & EFTA' in all_data.loc[i, 'Elem flow name'] or
+                                                    'IAI Area, North America, without Quebec' in all_data.loc[
+                                                        i, 'Elem flow name'] or
+                                                    'IAI Area, Russia & RER w/o EU27 & EFTA' in all_data.loc[
+                                                        i, 'Elem flow name'] or
                                                     'IAI Area, South America' in all_data.loc[i, 'Elem flow name'] or
                                                     'IN-Islands' in all_data.loc[i, 'Elem flow name'] or
                                                     'MRO' in all_data.loc[i, 'Elem flow name'] or
                                                     'NAFTA' in all_data.loc[i, 'Elem flow name'] or
                                                     'NORDEL' in all_data.loc[i, 'Elem flow name'] or
                                                     'NPCC' in all_data.loc[i, 'Elem flow name'] or
-                                                    'North America without Quebec' in all_data.loc[i, 'Elem flow name'] or
+                                                    'North America without Quebec' in all_data.loc[
+                                                        i, 'Elem flow name'] or
                                                     'Northern Cyprus' in all_data.loc[i, 'Elem flow name'] or
-                                                    'Québec, HQ distribution network' in all_data.loc[i, 'Elem flow name'] or
+                                                    'Québec, HQ distribution network' in all_data.loc[
+                                                        i, 'Elem flow name'] or
                                                     'RER w/o AT+BE+CH+DE+FR+IT' in all_data.loc[i, 'Elem flow name'] or
                                                     'RER w/o CH+DE' in all_data.loc[i, 'Elem flow name'] or
                                                     'RER w/o DE+NL+NO' in all_data.loc[i, 'Elem flow name'] or
@@ -3590,7 +2845,8 @@ class Parse:
                                                     'UCTE' in all_data.loc[i, 'Elem flow name'] or
                                                     'UCTE without France' in all_data.loc[i, 'Elem flow name'] or
                                                     'UCTE without Germany' in all_data.loc[i, 'Elem flow name'] or
-                                                    'UCTE without Germany and France' in all_data.loc[i, 'Elem flow name'] or
+                                                    'UCTE without Germany and France' in all_data.loc[
+                                                        i, 'Elem flow name'] or
                                                     'UN-AMERICAS' in all_data.loc[i, 'Elem flow name'] or
                                                     'UN-ASIA' in all_data.loc[i, 'Elem flow name'] or
                                                     'UN-AUSTRALIANZ' in all_data.loc[i, 'Elem flow name'] or
@@ -3613,11 +2869,12 @@ class Parse:
                                                     'UN-SEUROPE' in all_data.loc[i, 'Elem flow name'] or
                                                     'UN-WAFRICA' in all_data.loc[i, 'Elem flow name'] or
                                                     'UN-WASIA' in all_data.loc[i, 'Elem flow name'] or
-                                                    'United States of America, including overseas territories' in all_data.loc[i, 'Elem flow name'] or
+                                                    'United States of America, including overseas territories' in
+                                                    all_data.loc[i, 'Elem flow name'] or
                                                     'WECC' in all_data.loc[i, 'Elem flow name'] or
                                                     'WEU' in all_data.loc[i, 'Elem flow name']
                                                     )],
-                         'Native geographical resolution scale'] = 'Other region'
+                     'Native geographical resolution scale'] = 'Other region'
 
         # adding the different other water flows (lake, river, well, etc.)
         df_lake = all_data.loc[[i for i in all_data.index if
@@ -3647,7 +2904,8 @@ class Parse:
 
         # drop "Water" flow in Raw comp, that flow is only for the water comp
         all_data = all_data.drop([i for i in all_data.index if
-                       'agri' not in all_data.loc[i, 'Elem flow name'] and all_data.loc[i, 'Compartment'] == 'Raw'])
+                                  'agri' not in all_data.loc[i, 'Elem flow name'] and all_data.loc[
+                                      i, 'Compartment'] == 'Raw'])
 
         all_data = clean_up_dataframe(pd.concat([all_data, df_lake, df_river, df_unspe, df_well, df_cooling]))
 
@@ -3678,7 +2936,8 @@ class Parse:
                     water_data.loc[i, 'CF value'] = data.loc[i, 'CF_tot']
                 else:
                     for j in range(0, len(conc.loc[data.ecoinvent_shortname[i]])):
-                        water_data.loc[str(i + j), 'Elem flow name'] = 'Water, ' + conc.loc[data.ecoinvent_shortname[i]].iloc[j]
+                        water_data.loc[str(i + j), 'Elem flow name'] = 'Water, ' + \
+                                                                       conc.loc[data.ecoinvent_shortname[i]].iloc[j]
                         water_data.loc[str(i + j), 'CF value'] = data.loc[i, 'CF_tot']
             else:
                 water_data.loc[i, 'Elem flow name'] = 'Water, ' + data.ecoinvent_shortname[i]
@@ -3709,18 +2968,20 @@ class Parse:
                                                     'RLA' in all_data.loc[i, 'Elem flow name'] or
                                                     'OCE' in all_data.loc[i, 'Elem flow name'] or
                                                     'RNA' in all_data.loc[i, 'Elem flow name'])],
-                         'Native geographical resolution scale'] = 'Continent'
+                     'Native geographical resolution scale'] = 'Continent'
         all_data.loc[[i for i in all_data.index if 'GLO' in all_data.loc[i, 'Elem flow name']],
-                         'Native geographical resolution scale'] = 'Global'
+                     'Native geographical resolution scale'] = 'Global'
         all_data.loc[[i for i in all_data.index if ('RoW' in all_data.loc[i, 'Elem flow name'] or
                                                     'Akrotiri' in all_data.loc[i, 'Elem flow name'] or
                                                     'Asia without China' in all_data.loc[i, 'Elem flow name'] or
-                                                    'Australia, including overseas territories' in all_data.loc[i, 'Elem flow name'] or
+                                                    'Australia, including overseas territories' in all_data.loc[
+                                                        i, 'Elem flow name'] or
                                                     'BALTSO' in all_data.loc[i, 'Elem flow name'] or
                                                     'CENTREL' in all_data.loc[i, 'Elem flow name'] or
                                                     'CUSMA/T-MEC/USMCA' in all_data.loc[i, 'Elem flow name'] or
                                                     'Canada without Alberta' in all_data.loc[i, 'Elem flow name'] or
-                                                    'Canada without Alberta and Quebec' in all_data.loc[i, 'Elem flow name'] or
+                                                    'Canada without Alberta and Quebec' in all_data.loc[
+                                                        i, 'Elem flow name'] or
                                                     'Canada without Quebec' in all_data.loc[i, 'Elem flow name'] or
                                                     'Canary Islands' in all_data.loc[i, 'Elem flow name'] or
                                                     'Central Asia' in all_data.loc[i, 'Elem flow name'] or
@@ -3730,30 +2991,41 @@ class Parse:
                                                     'Dhekelia Base' in all_data.loc[i, 'Elem flow name'] or
                                                     'ENTSO-E' in all_data.loc[i, 'Elem flow name'] or
                                                     'Europe without Austria' in all_data.loc[i, 'Elem flow name'] or
-                                                    'Europe without NORDEL (NCPA)' in all_data.loc[i, 'Elem flow name'] or
+                                                    'Europe without NORDEL (NCPA)' in all_data.loc[
+                                                        i, 'Elem flow name'] or
                                                     'Europe without Switzerland' in all_data.loc[i, 'Elem flow name'] or
-                                                    'Europe without Switzerland and Austria' in all_data.loc[i, 'Elem flow name'] or
-                                                    'Europe without Switzerland and France' in all_data.loc[i, 'Elem flow name'] or
-                                                    'Europe, without Russia and Türkiye' in all_data.loc[i, 'Elem flow name'] or
+                                                    'Europe without Switzerland and Austria' in all_data.loc[
+                                                        i, 'Elem flow name'] or
+                                                    'Europe without Switzerland and France' in all_data.loc[
+                                                        i, 'Elem flow name'] or
+                                                    'Europe, without Russia and Türkiye' in all_data.loc[
+                                                        i, 'Elem flow name'] or
                                                     'FSU' in all_data.loc[i, 'Elem flow name'] or
-                                                    'France, including overseas territories' in all_data.loc[i, 'Elem flow name'] or
+                                                    'France, including overseas territories' in all_data.loc[
+                                                        i, 'Elem flow name'] or
                                                     'Guantanamo Bay' in all_data.loc[i, 'Elem flow name'] or
                                                     'IAI Area, Africa' in all_data.loc[i, 'Elem flow name'] or
-                                                    'IAI Area, Asia, without China and GCC' in all_data.loc[i, 'Elem flow name'] or
+                                                    'IAI Area, Asia, without China and GCC' in all_data.loc[
+                                                        i, 'Elem flow name'] or
                                                     'IAI Area, EU27 & EFTA' in all_data.loc[i, 'Elem flow name'] or
-                                                    'IAI Area, Gulf Cooperation Council' in all_data.loc[i, 'Elem flow name'] or
+                                                    'IAI Area, Gulf Cooperation Council' in all_data.loc[
+                                                        i, 'Elem flow name'] or
                                                     'IAI Area, North America' in all_data.loc[i, 'Elem flow name'] or
-                                                    'IAI Area, North America, without Quebec' in all_data.loc[i, 'Elem flow name'] or
-                                                    'IAI Area, Russia & RER w/o EU27 & EFTA' in all_data.loc[i, 'Elem flow name'] or
+                                                    'IAI Area, North America, without Quebec' in all_data.loc[
+                                                        i, 'Elem flow name'] or
+                                                    'IAI Area, Russia & RER w/o EU27 & EFTA' in all_data.loc[
+                                                        i, 'Elem flow name'] or
                                                     'IAI Area, South America' in all_data.loc[i, 'Elem flow name'] or
                                                     'IN-Islands' in all_data.loc[i, 'Elem flow name'] or
                                                     'MRO' in all_data.loc[i, 'Elem flow name'] or
                                                     'NAFTA' in all_data.loc[i, 'Elem flow name'] or
                                                     'NORDEL' in all_data.loc[i, 'Elem flow name'] or
                                                     'NPCC' in all_data.loc[i, 'Elem flow name'] or
-                                                    'North America without Quebec' in all_data.loc[i, 'Elem flow name'] or
+                                                    'North America without Quebec' in all_data.loc[
+                                                        i, 'Elem flow name'] or
                                                     'Northern Cyprus' in all_data.loc[i, 'Elem flow name'] or
-                                                    'Québec, HQ distribution network' in all_data.loc[i, 'Elem flow name'] or
+                                                    'Québec, HQ distribution network' in all_data.loc[
+                                                        i, 'Elem flow name'] or
                                                     'RER w/o AT+BE+CH+DE+FR+IT' in all_data.loc[i, 'Elem flow name'] or
                                                     'RER w/o CH+DE' in all_data.loc[i, 'Elem flow name'] or
                                                     'RER w/o DE+NL+NO' in all_data.loc[i, 'Elem flow name'] or
@@ -3768,7 +3040,8 @@ class Parse:
                                                     'UCTE' in all_data.loc[i, 'Elem flow name'] or
                                                     'UCTE without France' in all_data.loc[i, 'Elem flow name'] or
                                                     'UCTE without Germany' in all_data.loc[i, 'Elem flow name'] or
-                                                    'UCTE without Germany and France' in all_data.loc[i, 'Elem flow name'] or
+                                                    'UCTE without Germany and France' in all_data.loc[
+                                                        i, 'Elem flow name'] or
                                                     'UN-AMERICAS' in all_data.loc[i, 'Elem flow name'] or
                                                     'UN-ASIA' in all_data.loc[i, 'Elem flow name'] or
                                                     'UN-AUSTRALIANZ' in all_data.loc[i, 'Elem flow name'] or
@@ -3791,11 +3064,12 @@ class Parse:
                                                     'UN-SEUROPE' in all_data.loc[i, 'Elem flow name'] or
                                                     'UN-WAFRICA' in all_data.loc[i, 'Elem flow name'] or
                                                     'UN-WASIA' in all_data.loc[i, 'Elem flow name'] or
-                                                    'United States of America, including overseas territories' in all_data.loc[i, 'Elem flow name'] or
+                                                    'United States of America, including overseas territories' in
+                                                    all_data.loc[i, 'Elem flow name'] or
                                                     'WECC' in all_data.loc[i, 'Elem flow name'] or
                                                     'WEU' in all_data.loc[i, 'Elem flow name']
                                                     )],
-                         'Native geographical resolution scale'] = 'Other region'
+                     'Native geographical resolution scale'] = 'Other region'
 
         # adding the different other water flows (lake, river, well, etc.)
         df_lake = all_data[all_data.Compartment == 'Raw'].copy()
@@ -3881,18 +3155,20 @@ class Parse:
                                                     'RLA' in all_data.loc[i, 'Elem flow name'] or
                                                     'OCE' in all_data.loc[i, 'Elem flow name'] or
                                                     'RNA' in all_data.loc[i, 'Elem flow name'])],
-                         'Native geographical resolution scale'] = 'Continent'
+                     'Native geographical resolution scale'] = 'Continent'
         all_data.loc[[i for i in all_data.index if 'GLO' in all_data.loc[i, 'Elem flow name']],
-                         'Native geographical resolution scale'] = 'Global'
+                     'Native geographical resolution scale'] = 'Global'
         all_data.loc[[i for i in all_data.index if ('RoW' in all_data.loc[i, 'Elem flow name'] or
                                                     'Akrotiri' in all_data.loc[i, 'Elem flow name'] or
                                                     'Asia without China' in all_data.loc[i, 'Elem flow name'] or
-                                                    'Australia, including overseas territories' in all_data.loc[i, 'Elem flow name'] or
+                                                    'Australia, including overseas territories' in all_data.loc[
+                                                        i, 'Elem flow name'] or
                                                     'BALTSO' in all_data.loc[i, 'Elem flow name'] or
                                                     'CENTREL' in all_data.loc[i, 'Elem flow name'] or
                                                     'CUSMA/T-MEC/USMCA' in all_data.loc[i, 'Elem flow name'] or
                                                     'Canada without Alberta' in all_data.loc[i, 'Elem flow name'] or
-                                                    'Canada without Alberta and Quebec' in all_data.loc[i, 'Elem flow name'] or
+                                                    'Canada without Alberta and Quebec' in all_data.loc[
+                                                        i, 'Elem flow name'] or
                                                     'Canada without Quebec' in all_data.loc[i, 'Elem flow name'] or
                                                     'Canary Islands' in all_data.loc[i, 'Elem flow name'] or
                                                     'Central Asia' in all_data.loc[i, 'Elem flow name'] or
@@ -3902,30 +3178,41 @@ class Parse:
                                                     'Dhekelia Base' in all_data.loc[i, 'Elem flow name'] or
                                                     'ENTSO-E' in all_data.loc[i, 'Elem flow name'] or
                                                     'Europe without Austria' in all_data.loc[i, 'Elem flow name'] or
-                                                    'Europe without NORDEL (NCPA)' in all_data.loc[i, 'Elem flow name'] or
+                                                    'Europe without NORDEL (NCPA)' in all_data.loc[
+                                                        i, 'Elem flow name'] or
                                                     'Europe without Switzerland' in all_data.loc[i, 'Elem flow name'] or
-                                                    'Europe without Switzerland and Austria' in all_data.loc[i, 'Elem flow name'] or
-                                                    'Europe without Switzerland and France' in all_data.loc[i, 'Elem flow name'] or
-                                                    'Europe, without Russia and Türkiye' in all_data.loc[i, 'Elem flow name'] or
+                                                    'Europe without Switzerland and Austria' in all_data.loc[
+                                                        i, 'Elem flow name'] or
+                                                    'Europe without Switzerland and France' in all_data.loc[
+                                                        i, 'Elem flow name'] or
+                                                    'Europe, without Russia and Türkiye' in all_data.loc[
+                                                        i, 'Elem flow name'] or
                                                     'FSU' in all_data.loc[i, 'Elem flow name'] or
-                                                    'France, including overseas territories' in all_data.loc[i, 'Elem flow name'] or
+                                                    'France, including overseas territories' in all_data.loc[
+                                                        i, 'Elem flow name'] or
                                                     'Guantanamo Bay' in all_data.loc[i, 'Elem flow name'] or
                                                     'IAI Area, Africa' in all_data.loc[i, 'Elem flow name'] or
-                                                    'IAI Area, Asia, without China and GCC' in all_data.loc[i, 'Elem flow name'] or
+                                                    'IAI Area, Asia, without China and GCC' in all_data.loc[
+                                                        i, 'Elem flow name'] or
                                                     'IAI Area, EU27 & EFTA' in all_data.loc[i, 'Elem flow name'] or
-                                                    'IAI Area, Gulf Cooperation Council' in all_data.loc[i, 'Elem flow name'] or
+                                                    'IAI Area, Gulf Cooperation Council' in all_data.loc[
+                                                        i, 'Elem flow name'] or
                                                     'IAI Area, North America' in all_data.loc[i, 'Elem flow name'] or
-                                                    'IAI Area, North America, without Quebec' in all_data.loc[i, 'Elem flow name'] or
-                                                    'IAI Area, Russia & RER w/o EU27 & EFTA' in all_data.loc[i, 'Elem flow name'] or
+                                                    'IAI Area, North America, without Quebec' in all_data.loc[
+                                                        i, 'Elem flow name'] or
+                                                    'IAI Area, Russia & RER w/o EU27 & EFTA' in all_data.loc[
+                                                        i, 'Elem flow name'] or
                                                     'IAI Area, South America' in all_data.loc[i, 'Elem flow name'] or
                                                     'IN-Islands' in all_data.loc[i, 'Elem flow name'] or
                                                     'MRO' in all_data.loc[i, 'Elem flow name'] or
                                                     'NAFTA' in all_data.loc[i, 'Elem flow name'] or
                                                     'NORDEL' in all_data.loc[i, 'Elem flow name'] or
                                                     'NPCC' in all_data.loc[i, 'Elem flow name'] or
-                                                    'North America without Quebec' in all_data.loc[i, 'Elem flow name'] or
+                                                    'North America without Quebec' in all_data.loc[
+                                                        i, 'Elem flow name'] or
                                                     'Northern Cyprus' in all_data.loc[i, 'Elem flow name'] or
-                                                    'Québec, HQ distribution network' in all_data.loc[i, 'Elem flow name'] or
+                                                    'Québec, HQ distribution network' in all_data.loc[
+                                                        i, 'Elem flow name'] or
                                                     'RER w/o AT+BE+CH+DE+FR+IT' in all_data.loc[i, 'Elem flow name'] or
                                                     'RER w/o CH+DE' in all_data.loc[i, 'Elem flow name'] or
                                                     'RER w/o DE+NL+NO' in all_data.loc[i, 'Elem flow name'] or
@@ -3940,7 +3227,8 @@ class Parse:
                                                     'UCTE' in all_data.loc[i, 'Elem flow name'] or
                                                     'UCTE without France' in all_data.loc[i, 'Elem flow name'] or
                                                     'UCTE without Germany' in all_data.loc[i, 'Elem flow name'] or
-                                                    'UCTE without Germany and France' in all_data.loc[i, 'Elem flow name'] or
+                                                    'UCTE without Germany and France' in all_data.loc[
+                                                        i, 'Elem flow name'] or
                                                     'UN-AMERICAS' in all_data.loc[i, 'Elem flow name'] or
                                                     'UN-ASIA' in all_data.loc[i, 'Elem flow name'] or
                                                     'UN-AUSTRALIANZ' in all_data.loc[i, 'Elem flow name'] or
@@ -3963,11 +3251,12 @@ class Parse:
                                                     'UN-SEUROPE' in all_data.loc[i, 'Elem flow name'] or
                                                     'UN-WAFRICA' in all_data.loc[i, 'Elem flow name'] or
                                                     'UN-WASIA' in all_data.loc[i, 'Elem flow name'] or
-                                                    'United States of America, including overseas territories' in all_data.loc[i, 'Elem flow name'] or
+                                                    'United States of America, including overseas territories' in
+                                                    all_data.loc[i, 'Elem flow name'] or
                                                     'WECC' in all_data.loc[i, 'Elem flow name'] or
                                                     'WEU' in all_data.loc[i, 'Elem flow name']
                                                     )],
-                         'Native geographical resolution scale'] = 'Other region'
+                     'Native geographical resolution scale'] = 'Other region'
 
         # adding the different other water flows (lake, river, well, etc.)
         df_lake = all_data[all_data.Compartment == 'Raw'].copy()
@@ -4013,11 +3302,13 @@ class Parse:
         for i in data.index:
             if data.ecoinvent_shortname[i] in conc.index:
                 if type(conc.loc[data.ecoinvent_shortname[i]]) == str:
-                    water_data.loc[i, 'Elem flow name'] = 'Water, well, in ground, ' + conc.loc[data.ecoinvent_shortname[i]]
+                    water_data.loc[i, 'Elem flow name'] = 'Water, well, in ground, ' + conc.loc[
+                        data.ecoinvent_shortname[i]]
                     water_data.loc[i, 'CF value'] = data.loc[i, 'CF (PDF.m2.yr/m3)']
                 else:
                     for j in range(0, len(conc.loc[data.ecoinvent_shortname[i]])):
-                        water_data.loc[str(i + j), 'Elem flow name'] = 'Water, well, in ground, ' + conc.loc[data.ecoinvent_shortname[i]].iloc[j]
+                        water_data.loc[str(i + j), 'Elem flow name'] = 'Water, well, in ground, ' + \
+                                                                       conc.loc[data.ecoinvent_shortname[i]].iloc[j]
                         water_data.loc[str(i + j), 'CF value'] = data.loc[i, 'CF (PDF.m2.yr/m3)']
             else:
                 water_data.loc[i, 'Elem flow name'] = 'Water, well, in ground, ' + data.ecoinvent_shortname[i]
@@ -4034,97 +3325,121 @@ class Parse:
         water_data.loc[:, 'CF value'] = water_data.loc[:, 'CF value'].astype(float)
 
         water_data.loc[[i for i in water_data.index if ('RER' in water_data.loc[i, 'Elem flow name'] or
-                                            'RAS' in water_data.loc[i, 'Elem flow name'] or
-                                            'RAF' in water_data.loc[i, 'Elem flow name'] or
-                                            'RLA' in water_data.loc[i, 'Elem flow name'] or
-                                            'OCE' in water_data.loc[i, 'Elem flow name'] or
-                                            'RNA' in water_data.loc[i, 'Elem flow name'])],
-                         'Native geographical resolution scale'] = 'Continent'
+                                                        'RAS' in water_data.loc[i, 'Elem flow name'] or
+                                                        'RAF' in water_data.loc[i, 'Elem flow name'] or
+                                                        'RLA' in water_data.loc[i, 'Elem flow name'] or
+                                                        'OCE' in water_data.loc[i, 'Elem flow name'] or
+                                                        'RNA' in water_data.loc[i, 'Elem flow name'])],
+                       'Native geographical resolution scale'] = 'Continent'
         water_data.loc[[i for i in water_data.index if 'GLO' in water_data.loc[i, 'Elem flow name']],
-                         'Native geographical resolution scale'] = 'Global'
+                       'Native geographical resolution scale'] = 'Global'
         water_data.loc[[i for i in water_data.index if ('RoW' in water_data.loc[i, 'Elem flow name'] or
-                                            'Akrotiri' in water_data.loc[i, 'Elem flow name'] or
-                                            'Asia without China' in water_data.loc[i, 'Elem flow name'] or
-                                            'Australia, including overseas territories' in water_data.loc[i, 'Elem flow name'] or
-                                            'BALTSO' in water_data.loc[i, 'Elem flow name'] or
-                                            'CENTREL' in water_data.loc[i, 'Elem flow name'] or
-                                            'CUSMA/T-MEC/USMCA' in water_data.loc[i, 'Elem flow name'] or
-                                            'Canada without Alberta' in water_data.loc[i, 'Elem flow name'] or
-                                            'Canada without Alberta and Quebec' in water_data.loc[i, 'Elem flow name'] or
-                                            'Canada without Quebec' in water_data.loc[i, 'Elem flow name'] or
-                                            'Canary Islands' in water_data.loc[i, 'Elem flow name'] or
-                                            'Central Asia' in water_data.loc[i, 'Elem flow name'] or
-                                            'China w/o Inner Mongol' in water_data.loc[i, 'Elem flow name'] or
-                                            'Crimea' in water_data.loc[i, 'Elem flow name'] or
-                                            'Cyprus No Mans Area' in water_data.loc[i, 'Elem flow name'] or
-                                            'Dhekelia Base' in water_data.loc[i, 'Elem flow name'] or
-                                            'ENTSO-E' in water_data.loc[i, 'Elem flow name'] or
-                                            'Europe without Austria' in water_data.loc[i, 'Elem flow name'] or
-                                            'Europe without NORDEL (NCPA)' in water_data.loc[i, 'Elem flow name'] or
-                                            'Europe without Switzerland' in water_data.loc[i, 'Elem flow name'] or
-                                            'Europe without Switzerland and Austria' in water_data.loc[i, 'Elem flow name'] or
-                                            'Europe without Switzerland and France' in water_data.loc[i, 'Elem flow name'] or
-                                            'Europe, without Russia and Türkiye' in water_data.loc[i, 'Elem flow name'] or
-                                            'FSU' in water_data.loc[i, 'Elem flow name'] or
-                                            'France, including overseas territories' in water_data.loc[i, 'Elem flow name'] or
-                                            'Guantanamo Bay' in water_data.loc[i, 'Elem flow name'] or
-                                            'IAI Area, Africa' in water_data.loc[i, 'Elem flow name'] or
-                                            'IAI Area, Asia, without China and GCC' in water_data.loc[i, 'Elem flow name'] or
-                                            'IAI Area, EU27 & EFTA' in water_data.loc[i, 'Elem flow name'] or
-                                            'IAI Area, Gulf Cooperation Council' in water_data.loc[i, 'Elem flow name'] or
-                                            'IAI Area, North America' in water_data.loc[i, 'Elem flow name'] or
-                                            'IAI Area, North America, without Quebec' in water_data.loc[i, 'Elem flow name'] or
-                                            'IAI Area, Russia & RER w/o EU27 & EFTA' in water_data.loc[i, 'Elem flow name'] or
-                                            'IAI Area, South America' in water_data.loc[i, 'Elem flow name'] or
-                                            'IN-Islands' in water_data.loc[i, 'Elem flow name'] or
-                                            'MRO' in water_data.loc[i, 'Elem flow name'] or
-                                            'NAFTA' in water_data.loc[i, 'Elem flow name'] or
-                                            'NORDEL' in water_data.loc[i, 'Elem flow name'] or
-                                            'NPCC' in water_data.loc[i, 'Elem flow name'] or
-                                            'North America without Quebec' in water_data.loc[i, 'Elem flow name'] or
-                                            'Northern Cyprus' in water_data.loc[i, 'Elem flow name'] or
-                                            'Québec, HQ distribution network' in water_data.loc[i, 'Elem flow name'] or
-                                            'RER w/o AT+BE+CH+DE+FR+IT' in water_data.loc[i, 'Elem flow name'] or
-                                            'RER w/o CH+DE' in water_data.loc[i, 'Elem flow name'] or
-                                            'RER w/o DE+NL+NO' in water_data.loc[i, 'Elem flow name'] or
-                                            'RER w/o DE+NL+NO+RU' in water_data.loc[i, 'Elem flow name'] or
-                                            'RER w/o DE+NL+RU' in water_data.loc[i, 'Elem flow name'] or
-                                            'RER w/o RU' in water_data.loc[i, 'Elem flow name'] or
-                                            'Russia (Asia)' in water_data.loc[i, 'Elem flow name'] or
-                                            'Russia (Europe)' in water_data.loc[i, 'Elem flow name'] or
-                                            'SAS' in water_data.loc[i, 'Elem flow name'] or
-                                            'Siachen Glacier' in water_data.loc[i, 'Elem flow name'] or
-                                            'Somaliland' in water_data.loc[i, 'Elem flow name'] or
-                                            'UCTE' in water_data.loc[i, 'Elem flow name'] or
-                                            'UCTE without France' in water_data.loc[i, 'Elem flow name'] or
-                                            'UCTE without Germany' in water_data.loc[i, 'Elem flow name'] or
-                                            'UCTE without Germany and France' in water_data.loc[i, 'Elem flow name'] or
-                                            'UN-AMERICAS' in water_data.loc[i, 'Elem flow name'] or
-                                            'UN-ASIA' in water_data.loc[i, 'Elem flow name'] or
-                                            'UN-AUSTRALIANZ' in water_data.loc[i, 'Elem flow name'] or
-                                            'UN-CAMERICA' in water_data.loc[i, 'Elem flow name'] or
-                                            'UN-CARIBBEAN' in water_data.loc[i, 'Elem flow name'] or
-                                            'UN-EAFRICA' in water_data.loc[i, 'Elem flow name'] or
-                                            'UN-EASIA' in water_data.loc[i, 'Elem flow name'] or
-                                            'UN-EEUROPE' in water_data.loc[i, 'Elem flow name'] or
-                                            'UN-EUROPE' in water_data.loc[i, 'Elem flow name'] or
-                                            'UN-MAFRICA' in water_data.loc[i, 'Elem flow name'] or
-                                            'UN-MELANESIA' in water_data.loc[i, 'Elem flow name'] or
-                                            'UN-MICRONESIA' in water_data.loc[i, 'Elem flow name'] or
-                                            'UN-NAFRICA' in water_data.loc[i, 'Elem flow name'] or
-                                            'UN-NEUROPE' in water_data.loc[i, 'Elem flow name'] or
-                                            'UN-OCEANIA' in water_data.loc[i, 'Elem flow name'] or
-                                            'UN-POLYNESIA' in water_data.loc[i, 'Elem flow name'] or
-                                            'UN-SAMERICA' in water_data.loc[i, 'Elem flow name'] or
-                                            'UN-SASIA' in water_data.loc[i, 'Elem flow name'] or
-                                            'UN-SEASIA' in water_data.loc[i, 'Elem flow name'] or
-                                            'UN-SEUROPE' in water_data.loc[i, 'Elem flow name'] or
-                                            'UN-WAFRICA' in water_data.loc[i, 'Elem flow name'] or
-                                            'UN-WASIA' in water_data.loc[i, 'Elem flow name'] or
-                                            'United States of America, including overseas territories' in water_data.loc[i, 'Elem flow name'] or
-                                            'WECC' in water_data.loc[i, 'Elem flow name'] or
-                                            'WEU' in water_data.loc[i, 'Elem flow name'])],
-                         'Native geographical resolution scale'] = 'Other region'
+                                                        'Akrotiri' in water_data.loc[i, 'Elem flow name'] or
+                                                        'Asia without China' in water_data.loc[i, 'Elem flow name'] or
+                                                        'Australia, including overseas territories' in water_data.loc[
+                                                            i, 'Elem flow name'] or
+                                                        'BALTSO' in water_data.loc[i, 'Elem flow name'] or
+                                                        'CENTREL' in water_data.loc[i, 'Elem flow name'] or
+                                                        'CUSMA/T-MEC/USMCA' in water_data.loc[i, 'Elem flow name'] or
+                                                        'Canada without Alberta' in water_data.loc[
+                                                            i, 'Elem flow name'] or
+                                                        'Canada without Alberta and Quebec' in water_data.loc[
+                                                            i, 'Elem flow name'] or
+                                                        'Canada without Quebec' in water_data.loc[
+                                                            i, 'Elem flow name'] or
+                                                        'Canary Islands' in water_data.loc[i, 'Elem flow name'] or
+                                                        'Central Asia' in water_data.loc[i, 'Elem flow name'] or
+                                                        'China w/o Inner Mongol' in water_data.loc[
+                                                            i, 'Elem flow name'] or
+                                                        'Crimea' in water_data.loc[i, 'Elem flow name'] or
+                                                        'Cyprus No Mans Area' in water_data.loc[i, 'Elem flow name'] or
+                                                        'Dhekelia Base' in water_data.loc[i, 'Elem flow name'] or
+                                                        'ENTSO-E' in water_data.loc[i, 'Elem flow name'] or
+                                                        'Europe without Austria' in water_data.loc[
+                                                            i, 'Elem flow name'] or
+                                                        'Europe without NORDEL (NCPA)' in water_data.loc[
+                                                            i, 'Elem flow name'] or
+                                                        'Europe without Switzerland' in water_data.loc[
+                                                            i, 'Elem flow name'] or
+                                                        'Europe without Switzerland and Austria' in water_data.loc[
+                                                            i, 'Elem flow name'] or
+                                                        'Europe without Switzerland and France' in water_data.loc[
+                                                            i, 'Elem flow name'] or
+                                                        'Europe, without Russia and Türkiye' in water_data.loc[
+                                                            i, 'Elem flow name'] or
+                                                        'FSU' in water_data.loc[i, 'Elem flow name'] or
+                                                        'France, including overseas territories' in water_data.loc[
+                                                            i, 'Elem flow name'] or
+                                                        'Guantanamo Bay' in water_data.loc[i, 'Elem flow name'] or
+                                                        'IAI Area, Africa' in water_data.loc[i, 'Elem flow name'] or
+                                                        'IAI Area, Asia, without China and GCC' in water_data.loc[
+                                                            i, 'Elem flow name'] or
+                                                        'IAI Area, EU27 & EFTA' in water_data.loc[
+                                                            i, 'Elem flow name'] or
+                                                        'IAI Area, Gulf Cooperation Council' in water_data.loc[
+                                                            i, 'Elem flow name'] or
+                                                        'IAI Area, North America' in water_data.loc[
+                                                            i, 'Elem flow name'] or
+                                                        'IAI Area, North America, without Quebec' in water_data.loc[
+                                                            i, 'Elem flow name'] or
+                                                        'IAI Area, Russia & RER w/o EU27 & EFTA' in water_data.loc[
+                                                            i, 'Elem flow name'] or
+                                                        'IAI Area, South America' in water_data.loc[
+                                                            i, 'Elem flow name'] or
+                                                        'IN-Islands' in water_data.loc[i, 'Elem flow name'] or
+                                                        'MRO' in water_data.loc[i, 'Elem flow name'] or
+                                                        'NAFTA' in water_data.loc[i, 'Elem flow name'] or
+                                                        'NORDEL' in water_data.loc[i, 'Elem flow name'] or
+                                                        'NPCC' in water_data.loc[i, 'Elem flow name'] or
+                                                        'North America without Quebec' in water_data.loc[
+                                                            i, 'Elem flow name'] or
+                                                        'Northern Cyprus' in water_data.loc[i, 'Elem flow name'] or
+                                                        'Québec, HQ distribution network' in water_data.loc[
+                                                            i, 'Elem flow name'] or
+                                                        'RER w/o AT+BE+CH+DE+FR+IT' in water_data.loc[
+                                                            i, 'Elem flow name'] or
+                                                        'RER w/o CH+DE' in water_data.loc[i, 'Elem flow name'] or
+                                                        'RER w/o DE+NL+NO' in water_data.loc[i, 'Elem flow name'] or
+                                                        'RER w/o DE+NL+NO+RU' in water_data.loc[i, 'Elem flow name'] or
+                                                        'RER w/o DE+NL+RU' in water_data.loc[i, 'Elem flow name'] or
+                                                        'RER w/o RU' in water_data.loc[i, 'Elem flow name'] or
+                                                        'Russia (Asia)' in water_data.loc[i, 'Elem flow name'] or
+                                                        'Russia (Europe)' in water_data.loc[i, 'Elem flow name'] or
+                                                        'SAS' in water_data.loc[i, 'Elem flow name'] or
+                                                        'Siachen Glacier' in water_data.loc[i, 'Elem flow name'] or
+                                                        'Somaliland' in water_data.loc[i, 'Elem flow name'] or
+                                                        'UCTE' in water_data.loc[i, 'Elem flow name'] or
+                                                        'UCTE without France' in water_data.loc[i, 'Elem flow name'] or
+                                                        'UCTE without Germany' in water_data.loc[i, 'Elem flow name'] or
+                                                        'UCTE without Germany and France' in water_data.loc[
+                                                            i, 'Elem flow name'] or
+                                                        'UN-AMERICAS' in water_data.loc[i, 'Elem flow name'] or
+                                                        'UN-ASIA' in water_data.loc[i, 'Elem flow name'] or
+                                                        'UN-AUSTRALIANZ' in water_data.loc[i, 'Elem flow name'] or
+                                                        'UN-CAMERICA' in water_data.loc[i, 'Elem flow name'] or
+                                                        'UN-CARIBBEAN' in water_data.loc[i, 'Elem flow name'] or
+                                                        'UN-EAFRICA' in water_data.loc[i, 'Elem flow name'] or
+                                                        'UN-EASIA' in water_data.loc[i, 'Elem flow name'] or
+                                                        'UN-EEUROPE' in water_data.loc[i, 'Elem flow name'] or
+                                                        'UN-EUROPE' in water_data.loc[i, 'Elem flow name'] or
+                                                        'UN-MAFRICA' in water_data.loc[i, 'Elem flow name'] or
+                                                        'UN-MELANESIA' in water_data.loc[i, 'Elem flow name'] or
+                                                        'UN-MICRONESIA' in water_data.loc[i, 'Elem flow name'] or
+                                                        'UN-NAFRICA' in water_data.loc[i, 'Elem flow name'] or
+                                                        'UN-NEUROPE' in water_data.loc[i, 'Elem flow name'] or
+                                                        'UN-OCEANIA' in water_data.loc[i, 'Elem flow name'] or
+                                                        'UN-POLYNESIA' in water_data.loc[i, 'Elem flow name'] or
+                                                        'UN-SAMERICA' in water_data.loc[i, 'Elem flow name'] or
+                                                        'UN-SASIA' in water_data.loc[i, 'Elem flow name'] or
+                                                        'UN-SEASIA' in water_data.loc[i, 'Elem flow name'] or
+                                                        'UN-SEUROPE' in water_data.loc[i, 'Elem flow name'] or
+                                                        'UN-WAFRICA' in water_data.loc[i, 'Elem flow name'] or
+                                                        'UN-WASIA' in water_data.loc[i, 'Elem flow name'] or
+                                                        'United States of America, including overseas territories' in
+                                                        water_data.loc[i, 'Elem flow name'] or
+                                                        'WECC' in water_data.loc[i, 'Elem flow name'] or
+                                                        'WEU' in water_data.loc[i, 'Elem flow name'])],
+                       'Native geographical resolution scale'] = 'Other region'
 
         self.master_db = pd.concat([self.master_db, water_data])
         self.master_db = clean_up_dataframe(self.master_db)
@@ -4155,7 +3470,8 @@ class Parse:
                     water_data.loc[i, 'CF value'] = CF_value
                 else:
                     for j in range(0, len(conc.loc[geo])):
-                        water_data.loc[str(i + j), 'Elem flow name'] = 'Water, cooling, unspecified natural origin, ' + conc.loc[geo].iloc[j]
+                        water_data.loc[str(i + j), 'Elem flow name'] = 'Water, cooling, unspecified natural origin, ' + \
+                                                                       conc.loc[geo].iloc[j]
                         water_data.loc[str(i + j), 'CF value'] = CF_value
             else:
                 water_data.loc[i, 'Elem flow name'] = 'Water, cooling, unspecified natural origin, ' + geo
@@ -4173,97 +3489,121 @@ class Parse:
         water_data.loc[:, 'CF value'] = water_data.loc[:, 'CF value'].astype(float)
 
         water_data.loc[[i for i in water_data.index if ('RER' in water_data.loc[i, 'Elem flow name'] or
-                                            'RAS' in water_data.loc[i, 'Elem flow name'] or
-                                            'RAF' in water_data.loc[i, 'Elem flow name'] or
-                                            'RLA' in water_data.loc[i, 'Elem flow name'] or
-                                            'OCE' in water_data.loc[i, 'Elem flow name'] or
-                                            'RNA' in water_data.loc[i, 'Elem flow name'])],
-                         'Native geographical resolution scale'] = 'Continent'
+                                                        'RAS' in water_data.loc[i, 'Elem flow name'] or
+                                                        'RAF' in water_data.loc[i, 'Elem flow name'] or
+                                                        'RLA' in water_data.loc[i, 'Elem flow name'] or
+                                                        'OCE' in water_data.loc[i, 'Elem flow name'] or
+                                                        'RNA' in water_data.loc[i, 'Elem flow name'])],
+                       'Native geographical resolution scale'] = 'Continent'
         water_data.loc[[i for i in water_data.index if 'GLO' in water_data.loc[i, 'Elem flow name']],
-                         'Native geographical resolution scale'] = 'Global'
+                       'Native geographical resolution scale'] = 'Global'
         water_data.loc[[i for i in water_data.index if ('RoW' in water_data.loc[i, 'Elem flow name'] or
-                                            'Akrotiri' in water_data.loc[i, 'Elem flow name'] or
-                                            'Asia without China' in water_data.loc[i, 'Elem flow name'] or
-                                            'Australia, including overseas territories' in water_data.loc[i, 'Elem flow name'] or
-                                            'BALTSO' in water_data.loc[i, 'Elem flow name'] or
-                                            'CENTREL' in water_data.loc[i, 'Elem flow name'] or
-                                            'CUSMA/T-MEC/USMCA' in water_data.loc[i, 'Elem flow name'] or
-                                            'Canada without Alberta' in water_data.loc[i, 'Elem flow name'] or
-                                            'Canada without Alberta and Quebec' in water_data.loc[i, 'Elem flow name'] or
-                                            'Canada without Quebec' in water_data.loc[i, 'Elem flow name'] or
-                                            'Canary Islands' in water_data.loc[i, 'Elem flow name'] or
-                                            'Central Asia' in water_data.loc[i, 'Elem flow name'] or
-                                            'China w/o Inner Mongol' in water_data.loc[i, 'Elem flow name'] or
-                                            'Crimea' in water_data.loc[i, 'Elem flow name'] or
-                                            'Cyprus No Mans Area' in water_data.loc[i, 'Elem flow name'] or
-                                            'Dhekelia Base' in water_data.loc[i, 'Elem flow name'] or
-                                            'ENTSO-E' in water_data.loc[i, 'Elem flow name'] or
-                                            'Europe without Austria' in water_data.loc[i, 'Elem flow name'] or
-                                            'Europe without NORDEL (NCPA)' in water_data.loc[i, 'Elem flow name'] or
-                                            'Europe without Switzerland' in water_data.loc[i, 'Elem flow name'] or
-                                            'Europe without Switzerland and Austria' in water_data.loc[i, 'Elem flow name'] or
-                                            'Europe without Switzerland and France' in water_data.loc[i, 'Elem flow name'] or
-                                            'Europe, without Russia and Türkiye' in water_data.loc[i, 'Elem flow name'] or
-                                            'FSU' in water_data.loc[i, 'Elem flow name'] or
-                                            'France, including overseas territories' in water_data.loc[i, 'Elem flow name'] or
-                                            'Guantanamo Bay' in water_data.loc[i, 'Elem flow name'] or
-                                            'IAI Area, Africa' in water_data.loc[i, 'Elem flow name'] or
-                                            'IAI Area, Asia, without China and GCC' in water_data.loc[i, 'Elem flow name'] or
-                                            'IAI Area, EU27 & EFTA' in water_data.loc[i, 'Elem flow name'] or
-                                            'IAI Area, Gulf Cooperation Council' in water_data.loc[i, 'Elem flow name'] or
-                                            'IAI Area, North America' in water_data.loc[i, 'Elem flow name'] or
-                                            'IAI Area, North America, without Quebec' in water_data.loc[i, 'Elem flow name'] or
-                                            'IAI Area, Russia & RER w/o EU27 & EFTA' in water_data.loc[i, 'Elem flow name'] or
-                                            'IAI Area, South America' in water_data.loc[i, 'Elem flow name'] or
-                                            'IN-Islands' in water_data.loc[i, 'Elem flow name'] or
-                                            'MRO' in water_data.loc[i, 'Elem flow name'] or
-                                            'NAFTA' in water_data.loc[i, 'Elem flow name'] or
-                                            'NORDEL' in water_data.loc[i, 'Elem flow name'] or
-                                            'NPCC' in water_data.loc[i, 'Elem flow name'] or
-                                            'North America without Quebec' in water_data.loc[i, 'Elem flow name'] or
-                                            'Northern Cyprus' in water_data.loc[i, 'Elem flow name'] or
-                                            'Québec, HQ distribution network' in water_data.loc[i, 'Elem flow name'] or
-                                            'RER w/o AT+BE+CH+DE+FR+IT' in water_data.loc[i, 'Elem flow name'] or
-                                            'RER w/o CH+DE' in water_data.loc[i, 'Elem flow name'] or
-                                            'RER w/o DE+NL+NO' in water_data.loc[i, 'Elem flow name'] or
-                                            'RER w/o DE+NL+NO+RU' in water_data.loc[i, 'Elem flow name'] or
-                                            'RER w/o DE+NL+RU' in water_data.loc[i, 'Elem flow name'] or
-                                            'RER w/o RU' in water_data.loc[i, 'Elem flow name'] or
-                                            'Russia (Asia)' in water_data.loc[i, 'Elem flow name'] or
-                                            'Russia (Europe)' in water_data.loc[i, 'Elem flow name'] or
-                                            'SAS' in water_data.loc[i, 'Elem flow name'] or
-                                            'Siachen Glacier' in water_data.loc[i, 'Elem flow name'] or
-                                            'Somaliland' in water_data.loc[i, 'Elem flow name'] or
-                                            'UCTE' in water_data.loc[i, 'Elem flow name'] or
-                                            'UCTE without France' in water_data.loc[i, 'Elem flow name'] or
-                                            'UCTE without Germany' in water_data.loc[i, 'Elem flow name'] or
-                                            'UCTE without Germany and France' in water_data.loc[i, 'Elem flow name'] or
-                                            'UN-AMERICAS' in water_data.loc[i, 'Elem flow name'] or
-                                            'UN-ASIA' in water_data.loc[i, 'Elem flow name'] or
-                                            'UN-AUSTRALIANZ' in water_data.loc[i, 'Elem flow name'] or
-                                            'UN-CAMERICA' in water_data.loc[i, 'Elem flow name'] or
-                                            'UN-CARIBBEAN' in water_data.loc[i, 'Elem flow name'] or
-                                            'UN-EAFRICA' in water_data.loc[i, 'Elem flow name'] or
-                                            'UN-EASIA' in water_data.loc[i, 'Elem flow name'] or
-                                            'UN-EEUROPE' in water_data.loc[i, 'Elem flow name'] or
-                                            'UN-EUROPE' in water_data.loc[i, 'Elem flow name'] or
-                                            'UN-MAFRICA' in water_data.loc[i, 'Elem flow name'] or
-                                            'UN-MELANESIA' in water_data.loc[i, 'Elem flow name'] or
-                                            'UN-MICRONESIA' in water_data.loc[i, 'Elem flow name'] or
-                                            'UN-NAFRICA' in water_data.loc[i, 'Elem flow name'] or
-                                            'UN-NEUROPE' in water_data.loc[i, 'Elem flow name'] or
-                                            'UN-OCEANIA' in water_data.loc[i, 'Elem flow name'] or
-                                            'UN-POLYNESIA' in water_data.loc[i, 'Elem flow name'] or
-                                            'UN-SAMERICA' in water_data.loc[i, 'Elem flow name'] or
-                                            'UN-SASIA' in water_data.loc[i, 'Elem flow name'] or
-                                            'UN-SEASIA' in water_data.loc[i, 'Elem flow name'] or
-                                            'UN-SEUROPE' in water_data.loc[i, 'Elem flow name'] or
-                                            'UN-WAFRICA' in water_data.loc[i, 'Elem flow name'] or
-                                            'UN-WASIA' in water_data.loc[i, 'Elem flow name'] or
-                                            'United States of America, including overseas territories' in water_data.loc[i, 'Elem flow name'] or
-                                            'WECC' in water_data.loc[i, 'Elem flow name'] or
-                                            'WEU' in water_data.loc[i, 'Elem flow name'])],
-                         'Native geographical resolution scale'] = 'Other region'
+                                                        'Akrotiri' in water_data.loc[i, 'Elem flow name'] or
+                                                        'Asia without China' in water_data.loc[i, 'Elem flow name'] or
+                                                        'Australia, including overseas territories' in water_data.loc[
+                                                            i, 'Elem flow name'] or
+                                                        'BALTSO' in water_data.loc[i, 'Elem flow name'] or
+                                                        'CENTREL' in water_data.loc[i, 'Elem flow name'] or
+                                                        'CUSMA/T-MEC/USMCA' in water_data.loc[i, 'Elem flow name'] or
+                                                        'Canada without Alberta' in water_data.loc[
+                                                            i, 'Elem flow name'] or
+                                                        'Canada without Alberta and Quebec' in water_data.loc[
+                                                            i, 'Elem flow name'] or
+                                                        'Canada without Quebec' in water_data.loc[
+                                                            i, 'Elem flow name'] or
+                                                        'Canary Islands' in water_data.loc[i, 'Elem flow name'] or
+                                                        'Central Asia' in water_data.loc[i, 'Elem flow name'] or
+                                                        'China w/o Inner Mongol' in water_data.loc[
+                                                            i, 'Elem flow name'] or
+                                                        'Crimea' in water_data.loc[i, 'Elem flow name'] or
+                                                        'Cyprus No Mans Area' in water_data.loc[i, 'Elem flow name'] or
+                                                        'Dhekelia Base' in water_data.loc[i, 'Elem flow name'] or
+                                                        'ENTSO-E' in water_data.loc[i, 'Elem flow name'] or
+                                                        'Europe without Austria' in water_data.loc[
+                                                            i, 'Elem flow name'] or
+                                                        'Europe without NORDEL (NCPA)' in water_data.loc[
+                                                            i, 'Elem flow name'] or
+                                                        'Europe without Switzerland' in water_data.loc[
+                                                            i, 'Elem flow name'] or
+                                                        'Europe without Switzerland and Austria' in water_data.loc[
+                                                            i, 'Elem flow name'] or
+                                                        'Europe without Switzerland and France' in water_data.loc[
+                                                            i, 'Elem flow name'] or
+                                                        'Europe, without Russia and Türkiye' in water_data.loc[
+                                                            i, 'Elem flow name'] or
+                                                        'FSU' in water_data.loc[i, 'Elem flow name'] or
+                                                        'France, including overseas territories' in water_data.loc[
+                                                            i, 'Elem flow name'] or
+                                                        'Guantanamo Bay' in water_data.loc[i, 'Elem flow name'] or
+                                                        'IAI Area, Africa' in water_data.loc[i, 'Elem flow name'] or
+                                                        'IAI Area, Asia, without China and GCC' in water_data.loc[
+                                                            i, 'Elem flow name'] or
+                                                        'IAI Area, EU27 & EFTA' in water_data.loc[
+                                                            i, 'Elem flow name'] or
+                                                        'IAI Area, Gulf Cooperation Council' in water_data.loc[
+                                                            i, 'Elem flow name'] or
+                                                        'IAI Area, North America' in water_data.loc[
+                                                            i, 'Elem flow name'] or
+                                                        'IAI Area, North America, without Quebec' in water_data.loc[
+                                                            i, 'Elem flow name'] or
+                                                        'IAI Area, Russia & RER w/o EU27 & EFTA' in water_data.loc[
+                                                            i, 'Elem flow name'] or
+                                                        'IAI Area, South America' in water_data.loc[
+                                                            i, 'Elem flow name'] or
+                                                        'IN-Islands' in water_data.loc[i, 'Elem flow name'] or
+                                                        'MRO' in water_data.loc[i, 'Elem flow name'] or
+                                                        'NAFTA' in water_data.loc[i, 'Elem flow name'] or
+                                                        'NORDEL' in water_data.loc[i, 'Elem flow name'] or
+                                                        'NPCC' in water_data.loc[i, 'Elem flow name'] or
+                                                        'North America without Quebec' in water_data.loc[
+                                                            i, 'Elem flow name'] or
+                                                        'Northern Cyprus' in water_data.loc[i, 'Elem flow name'] or
+                                                        'Québec, HQ distribution network' in water_data.loc[
+                                                            i, 'Elem flow name'] or
+                                                        'RER w/o AT+BE+CH+DE+FR+IT' in water_data.loc[
+                                                            i, 'Elem flow name'] or
+                                                        'RER w/o CH+DE' in water_data.loc[i, 'Elem flow name'] or
+                                                        'RER w/o DE+NL+NO' in water_data.loc[i, 'Elem flow name'] or
+                                                        'RER w/o DE+NL+NO+RU' in water_data.loc[i, 'Elem flow name'] or
+                                                        'RER w/o DE+NL+RU' in water_data.loc[i, 'Elem flow name'] or
+                                                        'RER w/o RU' in water_data.loc[i, 'Elem flow name'] or
+                                                        'Russia (Asia)' in water_data.loc[i, 'Elem flow name'] or
+                                                        'Russia (Europe)' in water_data.loc[i, 'Elem flow name'] or
+                                                        'SAS' in water_data.loc[i, 'Elem flow name'] or
+                                                        'Siachen Glacier' in water_data.loc[i, 'Elem flow name'] or
+                                                        'Somaliland' in water_data.loc[i, 'Elem flow name'] or
+                                                        'UCTE' in water_data.loc[i, 'Elem flow name'] or
+                                                        'UCTE without France' in water_data.loc[i, 'Elem flow name'] or
+                                                        'UCTE without Germany' in water_data.loc[i, 'Elem flow name'] or
+                                                        'UCTE without Germany and France' in water_data.loc[
+                                                            i, 'Elem flow name'] or
+                                                        'UN-AMERICAS' in water_data.loc[i, 'Elem flow name'] or
+                                                        'UN-ASIA' in water_data.loc[i, 'Elem flow name'] or
+                                                        'UN-AUSTRALIANZ' in water_data.loc[i, 'Elem flow name'] or
+                                                        'UN-CAMERICA' in water_data.loc[i, 'Elem flow name'] or
+                                                        'UN-CARIBBEAN' in water_data.loc[i, 'Elem flow name'] or
+                                                        'UN-EAFRICA' in water_data.loc[i, 'Elem flow name'] or
+                                                        'UN-EASIA' in water_data.loc[i, 'Elem flow name'] or
+                                                        'UN-EEUROPE' in water_data.loc[i, 'Elem flow name'] or
+                                                        'UN-EUROPE' in water_data.loc[i, 'Elem flow name'] or
+                                                        'UN-MAFRICA' in water_data.loc[i, 'Elem flow name'] or
+                                                        'UN-MELANESIA' in water_data.loc[i, 'Elem flow name'] or
+                                                        'UN-MICRONESIA' in water_data.loc[i, 'Elem flow name'] or
+                                                        'UN-NAFRICA' in water_data.loc[i, 'Elem flow name'] or
+                                                        'UN-NEUROPE' in water_data.loc[i, 'Elem flow name'] or
+                                                        'UN-OCEANIA' in water_data.loc[i, 'Elem flow name'] or
+                                                        'UN-POLYNESIA' in water_data.loc[i, 'Elem flow name'] or
+                                                        'UN-SAMERICA' in water_data.loc[i, 'Elem flow name'] or
+                                                        'UN-SASIA' in water_data.loc[i, 'Elem flow name'] or
+                                                        'UN-SEASIA' in water_data.loc[i, 'Elem flow name'] or
+                                                        'UN-SEUROPE' in water_data.loc[i, 'Elem flow name'] or
+                                                        'UN-WAFRICA' in water_data.loc[i, 'Elem flow name'] or
+                                                        'UN-WASIA' in water_data.loc[i, 'Elem flow name'] or
+                                                        'United States of America, including overseas territories' in
+                                                        water_data.loc[i, 'Elem flow name'] or
+                                                        'WECC' in water_data.loc[i, 'Elem flow name'] or
+                                                        'WEU' in water_data.loc[i, 'Elem flow name'])],
+                       'Native geographical resolution scale'] = 'Other region'
 
         # concat with master_db
         self.master_db = pd.concat([self.master_db, water_data])
@@ -4289,7 +3629,7 @@ class Parse:
                                                i in original_cfs.index]
 
         CAS = {'EPS': '9003-53-6',
-               'HDPE': '9002-88-4',
+               'HDPE': '25087-34-7',
                'LDPE': '9002-88-4',
                'PA/Nylon': '25038-54-4',
                'PET': '25038-59-9',
@@ -4355,7 +3695,7 @@ class Parse:
         cfs.loc[:, 'FAO_num'] = [str(i) for i in cfs.loc[:, 'FAO_num']]
         # convert the species/yr cf to PDF.m2.yr
         cfs.loc[:, 'CF (PDF.m2.yr)'] = (
-                    cfs.loc[:, 'CF (species/yr)'] * cfs.loc[:, 'Area (m2)'] / cfs.loc[:, 'Species_num (nb sp.)'])
+                cfs.loc[:, 'CF (species/yr)'] * cfs.loc[:, 'Area (m2)'] / cfs.loc[:, 'Species_num (nb sp.)'])
         # original cfs per tonnes of fish. We Want per kg
         cfs.loc[:, 'CF (PDF.m2.yr)'] /= 1000
 
@@ -4438,14 +3778,15 @@ class Parse:
 
         data = pd.concat([data, pd.concat([pd.DataFrame(
             [i[1] + ' fish, discarded, FAO zone ' + i[0] for i in cf_regions.index], columns=['Elem flow name']),
-                                           pd.DataFrame(
-                                               cf_regions.loc[:, 'Discard CF (PDF.m2.yr/t discarded fish)'].values,
-                                               columns=['CF value'])], axis=1)])
+            pd.DataFrame(
+                cf_regions.loc[:, 'Discard CF (PDF.m2.yr/t discarded fish)'].values,
+                columns=['CF value'])], axis=1)])
 
         data = pd.concat(
-            [data, pd.concat([pd.DataFrame([i[1] + ' fish, discarded, GLO' for i in glo.index], columns=['Elem flow name']),
-                              pd.DataFrame(glo.loc[:, 'Discard CF (PDF.m2.yr/t discarded fish)'].values,
-                                           columns=['CF value'])], axis=1)])
+            [data,
+             pd.concat([pd.DataFrame([i[1] + ' fish, discarded, GLO' for i in glo.index], columns=['Elem flow name']),
+                        pd.DataFrame(glo.loc[:, 'Discard CF (PDF.m2.yr/t discarded fish)'].values,
+                                     columns=['CF value'])], axis=1)])
         data = clean_up_dataframe(data)
         data.loc[:, 'Impact category'] = 'Fisheries impact'
         data.loc[:, 'CF unit'] = 'PDF.m2.yr'
@@ -4475,34 +3816,10 @@ class Parse:
 
         map = pd.read_sql('SELECT * FROM [SI - Mapping countries to continents]', self.conn).set_index('country')
 
-        # keep both as separate loops, first one has to run before the second one
-        for indicator in ['Particulate matter formation', 'Freshwater acidification', 'Terrestrial acidification',
-                          'Marine eutrophication']:
-            for substance in ['Ammonia', 'Nitrogen oxides', 'Sulfur dioxide']:
-                if indicator == 'Particulate matter formation':
-                    df = self.master_db.loc[self.master_db.loc[:, 'Impact category'] == indicator].loc[
-                        self.master_db.loc[:, 'Elem flow name'] == substance + ', UN-OCEANIA'].copy('deep')
-                    df.loc[:, 'Elem flow name'] = substance + ', OCE'
-                    self.master_db = clean_up_dataframe(pd.concat([self.master_db, df]))
-
-                    df = self.master_db.loc[self.master_db.loc[:, 'Impact category'] == indicator].loc[
-                        self.master_db.loc[:, 'Elem flow name'] == substance + ', US-PR'].copy('deep')
-                    df.loc[:, 'Elem flow name'] = substance + ', PR'
-                    self.master_db = clean_up_dataframe(pd.concat([self.master_db, df]))
-                else:
-                    df = self.master_db.loc[self.master_db.loc[:, 'Impact category'] == indicator].loc[
-                        self.master_db.loc[:, 'Elem flow name'] == substance + ', OCE'].copy('deep')
-                    df.loc[:, 'Elem flow name'] = substance + ', UN-OCEANIA'
-                    self.master_db = clean_up_dataframe(pd.concat([self.master_db, df]))
-
-                    df = self.master_db.loc[self.master_db.loc[:, 'Impact category'] == indicator].loc[
-                        self.master_db.loc[:, 'Elem flow name'] == substance + ', PR'].copy('deep')
-                    df.loc[:, 'Elem flow name'] = substance + ', US-PR'
-                    self.master_db = clean_up_dataframe(pd.concat([self.master_db, df]))
-
         for substance in ['Ammonia', 'Nitrogen oxides', 'Sulfur dioxide']:
-            all_existing_geos = set(self.master_db.loc[self.master_db.loc[:, 'Elem flow name'].str.contains(
-                substance + ', '), 'Elem flow name'])
+            all_existing_geos = set(self.master_db.loc[(self.master_db.loc[:, 'Elem flow name'].str.contains(
+                substance + ', ') & ~(self.master_db.loc[:, 'Elem flow name'].str.contains(', as N, '))),
+                                                       'Elem flow name'])
             all_existing_geos = [i.split(substance + ', ')[1] for i in all_existing_geos]
 
             for indicator in ['Particulate matter formation', 'Freshwater acidification', 'Terrestrial acidification',
@@ -4511,16 +3828,60 @@ class Parse:
                                         self.master_db.loc[:, 'Elem flow name'].str.contains(
                                             substance + ', '), 'Elem flow name'])
                 existing_geos = [i.split(substance + ', ')[1] for i in existing_geos]
+                if existing_geos:
+                    to_create = set(all_existing_geos) - set(existing_geos)
+                    for new_geo in to_create:
+                        if new_geo in map.index:
+                            df = self.master_db.loc[self.master_db.loc[:, 'Impact category'] == indicator].loc[
+                                self.master_db.loc[:, 'Elem flow name'] == substance + ', ' + map.loc[
+                                    new_geo, 'continent']].copy('deep')
+                            df.loc[:, 'Elem flow name'] = substance + ', ' + new_geo
+                            if ('-' in new_geo and new_geo not in ['ENTSO-E', 'UN-SEASIA']) or len(new_geo) == 2:
+                                df.loc[:, 'Native geographical resolution scale'] = 'Country'
+                            else:
+                                df.loc[:, 'Native geographical resolution scale'] = 'Other region'
+                            self.master_db = clean_up_dataframe(pd.concat([self.master_db, df]))
 
-                to_create = set(all_existing_geos) - set(existing_geos)
+        # also ensure consistency for substance made from stochiometric ratios
+        harmonization_stoechiometry = {'Ammonia, as N': 'Ammonia',
+                                       'Ammonium carbonate': 'Ammonia',
+                                       'Ammonium nitrate': 'Nitrogen oxides',
+                                       'Ammonium, ion': 'Ammonia',
+                                       'Nitrate': 'Nitrogen oxides',
+                                       'Nitric acid': 'Nitrogen oxides',
+                                       'Nitrite': 'Nitrogen oxides',
+                                       'Nitrogen dioxide': 'Nitrogen oxides',
+                                       'Nitric oxide': 'Nitrogen oxides',
+                                       'Sulfate': 'Sulfur dioxide',
+                                       'Sulfur trioxide': 'Sulfur dioxide',
+                                       'Sulfuric acid': 'Sulfur dioxide'
+                                       }
 
-                for new_geo in to_create:
-                    if new_geo in map.index:
+        for substance in harmonization_stoechiometry:
+            for indicator in ['Particulate matter formation', 'Freshwater acidification',
+                              'Terrestrial acidification', 'Marine eutrophication']:
+                existing_geos = set(self.master_db.loc[self.master_db.loc[:, 'Impact category'] == indicator].loc[
+                                        self.master_db.loc[:, 'Elem flow name'].str.contains(
+                                            substance + ', '), 'Elem flow name'])
+                existing_geos = [i.split(substance + ', ')[1] for i in existing_geos]
+                if existing_geos:
+                    existing_geos_ref = set(
+                        self.master_db.loc[self.master_db.loc[:, 'Impact category'] == indicator].loc[
+                            (self.master_db.loc[:, 'Elem flow name'].str.contains(
+                                harmonization_stoechiometry[substance] + ', ') & ~(
+                                self.master_db.loc[:, 'Elem flow name'].str.contains(
+                                    ', as N, '))), 'Elem flow name'])
+                    existing_geos_ref = [i.split(harmonization_stoechiometry[substance] + ', ')[1] for i in
+                                         existing_geos_ref]
+
+                    missing_geos = set(existing_geos_ref) - set(existing_geos)
+                    for missing_geo in missing_geos:
                         df = self.master_db.loc[self.master_db.loc[:, 'Impact category'] == indicator].loc[
                             self.master_db.loc[:, 'Elem flow name'] == substance + ', ' + map.loc[
-                                new_geo, 'continent']].copy('deep')
-                        df.loc[:, 'Elem flow name'] = substance + ', ' + new_geo
-                        if ('-' in new_geo and new_geo not in ['ENTSO-E', 'UN-SEASIA']) or len(new_geo) == 2:
+                                missing_geo, 'continent']].copy('deep')
+                        df.loc[:, 'Elem flow name'] = substance + ', ' + missing_geo
+                        if ('-' in missing_geo and missing_geo not in ['ENTSO-E', 'UN-SEASIA']) or len(
+                                missing_geo) == 2:
                             df.loc[:, 'Native geographical resolution scale'] = 'Country'
                         else:
                             df.loc[:, 'Native geographical resolution scale'] = 'Other region'
@@ -4612,7 +3973,8 @@ class Parse:
             proxy = clean_up_dataframe(proxy)
 
         # only add new subcomps values if they do not already exist in master_db
-        proxy.set_index(['Impact category', 'CF unit', 'Compartment', 'Sub-compartment', 'Elem flow name'],inplace=True)
+        proxy.set_index(['Impact category', 'CF unit', 'Compartment', 'Sub-compartment', 'Elem flow name'],
+                        inplace=True)
         proxy.update(self.master_db.set_index(['Impact category', 'CF unit', 'Compartment',
                                                'Sub-compartment', 'Elem flow name']))
         proxy = proxy.reset_index()
@@ -4623,7 +3985,8 @@ class Parse:
         # ------------ groundwater and ocean subcomps ------------
 
         # for the groundwater and ocean subcomps, only in some impact categories are the values equal to unspecified
-        water_comp = self.master_db.loc[[i for i in self.master_db.index if self.master_db.loc[i, 'Compartment'] == 'Water']]
+        water_comp = self.master_db.loc[
+            [i for i in self.master_db.index if self.master_db.loc[i, 'Compartment'] == 'Water']]
         to_unspecified = {'groundwater': ['Water availability, freshwater ecosystem',
                                           'Water availability, human health',
                                           'Water scarcity'],
@@ -4722,7 +4085,7 @@ class Parse:
                 proxy.set_index(['Impact category', 'CF unit', 'Compartment', 'Sub-compartment', 'Elem flow name'],
                                 inplace=True)
                 proxy.update(self.master_db.set_index(['Impact category', 'CF unit', 'Compartment',
-                                                  'Sub-compartment', 'Elem flow name']))
+                                                       'Sub-compartment', 'Elem flow name']))
                 proxy = proxy.reset_index()
                 self.master_db = pd.concat([self.master_db, proxy]).drop_duplicates()
                 self.master_db = clean_up_dataframe(self.master_db)
@@ -4731,7 +4094,8 @@ class Parse:
 
         long_term_subcomps = {'low. pop., long-term': 'low. pop.'}
 
-        long_term_cats = ['Climate change, ecosystem quality', 'Climate change, human health', 'Freshwater ecotoxicity',
+        long_term_cats = ['Climate change, ecosystem quality, terrestrial ecosystem', 'Climate change, human health',
+                          'Climate change, ecosystem quality, marine ecosystem', 'Freshwater ecotoxicity',
                           'Marine ecotoxicity', 'Terrestrial ecotoxicity', 'Human toxicity cancer',
                           'Human toxicity non-cancer', 'Marine acidification']
 
@@ -4833,8 +4197,8 @@ class Parse:
 
     def create_regio_flows_for_not_regio_ic(self):
         """
-        Some regionalized emissions (e.g., Ammonia) also impact non-regionalized impact categories (e.g.,
-        Particulate matter). Hence, this method create non-regionalized CFs for these emissions.
+        Some regionalized emissions (e.g., Ammonia) also impact non-regionalized impact categories. Hence, this method
+        creates non-regionalized CFs for these emissions.
         :return:
         """
 
@@ -4842,21 +4206,23 @@ class Parse:
 
         for ic in set(self.master_db.loc[:, 'Impact category']):
             df = self.master_db[self.master_db['Impact category'] == ic].copy()
-            regio_flows_per_ic[ic] = set([', '.join(i.split(', ')[:-1]) for i in df['Elem flow name'] if ', FR' in i])
+            dff = df.loc[
+                df.loc[:, 'Elem flow name'].str.contains(', FR'), ['Elem flow name', 'Compartment']].drop_duplicates()
+            regio_flows_per_ic[ic] = set(zip(dff['Elem flow name'], dff['Compartment']))
+        regio_flows_per_ic = {k: set([(i[0].split(', FR')[0], i[1]) for i in v]) for k, v in regio_flows_per_ic.items()}
 
         flows_to_create = {}
 
         for ic in set(self.master_db.loc[:, 'Impact category']):
             df = self.master_db[self.master_db['Impact category'] == ic].copy()
             for flow in set.union(*[set(i) for i in list(regio_flows_per_ic.values())]):
-                if flow in df['Elem flow name'].tolist():
-                    # if the CF is equal to zero we don't care
-                    if df.loc[[i for i in df.index if (df.loc[i, 'Elem flow name'] == flow and
-                                                       df.loc[i, 'Impact category'] == ic)], 'CF value'].sum() != 0:
-                        if ic in flows_to_create.keys():
-                            flows_to_create[ic].append(flow)
-                        else:
-                            flows_to_create[ic] = [flow]
+                dff = df.loc[(df.loc[:, 'Elem flow name'] == flow[0]) & (df.loc[:, 'Compartment'] == flow[1])]
+                # if the CF is equal to zero we don't care
+                if dff.loc[:, 'CF value'].sum() != 0:
+                    if ic in flows_to_create.keys():
+                        flows_to_create[ic].append(flow)
+                    else:
+                        flows_to_create[ic] = [flow]
 
         flows_to_create = {k: set(v) for k, v in flows_to_create.items()}
 
@@ -4867,14 +4233,16 @@ class Parse:
 
         for substance in set.union(*[set(i) for i in list(flows_to_create.values())]):
             df = self.master_db.loc[
-                self.master_db[self.master_db['Elem flow name'].str.contains(substance, na=False)].index.tolist()]
+                self.master_db[self.master_db['Elem flow name'].str.contains(substance[0], na=False)].index.tolist()]
             df = df[df.loc[:, 'Native geographical resolution scale'].isin(['Country', 'Continent', 'Other region'])]
-            regions = set([i.split(substance + ', ')[-1] for i in df.loc[:, 'Elem flow name'] if substance + ', ' in i])
+            regions = set(
+                [i.split(substance[0] + ', ')[-1] for i in df.loc[:, 'Elem flow name'] if substance[0] + ', ' in i])
             ic_flows_to_create = {k for k, v in flows_to_create.items() if substance in v}
             for ic in ic_flows_to_create:
-                dff = self.master_db.loc[self.master_db.loc[:, 'Elem flow name'] == substance].loc[
+                dff = self.master_db.loc[(self.master_db.loc[:, 'Elem flow name'] == substance[0]) &
+                                         (self.master_db.loc[:, 'Compartment'] == substance[1])].loc[
                     self.master_db.loc[:, 'Impact category'] == ic].copy()
-                list_flow_added = ([substance + ', ' + i for i in regions] * len(dff))
+                list_flow_added = ([substance[0] + ', ' + i for i in regions] * len(dff))
                 list_flow_added.sort()
                 dff = pd.concat([dff] * (len(regions)))
                 dff['Elem flow name'] = list_flow_added
@@ -5007,12 +4375,12 @@ class Parse:
             df.loc[:, 'Elem flow unit'] = 'kgy'
             df.loc[:, 'CF value'] /= -100
             df.loc[df.loc[:, 'Impact category'] == 'Climate change, long term', 'CF value'] = 0
-            df.loc[df.loc[:, 'Impact category'] == 'Climate change, ecosystem quality, long term', 'CF value'] = -(
-                df.loc[df.loc[:, 'Impact category'] == 'Climate change, ecosystem quality, short term', 'CF value']
-            ).iloc[0]
+            df.loc[df.loc[:, 'Impact category'] == 'Climate change, ecosystem quality, terrestrial ecosystem, long term', 'CF value'] = -(
+                df.loc[df.loc[:, 'Impact category'] == 'Climate change, ecosystem quality, terrestrial ecosystem, short term', 'CF value']).iloc[0]
+            df.loc[df.loc[:,'Impact category'] == 'Climate change, ecosystem quality, marine ecosystem, long term', 'CF value'] = - (
+                df.loc[df.loc[:,'Impact category'] == 'Climate change, ecosystem quality, marine ecosystem, short term', 'CF value']).iloc[0]
             df.loc[df.loc[:, 'Impact category'] == 'Climate change, human health, long term', 'CF value'] = -(
-                df.loc[df.loc[:, 'Impact category'] == 'Climate change, human health, short term', 'CF value']
-            ).iloc[0]
+                df.loc[df.loc[:, 'Impact category'] == 'Climate change, human health, short term', 'CF value']).iloc[0]
             if origin_flow in ['Carbon dioxide, fossil', 'Methane, fossil', 'Carbon monoxide, fossil']:
                 df.loc[df.loc[:, 'Impact category'] == 'Marine acidification, long term', 'CF value'] = -(
                     df.loc[df.loc[:, 'Impact category'] == 'Marine acidification, short term', 'CF value']
@@ -5079,28 +4447,28 @@ class Parse:
         self.master_db.loc[
             self.master_db['Elem flow name'].isin(biogenic) &
             self.master_db['Impact category'].str.contains('Climate change', na=False), 'Impact category'] = [
-            i+', biogenic' for i in self.master_db.loc[
+            i + ', biogenic' for i in self.master_db.loc[
                 self.master_db['Elem flow name'].isin(biogenic) &
                 self.master_db['Impact category'].str.contains('Climate change', na=False), 'Impact category']]
 
         self.master_db.loc[
             self.master_db['Elem flow name'].isin(land_use) &
             self.master_db['Impact category'].str.contains('Climate change', na=False), 'Impact category'] = [
-            i+', land transformation' for i in self.master_db.loc[
+            i + ', land transformation' for i in self.master_db.loc[
                 self.master_db['Elem flow name'].isin(land_use) &
                 self.master_db['Impact category'].str.contains('Climate change', na=False), 'Impact category']]
 
         self.master_db.loc[
             self.master_db['Elem flow name'].isin(CO2_uptake) &
             self.master_db['Impact category'].str.contains('Climate change', na=False), 'Impact category'] = [
-            i+', CO2 uptake' for i in self.master_db.loc[
+            i + ', CO2 uptake' for i in self.master_db.loc[
                 self.master_db['Elem flow name'].isin(CO2_uptake) &
                 self.master_db['Impact category'].str.contains('Climate change', na=False), 'Impact category']]
 
         self.master_db.loc[
             ~self.master_db['Elem flow name'].isin(CO2_uptake + biogenic + land_use) &
             self.master_db['Impact category'].str.contains('Climate change', na=False), 'Impact category'] = [
-            i+', fossil' for i in self.master_db.loc[
+            i + ', fossil' for i in self.master_db.loc[
                 ~self.master_db['Elem flow name'].isin(CO2_uptake + biogenic + land_use) &
                 self.master_db['Impact category'].str.contains('Climate change', na=False), 'Impact category']]
 
@@ -5112,8 +4480,9 @@ class Parse:
         """
 
         self.master_db_not_regio = self.master_db.loc[[i for i in self.master_db.index if
-                                                self.master_db.loc[i, 'Native geographical resolution scale'] not in [
-                                                    'Continent', 'Country', 'Other region']]].copy()
+                                                       self.master_db.loc[
+                                                           i, 'Native geographical resolution scale'] not in [
+                                                           'Continent', 'Country', 'Other region']]].copy()
 
         # dropping flow names with ", GLO" in them
         self.master_db_not_regio.drop([i for i in self.master_db_not_regio.index if ', GLO' in
@@ -5135,7 +4504,7 @@ class Parse:
         :return: self.ei35_iw, self.ei36_iw, self.ei371_iw, self.ei38_iw
         """
 
-        latest_ei_version = '3.11'
+        latest_ei_version = '3.12'
 
         elem_flow_uuid = pd.read_excel(pkg_resources.resource_stream(
             __name__, '/Data/mappings/ei' + latest_ei_version.replace('.', '') + '/ei_elem_flow_uuids.xlsx'))
@@ -5161,7 +4530,8 @@ class Parse:
             # for not_one_for_one it's harder, e.g., the "Zinc" substance from iw+ must be linked to multiple elementary flows in ecoinvent
             unique_not_one_for_one = set(not_one_for_one.loc[:, 'iw name'])
             for subst in tqdm(unique_not_one_for_one, leave=True):
-                ei_df = not_one_for_one.loc[[i for i in not_one_for_one.index if not_one_for_one.loc[i, 'iw name'] == subst]]
+                ei_df = not_one_for_one.loc[
+                    [i for i in not_one_for_one.index if not_one_for_one.loc[i, 'iw name'] == subst]]
                 iw_df = ei_iw_db.loc[[i for i in ei_iw_db.index if ei_iw_db.loc[i, 'Elem flow name'] == subst]]
                 new_df = pd.concat([iw_df] * len(ei_df))
                 new_df = new_df.reset_index().drop('index', axis=1)
@@ -5214,14 +4584,15 @@ class Parse:
 
             # special cases: fossil well subcomp in water comp = ground- subcomp
             df = ei_iw_db.loc[[i for i in ei_iw_db.index if (ei_iw_db.loc[i, 'Sub-compartment'] == 'ground-' and
-                                                                 ei_iw_db.loc[i, 'Compartment'] == 'water')]].copy()
+                                                             ei_iw_db.loc[i, 'Compartment'] == 'water')]].copy()
             df.loc[:, 'Sub-compartment'] = 'fossil well'
             ei_iw_db = pd.concat([ei_iw_db, df])
             ei_iw_db = clean_up_dataframe(ei_iw_db)
 
             # special cases: fossil well subcomp in raw comp = in ground subcomp
             df = ei_iw_db.loc[[i for i in ei_iw_db.index if (ei_iw_db.loc[i, 'Sub-compartment'] == 'in ground' and
-                                                             ei_iw_db.loc[i, 'Compartment'] == 'natural resource')]].copy()
+                                                             ei_iw_db.loc[
+                                                                 i, 'Compartment'] == 'natural resource')]].copy()
             df.loc[:, 'Sub-compartment'] = 'fossil well'
             ei_iw_db = pd.concat([ei_iw_db, df])
             ei_iw_db = clean_up_dataframe(ei_iw_db)
@@ -5232,28 +4603,9 @@ class Parse:
             ei_iw_db.loc[
                 [i for i in ei_iw_db.index if ei_iw_db.loc[i, 'Elem flow unit'] == 'Bq'], 'Elem flow unit'] = 'kBq'
             ei_iw_db.loc[[i for i in ei_iw_db.index if
-                            ei_iw_db.loc[i, 'Elem flow unit'] == 'm2.yr'], 'Elem flow unit'] = 'm2*year'
+                          ei_iw_db.loc[i, 'Elem flow unit'] == 'm2.yr'], 'Elem flow unit'] = 'm2*year'
 
             # ---------- Odd cases ------------
-
-            # some weird subcomps for energy flows
-            energies = ['Energy, potential (in hydropower reservoir), converted',
-                        'Energy, solar, converted',
-                        'Energy, kinetic (in wind), converted',
-                        'Energy, gross calorific value, in biomass, primary forest',
-                        'Energy, gross calorific value, in biomass',
-                        'Energy, geothermal, converted']
-            subcomps_to_add = ['in air', 'in water', 'biotic']
-            # does not make sense but it does not matter because it's corrected by linking to ecoinvent afterwards
-            for energy in energies:
-                for subcomp in subcomps_to_add:
-                    add = pd.DataFrame(
-                        ['Fossil and nuclear energy use', 'MJ deprived', 'natural resource', subcomp, energy, None, 0.0,
-                         'MJ', 'Midpoint', 'Global'],
-                        ['Impact category', 'CF unit', 'Compartment', 'Sub-compartment', 'Elem flow name', 'CAS number',
-                         'CF value','Elem flow unit', 'MP or Damage', 'Native geographical resolution scale']).T
-                    ei_iw_db = pd.concat([ei_iw_db, add])
-                    ei_iw_db = clean_up_dataframe(ei_iw_db)
 
             # fix comp/subcomp of pesky biogenic carbon elementary flows
             ei_iw_db = ei_iw_db.drop(
@@ -5279,42 +4631,62 @@ class Parse:
                         ei_iw_db['Impact category'].str.contains(', fossil', na=False), 'Impact category']]
 
                 # start with latest available version of ecoinvent
-                self.ei311_iw = ei_iw_db.copy('deep')
+                self.ei312_iw = ei_iw_db.copy('deep')
+
                 # add ecoinvent elem flow uuids
-                self.ei311_iw = self.ei311_iw.merge(
+                self.ei312_iw = self.ei312_iw.merge(
                     elem_flow_uuid.loc[:, ['Name', 'Compartment', 'Subcompartment', 'ID']],
                     right_on=['Name', 'Compartment', 'Subcompartment'],
                     left_on=['Elem flow name', 'Compartment', 'Sub-compartment'],
                     how='left')
+
+                only_in_312 = list(mapping[mapping.loc[:, 'introduced in ei v.'] == 3.12].dropna(
+                    subset=['iw name']).loc[:, 'ecoinvent name'])
+
+                self.ei311_iw = self.ei312_iw.drop(
+                    [i for i in self.ei312_iw.index if self.ei312_iw.loc[i, 'Elem flow name'] in
+                     only_in_312]).copy('deep')
 
                 only_in_311 = list(mapping[mapping.loc[:, 'introduced in ei v.'] == 3.11].dropna(
                     subset=['iw name']).loc[:, 'ecoinvent name'])
 
-                self.ei310_iw = self.ei311_iw.drop([i for i in self.ei311_iw.index if self.ei311_iw.loc[i, 'Elem flow name'] in
-                                                  only_in_311]).copy('deep')
+                self.ei310_iw = self.ei311_iw.drop(
+                    [i for i in self.ei311_iw.index if self.ei311_iw.loc[i, 'Elem flow name'] in
+                     only_in_311]).copy('deep')
 
-                self.ei311_iw = self.ei311_iw.dropna(subset=['ID'])
-                self.ei310_iw = self.ei310_iw.dropna(subset=['ID'])
+                self.ei312_iw = self.ei312_iw.dropna(subset=['ID']).drop_duplicates()
+                self.ei311_iw = self.ei311_iw.dropna(subset=['ID']).drop_duplicates()
+                self.ei310_iw = self.ei310_iw.dropna(subset=['ID']).drop_duplicates()
 
             elif db_format == 'carbon neutrality':
 
-                self.ei311_iw_carbon_neutrality = ei_iw_db.copy('deep')
+                self.ei312_iw_carbon_neutrality = ei_iw_db.copy('deep')
                 # add ecoinvent elem flow uuids
-                self.ei311_iw_carbon_neutrality = self.ei311_iw_carbon_neutrality.merge(
+                self.ei312_iw_carbon_neutrality = self.ei312_iw_carbon_neutrality.merge(
                     elem_flow_uuid.loc[:, ['Name', 'Compartment', 'Subcompartment', 'ID']],
                     right_on=['Name', 'Compartment', 'Subcompartment'],
                     left_on=['Elem flow name', 'Compartment', 'Sub-compartment'],
                     how='left')
+
+                only_in_312 = list(mapping[mapping.loc[:, 'introduced in ei v.'] == 3.12].dropna(
+                    subset=['iw name']).loc[:, 'ecoinvent name'])
+
+                self.ei311_iw_carbon_neutrality = self.ei312_iw_carbon_neutrality.drop(
+                    [i for i in self.ei312_iw_carbon_neutrality.index if
+                     self.ei312_iw_carbon_neutrality.loc[i, 'Elem flow name'] in
+                     only_in_312]).copy('deep')
 
                 only_in_311 = list(mapping[mapping.loc[:, 'introduced in ei v.'] == 3.11].dropna(
                     subset=['iw name']).loc[:, 'ecoinvent name'])
 
                 self.ei310_iw_carbon_neutrality = self.ei311_iw_carbon_neutrality.drop(
-                    [i for i in self.ei311_iw_carbon_neutrality.index if self.ei311_iw_carbon_neutrality.loc[i, 'Elem flow name'] in
+                    [i for i in self.ei311_iw_carbon_neutrality.index if
+                     self.ei311_iw_carbon_neutrality.loc[i, 'Elem flow name'] in
                      only_in_311]).copy('deep')
 
-                self.ei311_iw_carbon_neutrality = self.ei311_iw_carbon_neutrality.dropna(subset=['ID'])
-                self.ei310_iw_carbon_neutrality = self.ei310_iw_carbon_neutrality.dropna(subset=['ID'])
+                self.ei312_iw_carbon_neutrality = self.ei312_iw_carbon_neutrality.dropna(subset=['ID']).drop_duplicates()
+                self.ei311_iw_carbon_neutrality = self.ei311_iw_carbon_neutrality.dropna(subset=['ID']).drop_duplicates()
+                self.ei310_iw_carbon_neutrality = self.ei310_iw_carbon_neutrality.dropna(subset=['ID']).drop_duplicates()
 
     def link_to_sp(self):
         """
@@ -5332,53 +4704,29 @@ class Parse:
             sp = pd.read_excel(pkg_resources.resource_filename(__name__, '/Data/mappings/SP/sp_mapping.xlsx'), None)
             sp = clean_up_dataframe(pd.concat([sp['Non regionalized'], sp['Regionalized']]))
             sp = sp.loc[:, ['Name', 'Name IW+']].dropna()
-            differences = sp.loc[sp.Name != sp.loc[:, 'Name IW+']].set_index('Name IW+')
+            differences = sp.loc[sp.Name != sp.loc[:, 'Name IW+']]
             double_iw_flow = sp.loc[sp.loc[:, 'Name IW+'].duplicated(), 'Name IW+'].tolist()
-            sp = sp.set_index('Name IW+')
 
-            # go to dictionaries because it's waaaay faster to process than dataframes
-            iw_sp_dict = dict(zip(list(zip(db.loc[:, 'Elem flow name'],
-                                           db.loc[:, 'Impact category'],
-                                           db.loc[:, 'CF unit'],
-                                           db.loc[:, 'Compartment'],
-                                           db.loc[:, 'Sub-compartment'],
-                                           db.loc[:, 'CAS number'],
-                                           db.loc[:, 'Elem flow unit'],
-                                           db.loc[:, 'MP or Damage'],
-                                           db.loc[:, 'Native geographical resolution scale'],
-                                           )),
-                                  db.loc[:, 'CF value']))
+            m = db.merge(differences[['Name IW+', 'Name']], how='left', left_on='Elem flow name', right_on='Name IW+')
 
-            for diff in tqdm(differences.index, leave=True):
-                if diff not in double_iw_flow:
-                    # simply rename the key
-                    for k in list(iw_sp_dict.keys()):
-                        if k[0] == diff:
-                            new_key = (differences.loc[diff, 'Name'],) + k[1:]
-                            iw_sp_dict[new_key] = iw_sp_dict.pop(k)
-                else:
-                    for i in range(len(sp.loc[diff, 'Name'])):
-                        # here we loop through the multiple SP names connected to one IW+ name
-                        if i == len(sp.loc[diff, 'Name']):
-                            # if it's the final SP name, we pop the original key
-                            for k in list(iw_sp_dict.keys()):
-                                if k[0] == diff:
-                                    new_key = (sp.loc[diff, 'Name'].iloc[i],) + k[1:]
-                                    iw_sp_dict[new_key] = iw_sp_dict.pop(k)
-                        else:
-                            for k in list(iw_sp_dict.keys()):
-                                # otherwise we just add a new key to the dict
-                                if k[0] == diff:
-                                    new_key = (sp.loc[diff, 'Name'].iloc[i],) + k[1:]
-                                    iw_sp_dict[new_key] = iw_sp_dict[k]
+            # rows that have any mapping
+            matched = m[m['Name'].notna()].copy()
+            matched['Elem flow name'] = matched['Name']
+            matched = matched.drop(columns=['Name IW+', 'Name'])
 
-            # create the dataframe from the dictionary
-            db = pd.DataFrame.from_dict(iw_sp_dict, orient='index')
-            db.index = pd.MultiIndex.from_tuples(db.index)
-            db = db.reset_index()
-            db.columns = ['Elem flow name', 'Impact category', 'CF unit', 'Compartment', 'Sub-compartment',
-                          'CAS number', 'Elem flow unit', 'MP or Damage', 'Native geographical resolution scale',
-                          'CF value']
+            # concat originals + all mapped copies
+            db = pd.concat([db, matched], ignore_index=True)
+
+            # remove duplicates names from IW+ (we just added everything together, i.e., SP names AND IW names)
+            db = db.loc[~((db.loc[:, "Elem flow name"].isin(differences.loc[:, 'Name IW+'])) & ~(
+                db.loc[:, "Elem flow name"].isin(double_iw_flow)))]
+            # remove other duplicated flows, basically all coming from land categories
+            db = db.loc[~(db.loc[:, 'Elem flow name'].str.contains('annual crops')) &
+                        ~(db.loc[:, 'Elem flow name'].str.contains('permanent crops')) &
+                        ~(db.loc[:, 'Elem flow name'].str.contains('forest, used, extensive')) &
+                        ~(db.loc[:, 'Elem flow name'].str.contains('forest, used, intensive')) &
+                        ~(db.loc[:, 'Elem flow name'].str.contains('pasture/meadow')) &
+                        ~(db.loc[:, 'Elem flow name'].str.contains('without Russia and Türkiye'))]
 
             # ------------------------------- SUBCOMPS ----------------------------------
 
@@ -5389,12 +4737,6 @@ class Parse:
             db.loc[db['Elem flow name'] == 'Water', 'Elem flow name'] = 'Water/m3'
             db.loc[db['Elem flow name'] == 'Water, agri', 'Elem flow name'] = 'Water/m3, agri'
             db.loc[db['Elem flow name'] == 'Water, non-agri', 'Elem flow name'] = 'Water/m3, non-agri'
-
-            # need an unspecified subcomp for mineral resource uses, for some databases in SP (e.g., Industry2.0)
-            df = db.loc[
-                [i for i in db.index if db.loc[i, 'Impact category'] == 'Mineral resources use']].copy()
-            df['Sub-compartment'] = '(unspecified)'
-            db = clean_up_dataframe(pd.concat([db, df]))
 
             # fix comp/subcomp of pesky biogenic carbon elementary flows
             db = db.drop(
@@ -5408,42 +4750,6 @@ class Parse:
             db = db.drop(db.loc[db.loc[:, 'Elem flow name'] == 'Carbon dioxide, biogenic, uptake'].index)
 
             # --------------------------- UNIT CONVERSIONS ----------------------------------
-
-            mj_flows = sp.loc[sp.loc[:, 'Name'].str.contains('MJ'), 'Name']
-            for flow in mj_flows:
-                db.loc[db.loc[:, 'Elem flow name'] == flow, 'CF value'] = float(
-                    flow.split(' MJ')[0].split(', ')[-1])
-
-            gj_flows = sp.loc[sp.loc[:, 'Name'].str.contains('GJ'), 'Name']
-            for flow in gj_flows:
-                if 'IN-GJ' not in flow:
-                    db.loc[[i for i in db.index if db.loc[i, 'Elem flow name'] == flow and
-                            db.loc[i, 'Impact category'] == 'Fossil and nuclear energy use'], 'CF value'] = float(
-                        flow.split(' GJ')[0].split(', ')[-1]) * 1000
-
-            # ensure units are coherent for energy flows
-            db.loc[db.loc[:, 'Elem flow name'].isin([i for i in mj_flows if 'per kg' in i]), 'Elem flow unit'] = 'kg'
-            db.loc[db.loc[:, 'Elem flow name'].isin([i for i in mj_flows if 'per m3' in i]), 'Elem flow unit'] = 'm3'
-
-            # some other flows from SP that require conversions because of units
-            new_flows = {
-                'Gas, natural/kg': 'Gas, natural/m3',
-                'Gas, mine, off-gas, process, coal mining/kg': 'Gas, mine, off-gas, process, coal mining/m3',
-                'Wood, unspecified, standing/kg': 'Wood, unspecified, standing/m3',
-                'Wood (16.9 MJ/kg)': 'Wood, unspecified, standing/m3'
-            }
-            for flow in new_flows:
-                if 'Gas' in flow:
-                    density = 0.8  # kg/m3 (https://www.engineeringtoolbox.com/gas-density-d_158.html)
-                elif 'Wood' in flow:
-                    density = 600  # kg/m3 (https://www.engineeringtoolbox.com/wood-density-d_40.html)
-
-                df = db[db['Elem flow name'] == new_flows[flow]].copy()
-                df.loc[:, 'Elem flow name'] = flow
-                df.loc[:, 'Elem flow unit'] = 'kg'
-                df.loc[:, 'CF value'] /= density
-                db = pd.concat([db, df])
-            db = clean_up_dataframe(db)
 
             # some water flows are in kilograms instead of cubic meters...
             problems = ['Water',
@@ -5477,13 +4783,34 @@ class Parse:
             db.loc[db.loc[:, 'CF unit'] == 'm2 arable land eq', 'CF unit'] = 'm2 ar ld eq'
             db.loc[db.loc[:, 'CF unit'] == 'm2 arable land eq .yr', 'CF unit'] = 'm2 ar ld.yr eq'
 
-            # ------------------------------ SUB-CATEGORIES SHENANIGANS ----------------------------
+            # ------------------------------ NAMING SHENANIGANS ----------------------------
+
+            # the names of CC EQ categories exceed 40 characters (i.e., the limit of SimaPro), so we rename them
+            db.loc[db.loc[:, 'Impact category'] ==
+                   'Climate change, ecosystem quality, terrestrial ecosystem, short term', 'Impact category'] = \
+                'Climate change, EQ, terr, ST'
+            db.loc[db.loc[:, 'Impact category'] ==
+                   'Climate change, ecosystem quality, terrestrial ecosystem, long term', 'Impact category'] = \
+                'Climate change, EQ, terr, LT'
+            db.loc[db.loc[:, 'Impact category'] ==
+                   'Climate change, ecosystem quality, marine ecosystem, short term', 'Impact category'] = \
+                'Climate change, EQ, mar, ST'
+            db.loc[db.loc[:, 'Impact category'] ==
+                   'Climate change, ecosystem quality, marine ecosystem, long term', 'Impact category'] = \
+                'Climate change, EQ, mar, LT'
+            # for consistency, also change the human health endpoint categories' names
+            db.loc[db.loc[:, 'Impact category'] ==
+                   'Climate change, human health, short term', 'Impact category'] = \
+                'Climate change, HH, ST'
+            db.loc[db.loc[:, 'Impact category'] ==
+                   'Climate change, human health, long term', 'Impact category'] = \
+                'Climate change, HH, LT'
 
             if not carboneutral:
                 db.loc[db['Elem flow name'].isin(['Carbon dioxide, land transformation',
                                                   'Carbon monoxide, land transformation',
                                                   'Methane, land transformation']) &
-                    db['Impact category'].str.contains(', fossil', na=False), 'Impact category'] = [
+                       db['Impact category'].str.contains(', fossil', na=False), 'Impact category'] = [
                     i.replace(', fossil', ', land transformation') for i in db.loc[
                         db['Elem flow name'].isin(['Carbon dioxide, land transformation',
                                                    'Carbon monoxide, land transformation',
@@ -5492,54 +4819,39 @@ class Parse:
 
                 # the names of sub-categories exceed 40 characters (i.e., the limit of SimaPro), so we rename them
                 db.loc[db.loc[:, 'Impact category'].str.contains(
-                    'Climate change, ecosystem quality, short term'), 'Impact category'] = [
-                    'Climate change, EQ, ST' + i.split('Climate change, ecosystem quality, short term')[1] for i in
+                    'Climate change, ecosystem quality, terrestrial ecosystem, short term'), 'Impact category'] = [
+                    'Climate change, EQ, terr, ST' + i.split('Climate change, ecosystem quality, terrestrial ecosystem, short term')[1] for i in
                     db.loc[db.loc[:, 'Impact category'].str.contains(
-                            'Climate change, ecosystem quality, short term'), 'Impact category']]
+                        'Climate change, ecosystem quality, terrestrial ecosystem, short term'), 'Impact category']]
 
                 db.loc[db.loc[:, 'Impact category'].str.contains(
-                    'Climate change, ecosystem quality, long term'), 'Impact category'] = [
-                    'Climate change, EQ, LT' + i.split('Climate change, ecosystem quality, long term')[1] for i in
+                    'Climate change, ecosystem quality, terrestrial ecosystem, long term'), 'Impact category'] = [
+                    'Climate change, EQ, terr, LT' + i.split('Climate change, ecosystem quality, terrestrial ecosystem, long term')[1] for i in
                     db.loc[db.loc[:, 'Impact category'].str.contains(
-                            'Climate change, ecosystem quality, long term'), 'Impact category']]
+                        'Climate change, ecosystem quality, terrestrial ecosystem, long term'), 'Impact category']]
+                db.loc[db.loc[:, 'Impact category'].str.contains(
+                    'Climate change, ecosystem quality, marine ecosystem, short term'), 'Impact category'] = [
+                    'Climate change, EQ, mar, ST' + i.split('Climate change, ecosystem quality, marine ecosystem, short term')[1] for i in
+                    db.loc[db.loc[:, 'Impact category'].str.contains(
+                        'Climate change, ecosystem quality, marine ecosystem, short term'), 'Impact category']]
+
+                db.loc[db.loc[:, 'Impact category'].str.contains(
+                    'Climate change, ecosystem quality, marine ecosystem, long term'), 'Impact category'] = [
+                    'Climate change, EQ, mar, LT' + i.split('Climate change, ecosystem quality, marine ecosystem, long term')[1] for i in
+                    db.loc[db.loc[:, 'Impact category'].str.contains(
+                        'Climate change, ecosystem quality, marine ecosystem, long term'), 'Impact category']]
 
                 db.loc[db.loc[:, 'Impact category'].str.contains(
                     'Climate change, human health, short term'), 'Impact category'] = [
                     'Climate change, HH, ST' + i.split('Climate change, human health, short term')[1] for i in
                     db.loc[db.loc[:, 'Impact category'].str.contains(
-                            'Climate change, human health, short term'), 'Impact category']]
+                        'Climate change, human health, short term'), 'Impact category']]
 
                 db.loc[db.loc[:, 'Impact category'].str.contains(
                     'Climate change, human health, long term'), 'Impact category'] = [
                     'Climate change, HH, LT' + i.split('Climate change, human health, long term')[1] for i in
                     db.loc[db.loc[:, 'Impact category'].str.contains(
-                            'Climate change, human health, long term'), 'Impact category']]
-
-            # ------------------------------ DOING SIMAPRO'S JOB ----------------------------
-
-            # Préconsultants can't seem to be able to harmonize their own substance list therefore some pollutants do not
-            # have the same spelling depending on the compartment. We "fix" that here by hardcoding the necessary changes.
-            db.loc[[i for i in db.index if
-                            db.loc[i, 'Elem flow name'] == '2-(Chloromethyl)-3-Chloro-1-Propene' and
-                            db.Compartment[i] in ['Water', 'Soil']], 'Elem flow name'] = '2-(Chloromethyl)-3-chloro-1-propene'
-            db.loc[[i for i in db.index if
-                            db.loc[i, 'Elem flow name'] == '2-Methyl-2,4-Pentanediol' and
-                            db.Compartment[i] in ['Water', 'Soil']], 'Elem flow name'] = '2-Methyl-2,4-pentanediol'
-            db.loc[[i for i in db.index if
-                            db.loc[i, 'Elem flow name'] == 'Alpha-Naphthylamine' and
-                            db.Compartment[i] == 'Air'], 'Elem flow name'] = 'alpha-Naphthylamine'
-            db.loc[[i for i in db.index if
-                            db.loc[i, 'Elem flow name'] == 'Alpha-pinene' and
-                            db.Compartment[i] == 'Air'], 'Elem flow name'] = 'alpha-Pinene'
-            db.loc[[i for i in db.index if
-                            db.loc[i, 'Elem flow name'] == 'Phosphorodithioic acid, O,O-diethyl ester' and
-                            db.Compartment[i] == 'Air'], 'Elem flow name'] = 'Phosphorodithioic acid, o,o-diethyl ester'
-            db.loc[[i for i in db.index if
-                            db.loc[i, 'Elem flow name'] == 'Phosphorodithioic acid, O,O-dimethyl ester' and
-                            db.Compartment[i] == 'Air'], 'Elem flow name'] = 'Phosphorodithioic acid, o,o-dimethyl ester'
-            db.loc[[i for i in db.index if
-                            db.loc[i, 'Elem flow name'] == 't-Butyl acetate' and
-                            db.Compartment[i] in ['Water', 'Soil']], 'Elem flow name'] = 'T-butyl acetate'
+                        'Climate change, human health, long term'), 'Impact category']]
 
             return db
 
@@ -5557,56 +4869,24 @@ class Parse:
             # -------------------------------- MAPPING -------------------------------------
 
             olca = pd.read_excel(pkg_resources.resource_filename(
-                __name__, '/Data/mappings/oLCA/v2.1.1/oLCA_mapping.xlsx'), None)
-            olca = clean_up_dataframe(pd.concat([olca['Non regionalized'], olca['Regionalized']]))
-            olca = olca.drop('Unnamed: 0', axis=1).loc[:, ['Name', 'Name IW+']].dropna()
-            differences = olca.loc[olca.Name != olca.loc[:, 'Name IW+']].set_index('Name IW+')
+                __name__, '/Data/mappings/oLCA/v2.5/oLCA_mapping.xlsx'), index_col=0).loc[:,
+                   ['Name', 'Name IW+']].dropna()
+            differences = olca.loc[olca.Name != olca.loc[:, 'Name IW+']]
             double_iw_flow = olca.loc[olca.loc[:, 'Name IW+'].duplicated(), 'Name IW+'].tolist()
-            olca = olca.set_index('Name IW+')
 
-            # go to dictionaries because it's waaaay faster to process than dataframes
-            iw_olca_dict = dict(zip(list(zip(db.loc[:, 'Elem flow name'],
-                                             db.loc[:, 'Impact category'],
-                                             db.loc[:, 'CF unit'],
-                                             db.loc[:, 'Compartment'],
-                                             db.loc[:, 'Sub-compartment'],
-                                             db.loc[:, 'CAS number'],
-                                             db.loc[:, 'Elem flow unit'],
-                                             db.loc[:, 'MP or Damage'],
-                                             db.loc[:, 'Native geographical resolution scale'],
-                                             )),
-                                    db.loc[:, 'CF value']))
+            m = db.merge(differences[['Name IW+', 'Name']], how='left', left_on='Elem flow name', right_on='Name IW+')
 
-            for diff in tqdm(differences.index, leave=True):
-                if diff not in double_iw_flow:
-                    # simply rename the key
-                    for k in list(iw_olca_dict.keys()):
-                        if k[0] == diff:
-                            new_key = (differences.loc[diff, 'Name'],) + k[1:]
-                            iw_olca_dict[new_key] = iw_olca_dict.pop(k)
-                else:
-                    for i in range(len(olca.loc[diff, 'Name'])):
-                        # here we loop through the multiple oLCA names connected to one IW+ name
-                        if i == len(olca.loc[diff, 'Name']):
-                            # if it's the final oLCA name, we pop the original key
-                            for k in list(iw_olca_dict.keys()):
-                                if k[0] == diff:
-                                    new_key = (olca.loc[diff, 'Name'].iloc[i],) + k[1:]
-                                    iw_olca_dict[new_key] = iw_olca_dict.pop(k)
-                        else:
-                            for k in list(iw_olca_dict.keys()):
-                                # otherwise we just add a new key to the dict
-                                if k[0] == diff:
-                                    new_key = (olca.loc[diff, 'Name'].iloc[i],) + k[1:]
-                                    iw_olca_dict[new_key] = iw_olca_dict[k]
+            # rows that have any mapping
+            matched = m[m['Name'].notna()].copy()
+            matched['Elem flow name'] = matched['Name']
+            matched = matched.drop(columns=['Name IW+', 'Name'])
 
-            # create the dataframe from the dictionary
-            db = pd.DataFrame.from_dict(iw_olca_dict, orient='index')
-            db.index = pd.MultiIndex.from_tuples(db.index)
-            db = db.reset_index()
-            db.columns = ['Elem flow name', 'Impact category', 'CF unit', 'Compartment', 'Sub-compartment',
-                                    'CAS number', 'Elem flow unit', 'MP or Damage', 'Native geographical resolution scale',
-                                    'CF value']
+            # concat originals + all mapped copies
+            db = pd.concat([db, matched], ignore_index=True)
+
+            # remove duplicates names from IW+ (we just added everything together, i.e., oLCA names AND IW names)
+            db = db.loc[~((db.loc[:, "Elem flow name"].isin(differences.loc[:, 'Name IW+'])) & ~(
+                db.loc[:, "Elem flow name"].isin(double_iw_flow)))]
 
             # ------------------------------------ UNITS --------------------------------
 
@@ -5615,34 +4895,6 @@ class Parse:
             db.loc[db.loc[:, 'Elem flow unit'] == 'Bq', 'Elem flow unit'] = 'kBq'
             db.loc[db.loc[:, 'Elem flow unit'] == 'm2.yr', 'Elem flow unit'] = 'm2*a'
             db.loc[db.loc[:, 'Elem flow unit'] == 'kgy', 'Elem flow unit'] = 'kg*a'
-
-            mj_flows = olca.loc[olca.loc[:, 'Name'].str.contains('MJ'), 'Name']
-            for flow in mj_flows:
-                db.loc[db.loc[:, 'Elem flow name'] == flow, 'CF value'] = float(
-                    flow.split(' MJ')[0].split(', ')[-1])
-
-            gj_flows = olca.loc[olca.loc[:, 'Name'].str.contains('GJ'), 'Name']
-            for flow in gj_flows:
-                if 'IN-GJ' not in flow:
-                    db.loc[[i for i in db.index if db.loc[i, 'Elem flow name'] == flow and
-                            db.loc[i, 'Impact category'] == 'Fossil and nuclear energy use'], 'CF value'] = float(
-                        flow.split(' GJ')[0].split(', ')[-1]) * 1000
-
-            # some other flows from oLCA that require conversions because of units
-            new_flows = {
-                'Gas, natural/kg': 'Gas, natural/m3',
-                'Gas, mine, off-gas, process, coal mining/kg': 'Gas, mine, off-gas, process, coal mining/m3'
-            }
-            for flow in new_flows:
-                if 'Gas' in flow:
-                    density = 0.8  # kg/m3 (https://www.engineeringtoolbox.com/gas-density-d_158.html)
-
-                df = db[db['Elem flow name'] == new_flows[flow]].copy()
-                df.loc[:, 'Elem flow name'] = flow
-                df.loc[:, 'Elem flow unit'] = 'kg'
-                df.loc[:, 'CF value'] /= density
-                db = pd.concat([db, df])
-            db = clean_up_dataframe(db)
 
             # some water flows are in kilograms instead of cubic meters...
             problems = ['Water/kg',
@@ -5687,19 +4939,20 @@ class Parse:
             db = clean_up_dataframe(pd.concat([db, df]))
 
             # --------------------------- COMPS AND SUBCOMPS --------------------------------
-            with open(pkg_resources.resource_filename(__name__, '/Data/mappings/oLCA/v2.1.1/comps.json'), 'r') as f:
+            with open(pkg_resources.resource_filename(__name__, '/Data/mappings/oLCA/v2.5/comps.json'), 'r') as f:
                 comps = json.load(f)
             db.Compartment = [{v: k for k, v in comps.items()}[i] for i in db.Compartment]
 
             db.loc[db.loc[:, 'Sub-compartment'] == '(unspecified)', 'Sub-compartment'] = 'unspecified'
             db.loc[db.loc[:, 'Sub-compartment'] == 'groundwater', 'Sub-compartment'] = 'ground water'
-            db.loc[db.loc[:, 'Sub-compartment'] == 'groundwater, long-term', 'Sub-compartment'] = 'ground water, long-term'
+            db.loc[
+                db.loc[:, 'Sub-compartment'] == 'groundwater, long-term', 'Sub-compartment'] = 'ground water, long-term'
             db.loc[db.loc[:, 'Sub-compartment'] == 'high. pop.', 'Sub-compartment'] = 'high population density'
             db.loc[db.loc[:, 'Sub-compartment'] == 'low. pop.', 'Sub-compartment'] = 'low population density'
             db.loc[db.loc[:, 'Sub-compartment'] == 'low. pop., long-term',
-                             'Sub-compartment'] = 'low population density, long-term'
+                   'Sub-compartment'] = 'low population density, long-term'
             db.loc[db.loc[:, 'Sub-compartment'] == 'stratosphere + troposphere',
-                             'Sub-compartment'] = 'lower stratosphere + upper troposphere'
+                   'Sub-compartment'] = 'lower stratosphere + upper troposphere'
 
             df = db.loc[db.loc[:, 'Sub-compartment'] == 'lake'].copy()
             df.loc[:, 'Sub-compartment'] = 'surface water'
@@ -5724,7 +4977,7 @@ class Parse:
                                               'Carbon dioxide, from soil or biomass stock',
                                               'Carbon monoxide, from soil or biomass stock',
                                               'Methane, from soil or biomass stock']) &
-                db['Impact category'].str.contains(', fossil', na=False), 'Impact category'] = [
+                   db['Impact category'].str.contains(', fossil', na=False), 'Impact category'] = [
                 i.replace(', fossil', ', land transformation') for i in db.loc[
                     db['Elem flow name'].isin(['Carbon dioxide, land transformation',
                                                'Carbon monoxide, land transformation',
@@ -5736,7 +4989,7 @@ class Parse:
 
             # --------------------------- ADD OLCA UUIDS ------------------------------------
             olca_flows = pd.read_excel(pkg_resources.resource_filename(
-                __name__, '/Data/mappings/oLCA/v2.1.1/all_stressors.xlsx'))
+                __name__, '/Data/mappings/oLCA/v2.5/all_stressors.xlsx'), index_col=0)
 
             # split comps and subcomps in two columns for matching with db
             olca_flows['Compartment'] = [i.split('/')[1] for i in olca_flows['comp']]
@@ -5744,15 +4997,62 @@ class Parse:
             # only keep relevant columns
             olca_flows = olca_flows.loc[:, ['flow_id', 'flow_name', 'unit', 'Compartment', 'Sub-compartment']]
             # merge with olca_iw, it basically adds the uuids of oLCA
-            db = olca_flows.merge(db, left_on=['flow_name', 'unit', 'Compartment', 'Sub-compartment'],
-                                  right_on=['Elem flow name', 'Elem flow unit', 'Compartment', 'Sub-compartment'],
-                                  how='left')
+            olca_db = olca_flows.merge(db, left_on=['flow_name', 'unit', 'Compartment', 'Sub-compartment'],
+                                       right_on=['Elem flow name', 'Elem flow unit', 'Compartment', 'Sub-compartment'],
+                                       how='left')
             # remove flows of IW+ with no link to oLCA flows
-            db = db.drop(db.loc[db.loc[:, 'CF value'].isna()].index)
+            olca_db = olca_db.drop(olca_db.loc[olca_db.loc[:, 'CF value'].isna()].index)
             # remove irrelevant columns
-            db = db.drop(['flow_name', 'unit'], axis=1)
+            olca_db = olca_db.drop(['flow_name', 'unit'], axis=1)
 
-            return db
+            with open(pkg_resources.resource_filename(
+                    __name__, '/Data/mappings/oLCA/v2.5/flows_to_spatialize.json'), 'r') as f:
+                spatialized_flows = json.load(f)
+
+            # adding spatialized_flows for mapped flow names (e.g., Sulfur oxides based on Sulfur dioxide)
+            for spatialized_flow in spatialized_flows:
+                # take GB because it's unambiguous
+                df = db.loc[db.loc[:, 'Elem flow name'].str.contains(spatialized_flow + ', GB')].copy()
+                if df.empty:
+                    df = db.loc[db.loc[:, 'Elem flow name'].str.contains(
+                        olca.set_index('Name').loc[spatialized_flow, 'Name IW+'] + ', ')].copy()
+                    df.loc[:, 'Elem flow name'] = [
+                        i.replace(olca.set_index('Name').loc[spatialized_flow, 'Name IW+'], spatialized_flow)
+                        for i in df.loc[:, 'Elem flow name']]
+                    db = clean_up_dataframe(pd.concat([db, df]))
+
+            # extract all existing locations within IMPACT World+
+            regions_water = set([i.split('Water, cooling, unspecified natural origin, ')[1] for i in
+                                 self.master_db_carbon_neutrality.loc[:, 'Elem flow name']
+                                 if 'Water, cooling, unspecified natural origin, ' in i])
+            regions_land = set([i.split('Occupation, annual crops, ')[1] for i in
+                                self.master_db_carbon_neutrality.loc[:, 'Elem flow name']
+                                if 'Occupation, annual crops, ' in i])
+            regions_acid = set(
+                [i.split('Nitrogen oxides, ')[1] for i in self.master_db_carbon_neutrality.loc[:, 'Elem flow name']
+                 if 'Nitrogen oxides, ' in i])
+            regions_pm = set([i.split('Particulates, < 2.5 um, ')[1] for i in
+                              self.master_db_carbon_neutrality.loc[:, 'Elem flow name']
+                              if 'Particulates, < 2.5 um, ' in i])
+            iw_locations = set(list(regions_water) + list(regions_land) + list(regions_acid) + list(regions_pm))
+
+            # separating location from name and put it in a new column / also add flow ids of openLCA from non-spatialized flow
+            for spatialized_flow in spatialized_flows:
+                df = db.loc[
+                    db.loc[:, 'Elem flow name'].isin([spatialized_flow + ', ' + i for i in iw_locations])].copy()
+
+                df.loc[:, 'Location'] = [i.split(spatialized_flow + ', ')[1] for i in df.loc[:, 'Elem flow name']]
+                df.loc[:, 'Elem flow name'] = [spatialized_flow for i in df.loc[:, 'Elem flow name']]
+
+                df = olca_flows.merge(df, left_on=['flow_name', 'unit', 'Compartment', 'Sub-compartment'],
+                                      right_on=['Elem flow name', 'Elem flow unit', 'Compartment', 'Sub-compartment'],
+                                      how='right').dropna(subset=['flow_id']).drop(['flow_name', 'unit'], axis=1)
+
+                olca_db = pd.concat([olca_db, df])
+
+            olca_db = clean_up_dataframe(olca_db)
+
+            return olca_db
 
         self.olca_iw = linking(self.master_db)
         self.olca_iw_carbon_neutrality = linking(self.master_db_carbon_neutrality)
@@ -5765,7 +5065,7 @@ class Parse:
 
         for exio_version in ['3.8', '3.9']:
             EXIO_IW_concordance = pd.read_excel(pkg_resources.resource_filename(
-                __name__, 'Data/mappings/exiobase/EXIO_'+exio_version.replace('.', '_')+'_IW_concordance.xlsx'))
+                __name__, 'Data/mappings/exiobase/EXIO_' + exio_version.replace('.', '_') + '_IW_concordance.xlsx'))
             EXIO_IW_concordance.set_index('EXIOBASE', inplace=True)
 
             C = pd.DataFrame(0, EXIO_IW_concordance.index,
@@ -5796,8 +5096,7 @@ class Parse:
                     else:
                         try:
                             CFs = pd.pivot(CF_flow, values='CF value', index=['Compartment', 'Sub-compartment'],
-                                           columns=['Impact category', 'CF unit']).loc[('raw', '(unspecified)')].fillna(
-                                0)
+                                           columns=['Impact category', 'CF unit']).loc[('raw', '(unspecified)')].fillna(0)
                         except KeyError:
                             CFs = pd.pivot(CF_flow, values='CF value', index=['Compartment', 'Sub-compartment'],
                                            columns=['Impact category', 'CF unit']).loc[('raw', 'biotic')].fillna(0)
@@ -5807,10 +5106,6 @@ class Parse:
 
             # EXIOBASE land occupation in km2 while IW in m2, so we convert
             C.loc[:, [i for i in C.columns if 'Land' in i[0]]] *= 1000000
-            # EXIOBASE energy flows in TJ while IW in MJ, so we convert
-            C.loc[:, 'Fossil and nuclear energy use'] = C.loc[:, 'Fossil and nuclear energy use'].values * 1000000
-            # EXIOBASE mineral flows in kt while IW in kg, so we convert
-            C.loc[:, 'Mineral resource use'] = C.loc[:, 'Mineral resource use'].values * 1000000
             # EXIOBASE water flows in Mm3 while IW in m3, so we convert
             C.loc[:, [i for i in C.columns if 'Water' in i[0]]] *= 1000000
             # more common to have impact categories as index
@@ -5818,7 +5113,8 @@ class Parse:
             # keep same index format as previously
             C.index = [(i[0] + ' (' + i[1] + ')') for i in C.index]
             # HFC and PFC linked to "carbon dioxide" but should not impact marine acidification
-            C.loc[['Marine acidification, long term (PDF.m2.yr)', 'Marine acidification, short term (PDF.m2.yr)'],
+            C.loc[['Marine acidification, long term (PDF.m2.yr)', 'Marine acidification, short term (PDF.m2.yr)',
+                   'Resources services loss (adaptation) (MJ)'],
                   ['HFC - air', 'PFC - air']] = 0
 
             if exio_version == '3.8':
@@ -5829,75 +5125,105 @@ class Parse:
     def get_simplified_versions(self):
 
         # SimaPro
-        self.simplified_version_sp = clean_up_dataframe(produce_simplified_version(self.iw_sp_carbon_neutrality).reindex(
-            self.iw_sp_carbon_neutrality.columns, axis=1))
+        self.simplified_version_sp = clean_up_dataframe(
+            produce_simplified_version(self.iw_sp_carbon_neutrality).reindex(
+                self.iw_sp_carbon_neutrality.columns, axis=1))
 
         # openLCA
-        # self.simplified_version_olca = clean_up_dataframe(produce_simplified_version(self.olca_iw_carbon_neutrality).reindex(
-        #     self.olca_iw_carbon_neutrality.columns, axis=1))
+        self.simplified_version_olca = clean_up_dataframe(
+            produce_simplified_version(self.olca_iw_carbon_neutrality).reindex(
+            self.olca_iw_carbon_neutrality.columns, axis=1))
 
         # ecoinvent
+        self.simplified_version_ei310 = clean_up_dataframe(
+            produce_simplified_version(self.ei310_iw_carbon_neutrality).reindex(
+                self.ei310_iw_carbon_neutrality.columns, axis=1))
 
-        self.simplified_version_ei310 = clean_up_dataframe(produce_simplified_version(self.ei310_iw_carbon_neutrality).reindex(
-            self.ei310_iw_carbon_neutrality.columns, axis=1))
+        self.simplified_version_ei311 = clean_up_dataframe(
+            produce_simplified_version(self.ei311_iw_carbon_neutrality).reindex(
+                self.ei311_iw_carbon_neutrality.columns, axis=1))
 
-        self.simplified_version_ei311 = clean_up_dataframe(produce_simplified_version(self.ei311_iw_carbon_neutrality).reindex(
-            self.ei311_iw_carbon_neutrality.columns, axis=1))
+        self.simplified_version_ei312 = clean_up_dataframe(
+            produce_simplified_version(self.ei312_iw_carbon_neutrality).reindex(
+                self.ei312_iw_carbon_neutrality.columns, axis=1))
 
-    def get_total_hh_and_eq(self):
+    def get_total_hh_and_eq_for_olca(self):
         """
         OpenLCA doesn't allow for reliable contribution analyses for total damage categories (unlike
         SimaPro). So we create two additional impact categories "Total human health" and "Total ecosystem quality".
         :return:
         """
 
-        total_hh = self.olca_iw.loc[self.olca_iw.loc[:, 'CF unit'] == 'DALY'].drop('Impact category', axis=1).groupby(
-            by=['Elem flow name', 'Compartment', 'Sub-compartment', 'Elem flow unit', 'CF unit',
-                'MP or Damage', 'flow_id']).agg({
-            'CF value': sum,
-            'CAS number': 'first'
-        }).reset_index()
+        total_hh = pd.concat([self.olca_iw.loc[self.olca_iw.Location.isna()].loc[self.olca_iw.loc[:, 'CF unit'] == 'DALY'].drop(
+            ['Impact category', 'CAS number', 'MP or Damage'], axis=1).groupby(
+            by=['Elem flow name', 'Compartment', 'Sub-compartment',
+                'Elem flow unit', 'flow_id', 'CF unit']).agg(
+            {'CF value': sum}).reset_index(),
+                              self.olca_iw.loc[self.olca_iw.loc[:, 'CF unit'] == 'DALY'].drop(
+                                  ['Impact category', 'CAS number', 'MP or Damage',
+                                   'Native geographical resolution scale'], axis=1).dropna(subset='Location').groupby(
+                                  by=['Elem flow name', 'Compartment', 'Sub-compartment',
+                                      'Elem flow unit', 'flow_id',
+                                      'Location', 'CF unit']).sum().reset_index()])
         total_hh.loc[:, 'Impact category'] = 'Total human health'
 
-        total_eq = self.olca_iw.loc[self.olca_iw.loc[:, 'CF unit'] == 'PDF.m2.yr'].drop('Impact category',
-                                                                                        axis=1).groupby(
-            by=['Elem flow name', 'Compartment', 'Sub-compartment', 'Elem flow unit', 'CF unit',
-                'MP or Damage', 'flow_id']).agg({
-            'CF value': sum,
-            'CAS number': 'first'
-        }).reset_index()
+        total_eq = pd.concat([self.olca_iw.loc[self.olca_iw.Location.isna()].loc[self.olca_iw.loc[:, 'CF unit'] == 'PDF.m2.yr'].drop(
+            ['Impact category', 'CAS number', 'MP or Damage'], axis=1).groupby(
+            by=['Elem flow name', 'Compartment', 'Sub-compartment',
+                'Elem flow unit', 'flow_id', 'CF unit']).agg(
+            {'CF value': sum}).reset_index(),
+                              self.olca_iw.loc[self.olca_iw.loc[:, 'CF unit'] == 'DALY'].drop(
+                                  ['Impact category', 'CAS number', 'MP or Damage',
+                                   'Native geographical resolution scale'], axis=1).dropna(subset='Location').groupby(
+                                  by=['Elem flow name', 'Compartment', 'Sub-compartment',
+                                      'Elem flow unit', 'flow_id', 'CF unit',
+                                      'Location']).sum().reset_index()])
         total_eq.loc[:, 'Impact category'] = 'Total ecosystem quality'
 
         self.olca_iw = clean_up_dataframe(pd.concat([self.olca_iw, total_hh, total_eq]))
 
-        total_hh = self.olca_iw_carbon_neutrality.loc[self.olca_iw_carbon_neutrality.loc[:, 'CF unit'] == 'DALY'].drop(
-            'Impact category', axis=1).groupby(by=['Elem flow name', 'Compartment', 'Sub-compartment',
-                                                   'Elem flow unit', 'CF unit', 'MP or Damage', 'flow_id']).agg({
-            'CF value': sum,
-            'CAS number': 'first'
-        }).reset_index()
+        total_hh = pd.concat([self.olca_iw_carbon_neutrality.loc[self.olca_iw_carbon_neutrality.Location.isna()].loc[
+                                  self.olca_iw_carbon_neutrality.loc[:, 'CF unit'] == 'DALY'].drop(
+            ['Impact category', 'CAS number', 'MP or Damage'], axis=1).groupby(
+            by=['Elem flow name', 'Compartment', 'Sub-compartment',
+                'Elem flow unit', 'CF unit', 'flow_id']).agg(
+            {'CF value': sum}).reset_index(),
+                              self.olca_iw_carbon_neutrality.loc[self.olca_iw_carbon_neutrality.loc[:, 'CF unit'] == 'DALY'].drop(
+                                  ['Impact category', 'CAS number', 'MP or Damage',
+                                   'Native geographical resolution scale'], axis=1).dropna(subset='Location').groupby(
+                                  by=['Elem flow name', 'Compartment', 'Sub-compartment',
+                                      'Elem flow unit', 'flow_id', 'CF unit',
+                                      'Location']).sum().reset_index()])
         total_hh.loc[:, 'Impact category'] = 'Total human health'
 
-        total_eq = self.olca_iw_carbon_neutrality.loc[self.olca_iw_carbon_neutrality.loc[:, 'CF unit'] == 'PDF.m2.yr'].drop(
-            'Impact category', axis=1).groupby(by=['Elem flow name', 'Compartment', 'Sub-compartment',
-                                                   'Elem flow unit', 'CF unit', 'MP or Damage', 'flow_id']).agg({
-            'CF value': sum,
-            'CAS number': 'first'
-        }).reset_index()
+        total_eq = pd.concat([self.olca_iw_carbon_neutrality.loc[self.olca_iw_carbon_neutrality.Location.isna()].loc[
+                                  self.olca_iw_carbon_neutrality.loc[:, 'CF unit'] == 'PDF.m2.yr'].drop(
+            ['Impact category', 'CAS number', 'MP or Damage'], axis=1).groupby(
+            by=['Elem flow name', 'Compartment', 'Sub-compartment',
+                'Elem flow unit', 'CF unit', 'flow_id']).agg(
+            {'CF value': sum}).reset_index(),
+                              self.olca_iw_carbon_neutrality.loc[self.olca_iw_carbon_neutrality.loc[:, 'CF unit'] == 'DALY'].drop(
+                                  ['Impact category', 'CAS number', 'MP or Damage',
+                                   'Native geographical resolution scale'], axis=1).dropna(subset='Location').groupby(
+                                  by=['Elem flow name', 'Compartment', 'Sub-compartment',
+                                      'Elem flow unit', 'flow_id', 'CF unit',
+                                      'Location']).sum().reset_index()])
         total_eq.loc[:, 'Impact category'] = 'Total ecosystem quality'
 
-        self.olca_iw_carbon_neutrality = clean_up_dataframe(pd.concat([self.olca_iw_carbon_neutrality, total_hh, total_eq]))
+        self.olca_iw_carbon_neutrality = clean_up_dataframe(
+            pd.concat([self.olca_iw_carbon_neutrality, total_hh, total_eq]))
 
 # -------------- Support modules -------------------
+
 # taken from the fair==1.6.2 Python package
 def meinshausen(
-    C,
-    Cpi=np.array([277.15, 731.41, 273.87]),
-    a1=-2.4785e-07, b1=0.00075906, c1=-0.0021492, d1 = 5.2488,
-    a2=-0.00034197, b2 = 0.00025455, c2 =-0.00024357, d2 = 0.12173,
-    a3 =-8.9603e-05, b3 = -0.00012462, d3 = 0.045194,
-    F2x=3.71, scale_F2x=True
-    ):
+        C,
+        Cpi=np.array([277.15, 731.41, 273.87]),
+        a1=-2.4785e-07, b1=0.00075906, c1=-0.0021492, d1=5.2488,
+        a2=-0.00034197, b2=0.00025455, c2=-0.00024357, d2=0.12173,
+        a3=-8.9603e-05, b3=-0.00012462, d3=0.045194,
+        F2x=3.71, scale_F2x=True
+):
     """Modified Etminan relationship from Meinshausen et al 2019
     https://gmd.copernicus.org/preprints/gmd-2019-222/gmd-2019-222.pdf
     table 3
@@ -5920,27 +5246,27 @@ def meinshausen(
     scaleCO2 = 1
     if scale_F2x:
         F2x_etminan = (
-          -2.4e-7*Cpi[0]**2 + 7.2e-4*Cpi[0] - 2.1e-4*Cpi[2] + 5.36) * np.log(2)
-        scaleCO2 = F2x/F2x_etminan
+                              -2.4e-7 * Cpi[0] ** 2 + 7.2e-4 * Cpi[0] - 2.1e-4 * Cpi[2] + 5.36) * np.log(2)
+        scaleCO2 = F2x / F2x_etminan
 
     F = np.zeros(3)
 
     # CO2
-    Camax = Cpi[0] - b1/(2*a1)
-    if Cpi[0] < C[0] <= Camax: # the most likely case
-        alphap = d1 + a1*(C[0] - Cpi[0])**2 + b1*(C[0] - Cpi[0])
+    Camax = Cpi[0] - b1 / (2 * a1)
+    if Cpi[0] < C[0] <= Camax:  # the most likely case
+        alphap = d1 + a1 * (C[0] - Cpi[0]) ** 2 + b1 * (C[0] - Cpi[0])
     elif C[0] <= Cpi[0]:
         alphap = d1
     else:
-        alphap = d1 - b1**2/(4*a1)
-    alphaN2O = c1*np.sqrt(C[2])
-    F[0] = (alphap + alphaN2O) * np.log(C[0]/Cpi[0]) * scaleCO2
+        alphap = d1 - b1 ** 2 / (4 * a1)
+    alphaN2O = c1 * np.sqrt(C[2])
+    F[0] = (alphap + alphaN2O) * np.log(C[0] / Cpi[0]) * scaleCO2
 
     # CH4
-    F[1] = (a3*np.sqrt(C[1]) + b3*np.sqrt(C[2]) + d3) * (np.sqrt(C[1]) - np.sqrt(Cpi[1]))
+    F[1] = (a3 * np.sqrt(C[1]) + b3 * np.sqrt(C[2]) + d3) * (np.sqrt(C[1]) - np.sqrt(Cpi[1]))
 
     # N2O
-    F[2] = (a2*np.sqrt(C[0]) + b2*np.sqrt(C[2]) + c2*np.sqrt(C[1]) + d2) * (np.sqrt(C[2]) - np.sqrt(Cpi[2]))
+    F[2] = (a2 * np.sqrt(C[0]) + b2 * np.sqrt(C[2]) + c2 * np.sqrt(C[1]) + d2) * (np.sqrt(C[2]) - np.sqrt(Cpi[2]))
 
     return F
 
@@ -6119,9 +5445,9 @@ def n2o_analytical(H, d, q, co2=409.85, ch4=1866.3275, n2o=332.091, n2o_ra=0.07,
         iagtp : Integrated absolute global temperature change potential, K kg-1
     """
     re_n2o = meinshausen(np.array([co2, ch4, n2o + 1]), np.array([co2, ch4, n2o]), scale_F2x=False)[2] * (
-                1 + n2o_ra) + n2o_o3
+            1 + n2o_ra) + n2o_o3
     re_ch4 = meinshausen(np.array([co2, ch4 + 1, n2o]), np.array([co2, ch4, n2o]), scale_F2x=False)[1] * (
-                1 + ch4_ra) + ch4_o3 + ch4_h2o
+            1 + ch4_ra) + ch4_o3 + ch4_h2o
     ppb2kg = 1e-9 * (M_N2O / M_AIR) * M_ATMOS
     # Add in a component for the destruction of methane from AR5 8.SM.11.3.3
     A = (re_n2o + f_n2o_ch4 * re_ch4) / ppb2kg
@@ -6256,7 +5582,8 @@ def produce_simplified_version(complete_dataframe):
     Method producing the simplified version of IW+ in which there are only 5 indicators:
     - Climate change, short term (=GWP100)
     - Water scarcity
-    - Fossil resources
+    - Resources services loss
+    - Resources services loss (adaptation)
     - Remaining Human health damage
     - Remaining Ecosystem quality damage
     The damage impacts of climate change and water use on the Human health and Ecosystem quality area of protections
@@ -6272,12 +5599,13 @@ def produce_simplified_version(complete_dataframe):
     midpoint_drop = ['Climate change, long term', 'Freshwater acidification', 'Freshwater ecotoxicity',
                      'Freshwater eutrophication', 'Human toxicity cancer', 'Human toxicity non-cancer',
                      'Ionizing radiations', 'Land occupation, biodiversity', 'Land transformation, biodiversity',
-                     'Marine eutrophication', 'Mineral resources use', 'Ozone layer depletion',
-                     'Particulate matter formation', 'Photochemical ozone formation',
-                     'Physical effects on biota', 'Terrestrial acidification']
+                     'Marine eutrophication', 'Ozone layer depletion', 'Particulate matter formation',
+                     'Photochemical ozone formation', 'Physical effects on biota', 'Terrestrial acidification']
     # endpoint categories excluded from simplified version
-    endpoint_drop = ['Climate change, ecosystem quality, long term',
-                     'Climate change, ecosystem quality, short term',
+    endpoint_drop = ['Climate change, ecosystem quality, terrestrial ecosystem, long term',
+                     'Climate change, ecosystem quality, terrestrial ecosystem, short term',
+                     'Climate change, ecosystem quality, marine ecosystem, long term',
+                     'Climate change, ecosystem quality, marine ecosystem, short term',
                      'Climate change, human health, long term', 'Climate change, human health, short term',
                      'Water availability, freshwater ecosystem', 'Water availability, human health',
                      'Water availability, terrestrial ecosystem', 'Marine ecotoxicity, long term',
@@ -6298,31 +5626,35 @@ def produce_simplified_version(complete_dataframe):
         'CAS number']
 
     # setting index to allow use of groupby later
-    if 'flow_id' in simplified_version.columns: # for openLCA
+    if 'flow_id' in simplified_version.columns:  # for openLCA
         simplified_version = simplified_version.set_index(['CF unit', 'Compartment', 'Sub-compartment',
-                                                       'Elem flow name', 'Elem flow unit', 'MP or Damage', 'flow_id'])
-    else: # for other software
+                                                           'Elem flow name', 'Elem flow unit', 'MP or Damage',
+                                                           'flow_id', 'Location'])
+    else:  # for other software
         simplified_version = simplified_version.set_index(['CF unit', 'Compartment', 'Sub-compartment',
-                                                       'Elem flow name', 'Elem flow unit', 'MP or Damage'])
+                                                           'Elem flow name', 'Elem flow unit', 'MP or Damage'])
     # isolate and group HH CFs
     hh_simplified = simplified_version.loc['DALY'].copy()
     hh_simplified = hh_simplified.drop(['Impact category', 'CAS number',
-                                        'Native geographical resolution scale'], axis=1).groupby(hh_simplified.index).sum()
+                                        'Native geographical resolution scale'], axis=1).groupby(
+        hh_simplified.index).sum()
     hh_simplified.index = pd.MultiIndex.from_tuples(hh_simplified.index)
     # isolate and group EQ CFs
     eq_simplified = simplified_version.loc['PDF.m2.yr'].copy()
     eq_simplified = eq_simplified.drop(['Impact category', 'CAS number',
-                                        'Native geographical resolution scale'], axis=1).groupby(eq_simplified.index).sum()
+                                        'Native geographical resolution scale'], axis=1).groupby(
+        eq_simplified.index).sum()
     eq_simplified.index = pd.MultiIndex.from_tuples(eq_simplified.index)
     # delete HH and EQ CFs from original df
     simplified_version.drop(['DALY', 'PDF.m2.yr'], inplace=True)
     simplified_version = simplified_version.reset_index()
     # make hh_simplified respect the format of self.simplified_version_sp for concatenation
     hh_simplified = hh_simplified.reset_index()
-    if len(hh_simplified.columns) == 7:  # for openLCA
+    if len(hh_simplified.columns) == 8:  # for openLCA
         hh_simplified = hh_simplified.rename(
             columns={'level_0': 'Compartment', 'level_1': 'Sub-compartment', 'level_2': 'Elem flow name',
-                     'level_3': 'Elem flow unit', 'level_4': 'MP or Damage', 'level_5': 'flow_id'})
+                     'level_3': 'Elem flow unit', 'level_4': 'MP or Damage', 'level_5': 'flow_id',
+                     'level_6': 'Location'})
     else:
         hh_simplified = hh_simplified.rename(
             columns={'level_0': 'Compartment', 'level_1': 'Sub-compartment', 'level_2': 'Elem flow name',
@@ -6331,10 +5663,11 @@ def produce_simplified_version(complete_dataframe):
     hh_simplified.loc[:, 'Impact category'] = 'Human health (residual)'
     # make eq_simplified respect the format of self.simplified_version_sp for concatenation
     eq_simplified = eq_simplified.reset_index()
-    if len(eq_simplified.columns) == 7:  # for openLCA
+    if len(eq_simplified.columns) == 8:  # for openLCA
         eq_simplified = eq_simplified.rename(
             columns={'level_0': 'Compartment', 'level_1': 'Sub-compartment', 'level_2': 'Elem flow name',
-                     'level_3': 'Elem flow unit', 'level_4': 'MP or Damage', 'level_5': 'flow_id'})
+                     'level_3': 'Elem flow unit', 'level_4': 'MP or Damage', 'level_5': 'flow_id',
+                     'level_6': 'Location'})
     else:
         eq_simplified = eq_simplified.rename(
             columns={'level_0': 'Compartment', 'level_1': 'Sub-compartment', 'level_2': 'Elem flow name',
@@ -6353,7 +5686,9 @@ def produce_simplified_version(complete_dataframe):
     simplified_version.loc[[i for i in simplified_version.index if simplified_version.loc[i, 'Impact category'] ==
                             'Water scarcity'], 'Impact category'] = 'Water footprint - Scarcity'
     simplified_version.loc[[i for i in simplified_version.index if simplified_version.loc[i, 'Impact category'] ==
-                            'Fossil and nuclear energy use'], 'Impact category'] = 'Energetic resource depletion'
+                            'Resources services loss'], 'Impact category'] = 'Resources services loss'
+    simplified_version.loc[[i for i in simplified_version.index if simplified_version.loc[i, 'Impact category'] ==
+                            'Resources services loss adaptation'], 'Impact category'] = 'Resources services loss adaptation'
 
     return simplified_version
 
@@ -6364,191 +5699,3 @@ def clean_up_dataframe(df):
     # fix index
     df = df.reset_index().drop('index', axis=1)
     return df
-
-
-def convert_country_codes(db):
-    """
-    Converts 3 letters ISO codes to 2 letters ISO codes, which are used by ecoinvent.
-    :param db:
-    :return:
-    """
-    # lines of logger to avoid having warnings showing up
-    coco_logger = coco.logging.getLogger()
-    coco_logger.setLevel(coco.logging.CRITICAL)
-    # converting 3 letters ISO codes to 2 letters ISO codes, which are used by ecoinvent
-    db.loc[[i for i in db.index if db.loc[i, 'Resolution'] == 'Country'], 'Region code'] = coco.convert(
-        db.loc[[i for i in db.index if db.loc[i, 'Resolution'] == 'Country'], 'Region code'], to='ISO2', not_found=None)
-
-    return db
-
-
-def mapping_with_ei35():
-    """
-    Support function kept for transparency on how the mapping with ecoinvent was performed.
-    :return: nothing
-    """
-    with gzip.open( '.../ecoinvent3.5.cutoffPandas_symmNorm.gz.pickle','rb') as f:
-        eco_35 = pd.read_pickle(f)
-
-    # check which substances have a direct match with their names
-    matching_by_name = self.master_db.loc[:, ['Elem flow name']].merge(eco_35['STR'].loc[:, ['name']],
-                                                                     left_on='Elem flow name',
-                                                                     right_on='name', how='inner').drop_duplicates()
-    # harmonize CAS numbers
-    eco_35['STR'].cas = [i.lstrip('0') if i != None else None for i in eco_35['STR'].cas]
-    corrected_cas = []
-    for i in self.master_db.loc[:, 'CAS number']:
-        if type(i) != float and i != None:
-            corrected_cas.append(i.lstrip('0'))
-        else:
-            corrected_cas.append(None)
-    self.master_db.loc[:, 'CAS number'] = corrected_cas
-    # merge dataframes
-    matching_by_cas = self.master_db.loc[:, ['CAS number', 'Elem flow name']].merge(eco_35['STR'].loc[:, ['name', 'cas']],
-                                                                                  left_on='CAS number',
-                                                                                  right_on='cas',
-                                                                                  how='inner').drop_duplicates().dropna()
-    # if there is a duplicate it means 2 different ecoinvent names are linked to a single IW name
-    # can't have that, it will require matching by hand to sort it out
-    issues_matching_cas = list(
-        set(matching_by_cas[matching_by_cas.loc[:, 'Elem flow name'].duplicated()].loc[:, 'Elem flow name']))
-    matching_by_cas = matching_by_cas.loc[
-        [i for i in matching_by_cas.index if matching_by_cas.loc[i, 'Elem flow name'] not in issues_matching_cas]]
-
-    auto_matching = pd.concat([matching_by_name, matching_by_cas])
-    auto_matching.drop(['CAS number', 'cas'], axis=1, inplace=True)
-
-    # plus add manual mapping later on
-
-
-def mapping_with_sp():
-    # determine all substance within SP (multiple databases)
-    def add_flows_dbs(sp_emissions, path_db_file):
-        db_flows = pd.read_excel(path_db_file)
-
-        resources_indexes = db_flows.loc[
-            [i for i in db_flows.index if db_flows.loc[i, 'SimaPro 9.3.0.3'] == 'Resources']].index
-        materials_indexes = db_flows.loc[
-            [i for i in db_flows.index if db_flows.loc[i, 'SimaPro 9.3.0.3'] == 'Materials/fuels']].index
-        air_indexes = db_flows.loc[
-            [i for i in db_flows.index if db_flows.loc[i, 'SimaPro 9.3.0.3'] == 'Emissions to air']].index
-        water_indexes = db_flows.loc[
-            [i for i in db_flows.index if db_flows.loc[i, 'SimaPro 9.3.0.3'] == 'Emissions to water']].index
-        soil_indexes = db_flows.loc[
-            [i for i in db_flows.index if db_flows.loc[i, 'SimaPro 9.3.0.3'] == 'Emissions to soil']].index
-        waste_indexes = db_flows.loc[
-            [i for i in db_flows.index if db_flows.loc[i, 'SimaPro 9.3.0.3'] == 'Final waste flows']].index
-
-        for i in range(0, len(resources_indexes)):
-            sp_emissions = pd.concat([sp_emissions, db_flows.loc[
-                                                    air_indexes.values.tolist()[i] + 1:water_indexes.values.tolist()[
-                                                                                           i] - 1].loc[:,
-                                                    'SimaPro 9.3.0.3']])
-            sp_emissions = pd.concat([sp_emissions, db_flows.loc[
-                                                    water_indexes.values.tolist()[i] + 1:soil_indexes.values.tolist()[
-                                                                                             i] - 1].loc[:,
-                                                    'SimaPro 9.3.0.3']])
-            sp_emissions = pd.concat([sp_emissions, db_flows.loc[
-                                                    soil_indexes.values.tolist()[i] + 1:waste_indexes.values.tolist()[
-                                                                                            i] - 1].loc[:,
-                                                    'SimaPro 9.3.0.3']])
-            sp_emissions = pd.concat([sp_emissions, db_flows.loc[
-                                                    resources_indexes.values.tolist()[i] + 1:
-                                                    materials_indexes.values.tolist()[i] - 1].loc[:, 'SimaPro 9.3.0.3']])
-
-        return sp_emissions
-
-    sp_emissions = pd.DataFrame()
-    sp_emissions = add_flows_dbs(sp_emissions, 'C://Users/11max/PycharmProjects/IW_Reborn/Data/mappings/SP/ecoinvent.XLSX')
-    sp_emissions = add_flows_dbs(sp_emissions, 'C://Users/11max/PycharmProjects/IW_Reborn/Data/mappings/SP/agribalyse.XLSX')
-    sp_emissions = add_flows_dbs(sp_emissions,
-                                 'C://Users/11max/PycharmProjects/IW_Reborn/Data/mappings/SP/agrifootprint.XLSX')
-    sp_emissions = add_flows_dbs(sp_emissions, 'C://Users/11max/PycharmProjects/IW_Reborn/Data/mappings/SP/ELCD.XLSX')
-    sp_emissions = add_flows_dbs(sp_emissions,
-                                 'C://Users/11max/PycharmProjects/IW_Reborn/Data/mappings/SP/Industry2.0.XLSX')
-    sp_emissions = add_flows_dbs(sp_emissions, 'C://Users/11max/PycharmProjects/IW_Reborn/Data/mappings/SP/US-ei2.2.XLSX')
-    sp_emissions = add_flows_dbs(sp_emissions, 'C://Users/11max/PycharmProjects/IW_Reborn/Data/mappings/SP/USLCI.XLSX')
-    sp_emissions = add_flows_dbs(sp_emissions, 'C://Users/11max/PycharmProjects/IW_Reborn/Data/mappings/SP/WFDB.XLSX')
-
-    sp_emissions = sp_emissions.dropna().drop_duplicates()
-
-
-def extract_olca_flowsv1():
-    """
-    Works for openLCA v1.x versions
-    :return:
-    """
-    # export relevant information from json files into a single dict
-    path = 'C://Users/11max/PycharmProjects/IW_Reborn/Data/metadata/OLCA/ei38/flows/'
-    directory = os.fsencode(path)
-
-    all_flows = []
-    for file in os.listdir(directory):
-        filename = os.fsdecode(file)
-
-        with open(path + filename, 'r') as f:
-            read = json.load(f)
-
-        if 'cas' in read.keys():
-            flow = {'flow_name': read['name'], 'flow_id': read['@id'], 'comp': read['category']['@id'],
-                    'cas': read['cas'], 'unit': read['flowProperties'][0]['flowProperty']['@id']}
-        else:
-            flow = {'flow_name': read['name'], 'flow_id': read['@id'], 'comp': read['category']['@id'],
-                    'cas': None, 'unit': read['flowProperties'][0]['flowProperty']['@id']}
-
-        all_flows.append(flow)
-
-    # now we go fetch information on categories and units from the other json files
-    path = 'C://Users/11max/PycharmProjects/IW_Reborn/Data/metadata/OLCA/ei38/categories/'
-    directory = os.fsencode(path)
-
-    categories = {}
-
-    for file in os.listdir(directory):
-        filename = os.fsdecode(file)
-
-        with open(path + filename, 'r') as f:
-            read = json.load(f)
-
-        if 'category' in read.keys():
-            categories[read['@id']] = (read['category']['name'], read['name'])
-
-    # hardcoded because it's too much of a mess inside openLCA files
-    units = {'4e10f566-0358-489a-8e3a-d687b66c50e6': 'kg*a', 'f6811440-ee37-11de-8a39-0800200c9a66': 'MJ',
-             '93a60a56-a3c8-22da-a746-0800200c9a66': 'm3', '93a60a56-a3c8-17da-a746-0800200c9a66': 'kBq',
-             '93a60a56-a3c8-19da-a746-0800200c9a66': 'm2', '93a60a56-a3c8-21da-a746-0800200c9a66': 'm2*a',
-             '441238a3-ba09-46ec-b35b-c30cfba746d1': 'm3*a', '93a60a56-a3c8-11da-a746-0800200b9a66': 'kg'}
-
-    all_flows = pd.DataFrame(all_flows)
-    all_flows['comp'] = [categories[i] for i in all_flows['comp']]
-    all_flows['unit'] = [units[i] for i in all_flows['unit']]
-
-    return all_flows
-
-
-def extract_olca_flowsv2():
-    """
-    Works for openLCA v2.x
-    :return:
-    """
-    # export relevant information from json files into a single dict
-    path = 'C://Users/11max/PycharmProjects/IW_Reborn/Data/metadata/OLCA/v2.0/ei38/flows/'
-    directory = os.fsencode(path)
-
-    all_flows = []
-    for file in os.listdir(directory):
-        filename = os.fsdecode(file)
-
-        with open(path + filename, 'r') as f:
-            read = json.load(f)
-
-        if 'cas' in read.keys():
-            flow = {'flow_name': read['name'], 'flow_id': read['@id'], 'comp': read['category'],
-                    'cas': read['cas'], 'unit': read['flowProperties'][0]['flowProperty']['refUnit']}
-        else:
-            flow = {'flow_name': read['name'], 'flow_id': read['@id'], 'comp': read['category'],
-                    'cas': None, 'unit': read['flowProperties'][0]['flowProperty']['refUnit']}
-
-        all_flows.append(flow)
-
-    return pd.DataFrame(all_flows)
