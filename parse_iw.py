@@ -501,6 +501,8 @@ class Parse:
                                    '- Physical effect on biota' + chr(int("007F", 16)) +
                                    '- Land occupation (biodiversity)' + chr(int("007F", 16)) +
                                    '- Land transformation (biodiversity)' + chr(int("007F", 16)) +
+                                   '- Marine ecotoxicity' + chr(int("007F", 16)) +
+                                   '- Terrestrial ecotoxicity' + chr(int("007F", 16)) +
                                    chr(int("007F", 16)) +
                                    'For more information on IMPACT World+ and its methodology: https://www.impactworldplus.org.' + chr(
                                       int("007F", 16)) +
@@ -544,6 +546,8 @@ class Parse:
                                      '- Physical effect on biota' + chr(int("007F", 16)) +
                                      '- Land occupation (biodiversity)' + chr(int("007F", 16)) +
                                      '- Land transformation (biodiversity)' + chr(int("007F", 16)) +
+                                     '- Marine ecotoxicity' + chr(int("007F", 16)) +
+                                     '- Terrestrial ecotoxicity' + chr(int("007F", 16)) +
                                      chr(int("007F", 16)) +
                                      'For more information on IMPACT World+ and its methodology: https://www.impactworldplus.org.' + chr(
                                         int("007F", 16)) +
@@ -620,6 +624,8 @@ class Parse:
                                                    '- Physical effect on biota' + chr(int("007F", 16)) +
                                                    '- Land occupation (biodiversity)' + chr(int("007F", 16)) +
                                                    '- Land transformation (biodiversity)' + chr(int("007F", 16)) +
+                                                   '- Marine ecotoxicity' + chr(int("007F", 16)) +
+                                                   '- Terrestrial ecotoxicity' + chr(int("007F", 16)) +
                                                    chr(int("007F", 16)) +
                                                    'For more information on IMPACT World+ and its methodology: https://www.impactworldplus.org.' + chr(
                                                       int("007F", 16)) +
@@ -662,6 +668,8 @@ class Parse:
                                                      '- Physical effect on biota' + chr(int("007F", 16)) +
                                                      '- Land occupation (biodiversity)' + chr(int("007F", 16)) +
                                                      '- Land transformation (biodiversity)' + chr(int("007F", 16)) +
+                                                     '- Marine ecotoxicity' + chr(int("007F", 16)) +
+                                                     '- Terrestrial ecotoxicity' + chr(int("007F", 16)) +
                                                      chr(int("007F", 16)) +
                                                      'For more information on IMPACT World+ and its methodology: https://www.impactworldplus.org.' + chr(
                                                         int("007F", 16)) +
@@ -1131,16 +1139,22 @@ class Parse:
             path + '/ecoinvent/impact_world_plus_' + self.version + ' (incl. CO2 uptake)_expert_version_ecoinvent_v310.xlsx')
         self.ei311_iw.to_excel(
             path + '/ecoinvent/impact_world_plus_' + self.version + ' (incl. CO2 uptake)_expert_version_ecoinvent_v311.xlsx')
+        self.ei312_iw.to_excel(
+            path + '/ecoinvent/impact_world_plus_' + self.version + ' (incl. CO2 uptake)_expert_version_ecoinvent_v312.xlsx')
         self.ei310_iw_carbon_neutrality.to_excel(
             path + '/ecoinvent/impact_world_plus_' + self.version + '_expert_version_ecoinvent_v310.xlsx')
         self.ei311_iw_carbon_neutrality.to_excel(
             path + '/ecoinvent/impact_world_plus_' + self.version + '_expert_version_ecoinvent_v311.xlsx')
+        self.ei312_iw_carbon_neutrality.to_excel(
+            path + '/ecoinvent/impact_world_plus_' + self.version + '_expert_version_ecoinvent_v312.xlsx')
 
         # ecoinvent version in DataFrame format
         self.simplified_version_ei310.to_excel(
             path + '/ecoinvent/impact_world_plus_' + self.version + '_footprint_version_ecoinvent_v310.xlsx')
         self.simplified_version_ei311.to_excel(
             path + '/ecoinvent/impact_world_plus_' + self.version + '_footprint_version_ecoinvent_v311.xlsx')
+        self.simplified_version_ei312.to_excel(
+            path + '/ecoinvent/impact_world_plus_' + self.version + '_footprint_version_ecoinvent_v312.xlsx')
 
         # exiobase version in DataFrame format
         self.exio_iw_38.to_excel(path + '/exiobase/impact_world_plus_' + self.version +
@@ -2014,13 +2028,13 @@ class Parse:
         data = pd.read_sql('SELECT * FROM [CF - not regionalized - ResourcesServicesLoss]', self.conn)
         data.columns = ['Elem flow name', 'CAS number', 'CF value', 'Status', 'Elem flow unit']
 
-        # if you want to remove isotopes
-        data = data[data.Status != 'isotope']
+        # uncomment if you want to remove isotopes
+        # data = data[data.Status != 'isotope']
         data = data.drop('Status', axis=1)
 
         # add metadata
         data.loc[:, 'Impact category'] = 'Resources services loss'
-        data.loc[:, 'CF unit'] = 'MJ'
+        data.loc[:, 'CF unit'] = 'kg deficit'
         data.loc[:, 'MP or Damage'] = 'Midpoint'
         data.loc[:, 'Native geographical resolution scale'] = 'Not regionalized'
 
@@ -2062,8 +2076,8 @@ class Parse:
         data = pd.read_sql('SELECT * FROM [CF - not regionalized - ResourcesServicesLossAdaptation]', self.conn)
         data.columns = ['Elem flow name', 'CAS number', 'CF value', 'Status', 'Elem flow unit']
 
-        # if you want to remove isotopes
-        data = data[data.Status != 'isotope']
+        # uncomment if you want to remove isotopes
+        # data = data[data.Status != 'isotope']
         data = data.drop('Status', axis=1)
 
         # add metadata
@@ -4039,6 +4053,8 @@ class Parse:
                              'Terrestrial ecotoxicity, short term',
                              'Freshwater eutrophication',
                              'Ionizing radiations, ecosystem quality',
+                             'Ionizing radiations, human health',
+                             'Ionizing radiations',
                              'Human toxicity cancer',
                              'Human toxicity cancer, long term',
                              'Human toxicity cancer, short term',
@@ -4728,13 +4744,12 @@ class Parse:
                         ~(db.loc[:, 'Elem flow name'].str.contains('pasture/meadow')) &
                         ~(db.loc[:, 'Elem flow name'].str.contains('without Russia and Türkiye'))]
 
-            # ------------------------------- SUBCOMPS ----------------------------------
+            # ------------------------------- ODDITIES ----------------------------------
 
             # need to change the unit of land occupation flows to match SP nomenclature
             db.loc[db.loc[:, 'Elem flow unit'] == 'm2.yr', 'Elem flow unit'] = 'm2a'
 
             # Some water names are reserved names in SimaPro, so we modify it
-            db.loc[db['Elem flow name'] == 'Water', 'Elem flow name'] = 'Water/m3'
             db.loc[db['Elem flow name'] == 'Water, agri', 'Elem flow name'] = 'Water/m3, agri'
             db.loc[db['Elem flow name'] == 'Water, non-agri', 'Elem flow name'] = 'Water/m3, non-agri'
 
@@ -4743,11 +4758,18 @@ class Parse:
                 db.loc[db.loc[:, 'Elem flow name'].isin(['Carbon dioxide, non-fossil, resource correction',
                                                          'Carbon dioxide, in air'])].loc[
                     db.loc[:, 'Sub-compartment'] != '(unspecified)'].index)
+            db = db.drop(
+                db.loc[db.loc[:, 'Elem flow name'].isin(['Carbon dioxide, non-fossil, resource correction',
+                                                         'Carbon dioxide, in air'])].loc[
+                    (db.loc[:, 'Compartment'] != 'Air')].index)
             db.loc[db.loc[:, 'Elem flow name'].isin(['Carbon dioxide, non-fossil, resource correction',
                                                      'Carbon dioxide, in air']), 'Compartment'] = 'Raw'
             db.loc[db.loc[:, 'Elem flow name'].isin(['Carbon dioxide, non-fossil, resource correction',
                                                      'Carbon dioxide, in air']), 'Sub-compartment'] = 'in air'
             db = db.drop(db.loc[db.loc[:, 'Elem flow name'] == 'Carbon dioxide, biogenic, uptake'].index)
+
+            # somehow the unit of the radioactive flow Phosphorus-32 in SimaPro is kg and not Bq/kBq. Delete ...
+            db = db.drop(db.loc[db.loc[:, 'Elem flow name'] == 'Phosphorus-32'].index)
 
             # --------------------------- UNIT CONVERSIONS ----------------------------------
 
@@ -4777,6 +4799,10 @@ class Parse:
             for problem_child in problems:
                 db.loc[db['Elem flow name'] == problem_child, 'Elem flow unit'] = 'kg'
                 db.loc[db['Elem flow name'] == problem_child, 'CF value'] /= 1000
+
+            # change Becquerels into kiloBecquerels
+            db.loc[[i for i in db.index if db.loc[i, 'Elem flow unit'] == 'Bq'], 'CF value'] *= 1000
+            db.loc[[i for i in db.index if db.loc[i, 'Elem flow unit'] == 'Bq'], 'Elem flow unit'] = 'kBq'
 
             # finally, SimaPro limits to 12 characters the size of the CF unit. We rename some to avoid issues
             db.loc[db.loc[:, 'CF unit'] == 'kg CFC-11 eq', 'CF unit'] = 'kg CFC11 eq'
