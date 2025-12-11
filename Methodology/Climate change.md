@@ -5,10 +5,12 @@ Concerned impact categories:
 - Climate change, long term (midpoint)
 - Climate change, human health, short term (damage)
 - Climate change, human health, long term (damage)
-- Climate change, ecosystem quality, short term (damage)
-- Climate change, ecosystem quality, long term (damage)
+- Climate change, ecosystem quality, marine ecosystem, short term (damage)
+- Climate change, ecosystem quality, marine ecosystem,long term (damage)
+- Climate change, ecosystem quality, terrestrial ecosystem, short term (damage)
+- Climate change, ecosystem quality, terrestrial ecosystem,long term (damage)
 
-For the (incl. CO2 uptake) version each of these 6 impact categories were split into 4 sub-categories:
+For the (incl. CO2 uptake) version each of these 8 impact categories were split into 4 sub-categories:
 - biogenic
 - CO2 uptake
 - fossil
@@ -66,7 +68,7 @@ giving a 1.57 kgCO2eq/kgCO characterization factor.
 
 ### 3.2 Damage indicator(s)
 As a reminder, a characterization factor (CF) is the multiplication of a Fate factor (FF) and an Effect factor (EF) (and 
-sometimes also a severity factor (SF)).
+sometimes also a severity factor (SF) and an exposition factor (XF)).
 
 #### 3.2.1 Fate factor
 The Fate factor is identical for both damage indicators (i.e., for both human health and ecosystem quality). It
@@ -90,6 +92,12 @@ package ```pip install fair==1.6.2```.
 
 From these equations we can recalculate the AGTP-50 and AGTP-100 values provided in the AR6 Chapter-7 (<0.2% difference).
 
+The calculated AGTP values at each year (AGTP1, AGTP2, etc. until AGTP500) and for each GHG are provided in the source
+database of IW+ in the table SI - Climate change - fate factors (K/kg). Note that some GHGs had radiative efficiency values
+and/or lifetime values so low that it resulted in null AGTP values. For instance, for butane the radiative efficiency is smaller
+than 0.001 W/m2/ppb and has thus been rounded to 0 in the IPCC AR6 report, thus rendering impossible the calculation of
+AGTP values for this compound.
+
 #### 3.2.2 Effect factors
 Fate factors in K.yr/kg GHG are to be multiplied with effect factors. These effect factors differ between both damage 
 indicators. For human health it is expressed in DALY/(K.yr) and for ecosystem quality it is expressed in PDF.m2.yr/(K.yr).
@@ -112,7 +120,7 @@ The effect factor for Ecosystem quality is based on Potentially Affected Fractio
 considered affected whenever their niche habitat temperature is exceeded for 5 consecutive years. This definition is
 based on the article of Trisos et al. 2020 (https://doi.org/10.1038/s41586-020-2189-9) which is also used by 
 Iordan-Vasquez et al. 2023 (https://doi.org/10.1016/j.resconrec.2023.107159). The latter is the basis of the equivalent
-indicator in the GLAM methodology.
+climate change ecosystem quality indicator in the GLAM methodology.
 
 ##### 3.2.2.2.1 Data sources
 The niche temperature of each species is defined "using the	maximum	mean annual	temperature experienced	across the 
@@ -134,10 +142,80 @@ Since PAFs are defined as the exceedance of the niche temperature limit of each 
 need climate models to determine what the temperature will be over the next years. To do so, we re-use the data from
 Iordan-Vasquez et al. (2023). They averaged 5 climate models (CESM1(CAM5), HadGEM2-ES, IPSL-CM5A-MR, MIROC5, MPI-ESM-MR)
 to obtain temperatures from 2010 to 2100, at a 1.875° resolution, for three climate scenarios RCP2.6, 4.5 and 8.5. This
-provides temperatures for air temperature and surface ocean temperature.
+provides temperatures for air and ocean surface. The latter is used as a proxy for the total ocean temperature.
 
-Finally, the maps to determine the distribution of land vs ocean surface come from using MODIS MCD12Q1 land water mask
-through the Google Earth Engine.
+Finally, since we need to distinguish between land and marine species, we need to distinguish between land and ocean areas.
+The maps to do so come from using MODIS MCD12Q1 land water mask through the Google Earth Engine.
+
+##### 3.2.2.2.2 Methodology for calculating effect factors
+To determine the effect factors, we first calculate the PAF for each grid cell, that is, the number of affected species
+per grid cell, over the total number of species in that grid cell. In each grid cell, we thus compared the maximum estimated
+temperature over the time period 2010-2100. This maximum often occurs at the 2100 year, but not always. This maximum of 
+temperature is then compared to the niche temperatures of all species in the grid cell, and species for which this 
+temperature is exceeded are considered affected. 
+Note that since the temperature estimates at provided by increment of 
+average of 5 years (e.g., the average temperature from 2050 and 2055), which means that as soon as the estimated temperature
+exceeds the niche temperature, it directly corresponds to our definition of affected species (i.e., temperature exceeded 
+for5 consecutive years).
+Also note that for terrestrial species, the air temperature estimates are used while the estimated surface ocean temperatures
+are used for marine species.
+
+Once we have our PAFs per grid cell, we multiply them by their corresponding surface area (either land or water) in
+each grid cell.
+
+We finally divide these PAF.m2 by the temperature increase in the corresponding cell, that is, the difference between the
+maximum estimated temperature over the period 2010-2100 and the temperature at 2010 (the reference year). This provides
+PAF.m2/K effect factors.
+
+At this point, we have what we call average effect factors, for each of the three RCP for which temperature
+estimates are provided (RCP2.6, 4.5 and 8.5). In IMPACT World+, characterization factors are typically marginal 
+characterization factors. So, we need a few more steps to get there.
+
+Marginal effect factors are typically defined to represent the effect of a marginal increase of a pollutant in
+the system. For this indicator, the marginal increase of pollutant would be an increase in emissions of GHGs, which can
+be translated as an increase of temperature in our system. Therefore, to derive marginal effect factors, we
+use the previously obtained average effect factors as a reference state, and proceed to add marginal increments
+of temperature to the system to see what is the effect that will result from these increments.
+
+Concretely, we follow the same methodology, except we compare the niche temperature to the estimated air/surface
+ocean temperature from the climate models + an increment of temperature increase (say +0.01K). This increment must be
+distributed across the different grid cells across the global, because simply adding the increment equally in each grid
+cell does not account for the fact that some areas in the world are heating up faster than others. So we determine the
+temperature increase between 2100 and 2010 in each grid cell. This provides us a distribution, reflecting some areas
+heat up faster than others. This distribution is then applied to the temperature increment to distribute it in a logical
+manner across the globe.
+Similarly to the average effect factor, we then obtain PAFs, that we convert to PAF.m2 and PAF.m2/K. Finally,
+we calculate the difference between the effect factor obtained through this increment and its reference state (the 
+average effect factor). The obtained value is then divided by the temperature increment, which yields the final effect factor.
+
+Since we both cover terrestrial and marine species, we decided to split the climate change, ecosystem quality damage
+indicator into two indicators:
+- climate change, ecosystem quality, terrestrial ecosystem
+- climate change, ecosystem quality, marine ecosystem
+
+In the end, the respective effect factors are 4.35e12 PDF.m2/K for terrestrial species and 31.3e12 PDF.m2/K for marine
+species. Marine species are thus dramatically more affected than terrestrial species by climate change, which is an 
+observation that can be found in other scientific articles (https://doi.org/10.1038/s41586-019-1132-4). For reference, 
+the previous effect factors in IW+ v2.1 was 2.73e12 PDF.m2/K. This factor only represented terrestrial species. The 
+effect of climate change on ecosystem quality overall has thus gone from 2.73e12 to 35.65e12, that is a 13-fold increase!
+
+##### 3.2.2.2.3 PAF to PDF
+Here we consider that any affected species will temporarily disappear. We thus have a 1:1 ratio conversion between PAF
+and PDF. While this might be surprising, the original authors Trisos et al. (2020) state having tested how would their
+own results be affected by taking a 20 consecutive years period (instead of 5) and noted that it did not significantly
+impact results.
+
+##### 3.2.2.2.4 The choice of the RCP
+The calculations for the ecosystem quality effect factor were performed for the three RCPs for which the climate models
+were derived by Iordan-Vasquez et al. (2023). In fine, we chose the RCP4.5 to determine the effect factors. The RCP2.6
+corresponds to a very optimistic vision of the world, while the RCP8.5 could be considered a pessimistic vision. Note
+that the arithmetic average of these three RCPs yielded temperatures estimates extremely close to the RCP4.5 estimates.
+Also note that the effect factors obtained from the RCP4.5 are higher than the ones obtained from the RCP8.5. Choosing
+the RCP4.5 thus corresponds to a conservative approach, where we take the worst case.
+
+##### 3.2.2.2.5 The choice of the temperature increment
+We selected the +0.01K temperature increment for the calculation of our marginal effect factor. We tested temperature
+increments of +0.1K and +1K, which yielded similar effect factors (difference of less than 25%).
 
 ### 3.3 The case of biogenic carbon
 With the v2.1 update, users have the possibility to choose between two versions of IMPACT World+ corresponding to two 
@@ -157,7 +235,7 @@ sub-categories: fossil, biogenic, land transformation, CO2 uptake. This separati
 such as the PEF and GHG protocol.
 
 ### 3.4 The case of temporary storage of carbon
-SOme LCI datasets offer the use of temporary carbon storage flows (e.g., Correction flow for delayed emission of fossil 
+Some LCI datasets offer the use of temporary carbon storage flows (e.g., Correction flow for delayed emission of fossil 
 carbon dioxide). These flows are expressed in kgy. They are only characterized at the damage level (so for human health 
 and ecosystem quality). They are attributed a negative CF for their short term impact, equal to the CF of their 
 corresponding flow divided by 100 (because the flows are per year and our climate change short term impact is on 100 
