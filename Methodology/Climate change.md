@@ -156,7 +156,7 @@ temperature is exceeded are considered affected.
 Note that since the temperature estimates at provided by increment of 
 average of 5 years (e.g., the average temperature from 2050 and 2055), which means that as soon as the estimated temperature
 exceeds the niche temperature, it directly corresponds to our definition of affected species (i.e., temperature exceeded 
-for5 consecutive years).
+for 5 consecutive years).
 Also note that for terrestrial species, the air temperature estimates are used while the estimated surface ocean temperatures
 are used for marine species.
 
@@ -216,6 +216,23 @@ the RCP4.5 thus corresponds to a conservative approach, where we take the worst 
 ##### 3.2.2.2.5 The choice of the temperature increment
 We selected the +0.01K temperature increment for the calculation of our marginal effect factor. We tested temperature
 increments of +0.1K and +1K, which yielded similar effect factors (difference of less than 25%).
+
+#### 3.2.2.2.6 Ocean/sea surface temperature proxy
+Ocean/sea temperature values from the climate models used are surface temperatures only. This correlates with the niche 
+temperatures of marine species, which are also provided as surface temperatures, even for species living deep in the 
+ocean. There is thus no issue of coherence here. However, the implicit assumption that is made by using the surface
+temperature is that we consider that an X degree temperature increase in the surface corresponds to an X degree 
+temperature increase everywhere in the ocean/sea. This is obviously wrong, since oceans/seas are not homogeneous in 
+their temperature distribution. Nevertheless, if this assumption becomes true in the course of our time period of study
+(until 500 years for climate change, long term indicators), then all it comes down to, is a potential overestimation of
+the short time impact and an underestimation of the long term impact, only for species living far from the surface.
+With a quick Google Gemini research, it estimated that a theoretical 1° increase in temperature at the surface of the 
+ocean would take on average (globally) less than 50 years to reach 250m depth. For 3000m depth, it would take around 300
+years. Of course, it depends on the geographical location and we only look at global values here. However, this would 
+mean that such temperature increase would eventually also be felt by species living in deep water, within the 500 years
+of our indicator. Moreover, another quick Gemini research seems to indicate that roughly 90% of marine species live
+above 250m depth, while 9% live between 250m and 3000m and 1% live below 3000m. Since most of our species live above the
+250m-depth, our proxy to use the surface temperature of the ocean is not drastically incorrect.
 
 ### 3.3 The case of biogenic carbon
 With the v2.1 update, users have the possibility to choose between two versions of IMPACT World+ corresponding to two 
