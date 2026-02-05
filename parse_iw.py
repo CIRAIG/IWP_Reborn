@@ -5014,13 +5014,13 @@ class Parse:
 
             # --------------------------- ADD OLCA UUIDS ------------------------------------
             olca_flows = pd.read_excel(pkg_resources.resource_filename(
-                __name__, '/Data/mappings/oLCA/v2.5/all_stressors.xlsx'), index_col=0)
+                __name__, '/Data/mappings/oLCA/v2.5/all_stressors.xlsx'))
 
             # split comps and subcomps in two columns for matching with db
             olca_flows['Compartment'] = [i.split('/')[1] for i in olca_flows['comp']]
             olca_flows['Sub-compartment'] = [i.split('/')[2] for i in olca_flows['comp']]
             # only keep relevant columns
-            olca_flows = olca_flows.loc[:, ['flow_id', 'flow_name', 'unit', 'Compartment', 'Sub-compartment']]
+            olca_flows = olca_flows[['flow_id', 'flow_name', 'unit', 'Compartment', 'Sub-compartment']]
             # merge with olca_iw, it basically adds the uuids of oLCA
             olca_db = olca_flows.merge(db, left_on=['flow_name', 'unit', 'Compartment', 'Sub-compartment'],
                                        right_on=['Elem flow name', 'Elem flow unit', 'Compartment', 'Sub-compartment'],
