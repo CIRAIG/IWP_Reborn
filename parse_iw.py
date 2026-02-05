@@ -261,7 +261,7 @@ class Parse:
         self.link_to_exiobase()
 
         self.logger.info("Prepare the footprint version...")
-        self.get_simplified_versions()
+        self.get_simplified_versions(bw_only=bw_only)
 
         if not bw_only:
             self.get_total_hh_and_eq_for_olca()
@@ -1155,8 +1155,10 @@ class Parse:
         """
 
         # Note, for openLCA we just export the files directly from the software
-
-        self.logger.info("Creating all the files...")
+        if not bw_only:
+            self.logger.info("Creating all the files...")
+        else :
+            self.logger.info("Creating brigthway files")
 
         path = pkg_resources.resource_filename(__name__, '/Databases/Impact_world_' + self.version)
 
@@ -5147,17 +5149,17 @@ class Parse:
             elif exio_version == '3.9':
                 self.exio_iw_39 = C.copy()
 
-    def get_simplified_versions(self):
+    def get_simplified_versions(self, bw_only:bool):
+        if not bw_only:
+            # SimaPro
+            self.simplified_version_sp = clean_up_dataframe(
+                produce_simplified_version(self.iw_sp_carbon_neutrality).reindex(
+                    self.iw_sp_carbon_neutrality.columns, axis=1))
 
-        # SimaPro
-        self.simplified_version_sp = clean_up_dataframe(
-            produce_simplified_version(self.iw_sp_carbon_neutrality).reindex(
-                self.iw_sp_carbon_neutrality.columns, axis=1))
-
-        # openLCA
-        self.simplified_version_olca = clean_up_dataframe(
-            produce_simplified_version(self.olca_iw_carbon_neutrality).reindex(
-            self.olca_iw_carbon_neutrality.columns, axis=1))
+            # openLCA
+            self.simplified_version_olca = clean_up_dataframe(
+                produce_simplified_version(self.olca_iw_carbon_neutrality).reindex(
+                self.olca_iw_carbon_neutrality.columns, axis=1))
 
         # ecoinvent
         self.simplified_version_ei310 = clean_up_dataframe(
