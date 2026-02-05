@@ -1381,6 +1381,7 @@ class Parse:
         for indicator in ['Radiative Efficiency (W/m2/ppb)', 'AGWP-20 (pW/m2/yr/kg)', 'GWP-20',
                           'AGWP-100 (pW/m2/yr/kg)', 'GWP-100', 'AGWP-500 (pW/m2/yr/kg)', 'GWP-500',
                           'AGTP-50 (pK/kg)', 'GTP-50', 'AGTP-100 (pK/kg)', 'GTP-100']:
+            monoxide[indicator]=monoxide[indicator].astype(float)
             monoxide.loc[monoxide.index[0], indicator] = float(monoxide.loc[monoxide.index[0], indicator]) * 1.57
         data = clean_up_dataframe(pd.concat([data, monoxide]))
 
@@ -2753,7 +2754,7 @@ class Parse:
         water_data.loc[:, 'MP or Damage'] = 'Midpoint'
         water_data.loc[:, 'Native geographical resolution scale'] = 'Country'
 
-        water_data.loc[:, 'CF value'] = water_data.loc[:, 'CF value'].astype(float)
+        water_data['CF value'] = water_data['CF value'].astype(float)
 
         # create the negative flows for the Water compartment
         water_extraction_data = water_data.copy('deep')
@@ -3688,7 +3689,7 @@ class Parse:
         # only keep data that are classifies as the most robust, i.e., class I
         cfs = cfs.loc[cfs.loc[:, 'class'] == 'I']
         # change FAO_zone from numbers to strings
-        cfs.loc[:, 'FAO_num'] = [str(i) for i in cfs.loc[:, 'FAO_num']]
+        cfs['FAO_num'] = cfs['FAO_num'].astype(str)
         # convert the species/yr cf to PDF.m2.yr
         cfs.loc[:, 'CF (PDF.m2.yr)'] = (
                 cfs.loc[:, 'CF (species/yr)'] * cfs.loc[:, 'Area (m2)'] / cfs.loc[:, 'Species_num (nb sp.)'])
@@ -5170,7 +5171,7 @@ class Parse:
 
             C = pd.DataFrame(0, EXIO_IW_concordance.index,
                              list(set(list(zip(self.master_db_carbon_neutrality.loc[:, 'Impact category'],
-                                               self.master_db_carbon_neutrality.loc[:, 'CF unit'])))))
+                                               self.master_db_carbon_neutrality.loc[:, 'CF unit'])))), dtype=float)
             C.columns = pd.MultiIndex.from_tuples(C.columns, names=['Impact category', 'CF unit'])
             C = C.T.sort_index().T
 
@@ -5180,6 +5181,7 @@ class Parse:
                     CF_flow = self.master_db_carbon_neutrality.loc[self.master_db_carbon_neutrality['Elem flow name'] ==
                                                                    EXIO_IW_concordance.loc[flow, 'IW']].loc[:,
                               ['Impact category', 'CF unit', 'CF value', 'Compartment', 'Sub-compartment']]
+                    CF_flow['CF value'] = CF_flow['CF value'].astype(float)
                     # name of the comp in lower case to match exiobase easily
                     CF_flow['Compartment'] = CF_flow['Compartment'].apply(lambda x: str(x).lower())
                     # only keeping right compartments, always selecting unspecified sub-compartment
