@@ -131,7 +131,6 @@ class Parse:
 
         # ignoring some warnings
         warnings.filterwarnings(action='ignore', category=FutureWarning)
-        warnings.filterwarnings(action='ignore', category=np.VisibleDeprecationWarning)
         warnings.filterwarnings(action='ignore', category=pd.errors.PerformanceWarning)
         warnings.filterwarnings(action='ignore', category=UserWarning)
 
