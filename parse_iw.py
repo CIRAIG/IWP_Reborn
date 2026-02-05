@@ -189,7 +189,7 @@ class Parse:
 
     # -------------------------------------------- Main methods -------------------------------------------------------
 
-    def load_cfs(self):
+    def load_cfs(self, bw_only:bool=False):
         """
         Load the characterization factors and stored them in master_db.
         :return: updated master_db
@@ -249,22 +249,59 @@ class Parse:
         self.logger.info("Linking to ecoinvent elementary flows...")
         self.link_to_ecoinvent()
 
-        self.logger.info("Linking to SimaPro elementary flows...")
-        self.link_to_sp()
+        if not bw_only:
+            self.logger.info("Linking to SimaPro elementary flows...")
+            self.link_to_sp()
 
-        self.logger.info("Linking to openLCA elementary flows...")
-        self.link_to_olca()
+            self.logger.info("Linking to openLCA elementary flows...")
+            self.link_to_olca()
 
+        # leave exiobase with brightway only option for hybrid version
         self.logger.info("Linking to exiobase environmental extensions...")
         self.link_to_exiobase()
 
         self.logger.info("Prepare the footprint version...")
         self.get_simplified_versions()
-        self.get_total_hh_and_eq_for_olca()
+
+        if not bw_only:
+            self.get_total_hh_and_eq_for_olca()
+
+    def generate_bw_files(self)->None:
+        """
+        A specific method that generates IW+ files for brightway format only.
+        It first checks that brightway projects match code requirements.
+        Characterization factors are then loaded, matched to brightway format
+        and exported to a bw2package file.
+
+        Return
+        ----------
+           Returns None. IW+ files are generated in `./Databases/Impact_world_2.2/bw{bw_version}`
+           bw_version can be '2' or '2.5' depending on what was chosen when instantiating the class.
+
+        """
+        # Make sure that all projects have ecoinvent in their name
+        assert all(
+            "ecoinvent" in project for project in self.bw2_projects
+        ), ("All project names should contain the word 'ecoinvent'. "
+        "Please rename your project with following form 'any_name ecoinvent$version_number$' "
+        "(replacing $version_number$ by the ecoinvent version you are using)")
+        # For each project make sure that at least one database has biosphere in its name
+        for project in self.bw2_projects:
+            bd.projects.set_current(project)
+            biosphere_key="biosphere"
+            if self.bw_version=='2':
+                biosphere_key="biosphere3"
+            assert any(biosphere_key in db for db in bd.databases), ("At least one database in each "
+            f"brightway project should be a biosphere and contain '{biosphere_key}' in its name "
+            "for the code to run.")
+        self.load_cfs(bw_only=True)
+        self.export_to_bw()
+        self.produce_files(bw_only=True)
 
     def export_to_bw(self):
         """
-        This method creates a brightway2 or brightway2.5 method with the IW+ characterization factors.
+        This method creates a brightway2 or brightway2.5 method with the IW+ characterization 
+        factors.
 
         :return:
         """
@@ -1103,10 +1140,18 @@ class Parse:
         new_method.impact_categories = []
         write_to_olca(df, new_method)
 
-    def produce_files(self):
+    def produce_files(self, bw_only:bool=False):
         """
         Function producing the different IW+ files for the different versions.
-        :return: the IW+ files
+        
+        Parameters
+        ----------
+        bw_only:bool, optional, default False
+            If set to True, only brightway files will be generated.
+        
+        Return
+        ----------
+           Returns None. IW+ files are generated in `./Databases/Impact_world_2.2`
         """
 
         # Note, for openLCA we just export the files directly from the software
@@ -1116,186 +1161,140 @@ class Parse:
         path = pkg_resources.resource_filename(__name__, '/Databases/Impact_world_' + self.version)
 
         # if the folders are not there yet, create them
-        if not os.path.exists(path + '/Dev/'):
-            os.makedirs(path + '/Dev/')
-        if not os.path.exists(path + '/ecoinvent/'):
-            os.makedirs(path + '/ecoinvent/')
-        if not os.path.exists(path + '/exiobase/'):
-            os.makedirs(path + '/exiobase/')
         if not os.path.exists(path + '/bw' + self.bw_version.replace('.', '')):
             os.makedirs(path + '/bw' + self.bw_version.replace('.', ''))
-        if not os.path.exists(path + '/SimaPro/'):
-            os.makedirs(path + '/SimaPro/')
-        if not os.path.exists(path + '/openLCA/'):
-            os.makedirs(path + '/openLCA/')
-
-        # Dev version
-        self.master_db.to_excel(path + '/Dev/impact_world_plus_' + self.version + ' (incl. CO2 uptake)_dev.xlsx')
-        self.master_db_carbon_neutrality.to_excel(path + '/Dev/impact_world_plus_' + self.version + '_dev.xlsx')
-
-        # ecoinvent versions in Excel format
-        self.ei310_iw.to_excel(
-            path + '/ecoinvent/impact_world_plus_' + self.version + ' (incl. CO2 uptake)_expert_version_ecoinvent_v310.xlsx')
-        self.ei311_iw.to_excel(
-            path + '/ecoinvent/impact_world_plus_' + self.version + ' (incl. CO2 uptake)_expert_version_ecoinvent_v311.xlsx')
-        self.ei312_iw.to_excel(
-            path + '/ecoinvent/impact_world_plus_' + self.version + ' (incl. CO2 uptake)_expert_version_ecoinvent_v312.xlsx')
-        self.ei310_iw_carbon_neutrality.to_excel(
-            path + '/ecoinvent/impact_world_plus_' + self.version + '_expert_version_ecoinvent_v310.xlsx')
-        self.ei311_iw_carbon_neutrality.to_excel(
-            path + '/ecoinvent/impact_world_plus_' + self.version + '_expert_version_ecoinvent_v311.xlsx')
-        self.ei312_iw_carbon_neutrality.to_excel(
-            path + '/ecoinvent/impact_world_plus_' + self.version + '_expert_version_ecoinvent_v312.xlsx')
-
-        # ecoinvent version in DataFrame format
-        self.simplified_version_ei310.to_excel(
-            path + '/ecoinvent/impact_world_plus_' + self.version + '_footprint_version_ecoinvent_v310.xlsx')
-        self.simplified_version_ei311.to_excel(
-            path + '/ecoinvent/impact_world_plus_' + self.version + '_footprint_version_ecoinvent_v311.xlsx')
-        self.simplified_version_ei312.to_excel(
-            path + '/ecoinvent/impact_world_plus_' + self.version + '_footprint_version_ecoinvent_v312.xlsx')
-
-        # exiobase version in DataFrame format
-        self.exio_iw_38.to_excel(path + '/exiobase/impact_world_plus_' + self.version +
-                                 '_expert_version_exiobase_3.8.2_and_before.xlsx')
-        self.exio_iw_39.to_excel(path + '/exiobase/impact_world_plus_' + self.version +
-                                 '_expert_version_exiobase_3.9_and_after.xlsx')
+        if not bw_only:
+            if not os.path.exists(path + '/Dev/'):
+                os.makedirs(path + '/Dev/')
+            if not os.path.exists(path + '/ecoinvent/'):
+                os.makedirs(path + '/ecoinvent/')
+            if not os.path.exists(path + '/exiobase/'):
+                os.makedirs(path + '/exiobase/')
+            if not os.path.exists(path + '/SimaPro/'):
+                os.makedirs(path + '/SimaPro/')
+            if not os.path.exists(path + '/openLCA/'):
+                os.makedirs(path + '/openLCA/')
 
         # brightway2 versions in bw2package format
         for project in self.bw2_projects:
             bd.projects.set_current(project)
-            if '3.10' in project:
-                IW_ic = [bd.Method(ic) for ic in list(bd.methods) if
+            for ei_version in ['3.10', '3.11', '3.12']:
+                if ei_version in project:
+                    IW_ic = [bd.Method(ic) for ic in list(bd.methods) if
                          ('IMPACT World+' in ic[0] and 'Footprint' not in ic[0] and
                           self.version in ic[0] and "for ecoinvent" in ic[0] and
                           ' (incl. CO2 uptake)' in ic[0] and 'regionalized' not in ic[0])]
-                bi.package.BW2Package.export_objs(IW_ic, filename='impact_world_plus_' + self.version +
-                                                                  ' (incl. CO2 uptake)_brightway' + self.bw_version +
-                                                                  '_expert_version_ei310',
-                                                  folder=path + '/bw' + self.bw_version.replace('.', '') + '/')
-                IW_ic = [bd.Method(ic) for ic in list(bd.methods) if
-                         ('IMPACT World+' in ic[0] and 'Footprint' not in ic[0] and
-                          self.version in ic[0] and "for ecoinvent" in ic[0] and
-                          ' (incl. CO2 uptake)' not in ic[0] and 'regionalized' not in ic[0])]
-                bi.package.BW2Package.export_objs(IW_ic, filename='impact_world_plus_' + self.version +
-                                                                  '_brightway' + self.bw_version +
-                                                                  '_expert_version_ei310',
-                                                  folder=path + '/bw' + self.bw_version.replace('.', '') + '/')
-                IW_ic = [bd.Method(ic) for ic in list(bd.methods) if
-                         ('IMPACT World+' in ic[0] and 'Footprint' in ic[0] and
-                          self.version in ic[0] and "for ecoinvent" in ic[0] and 'regionalized' not in ic[0])]
-                bi.package.BW2Package.export_objs(IW_ic, filename='impact_world_plus_' + self.version +
-                                                                  '_brightway' + self.bw_version +
-                                                                  '_footprint_version_ei310',
-                                                  folder=path + '/bw' + self.bw_version.replace('.', '') + '/')
-            elif '3.11' in project:
-                IW_ic = [bd.Method(ic) for ic in list(bd.methods) if
-                         ('IMPACT World+' in ic[0] and 'Footprint' not in ic[0] and
-                          self.version in ic[0] and "for ecoinvent" in ic[0] and
-                          ' (incl. CO2 uptake)' in ic[0] and 'regionalized' not in ic[0])]
-                bi.package.BW2Package.export_objs(IW_ic, filename='impact_world_plus_' + self.version +
-                                                                  ' (incl. CO2 uptake)_brightway' + self.bw_version +
-                                                                  '_expert_version_ei311',
-                                                  folder=path + '/bw' + self.bw_version.replace('.', '') + '/')
-                IW_ic = [bd.Method(ic) for ic in list(bd.methods) if
-                         ('IMPACT World+' in ic[0] and 'Footprint' not in ic[0] and
-                          self.version in ic[0] and "for ecoinvent" in ic[0] and
-                          ' (incl. CO2 uptake)' not in ic[0] and 'regionalized' not in ic[0])]
-                bi.package.BW2Package.export_objs(IW_ic, filename='impact_world_plus_' + self.version +
-                                                                  '_brightway' + self.bw_version +
-                                                                  '_expert_version_ei311',
-                                                  folder=path + '/bw' + self.bw_version.replace('.', '') + '/')
-                IW_ic = [bd.Method(ic) for ic in list(bd.methods) if
-                         ('IMPACT World+' in ic[0] and 'Footprint' in ic[0] and
-                          self.version in ic[0] and "for ecoinvent" in ic[0] and 'regionalized' not in ic[0])]
-                bi.package.BW2Package.export_objs(IW_ic, filename='impact_world_plus_' + self.version +
-                                                                  '_brightway' + self.bw_version +
-                                                                  '_footprint_version_ei311',
-                                                  folder=path + '/bw' + self.bw_version.replace('.', '') + '/')
-            elif '3.12' in project:
-                IW_ic = [bd.Method(ic) for ic in list(bd.methods) if
-                         ('IMPACT World+' in ic[0] and 'Footprint' not in ic[0] and
-                          self.version in ic[0] and "for ecoinvent" in ic[0] and
-                          ' (incl. CO2 uptake)' in ic[0] and 'regionalized' not in ic[0])]
-                bi.package.BW2Package.export_objs(IW_ic, filename='impact_world_plus_' + self.version +
-                                                                  ' (incl. CO2 uptake)_brightway' + self.bw_version +
-                                                                  '_expert_version_ei312',
-                                                  folder=path + '/bw' + self.bw_version.replace('.', '') + '/')
-                IW_ic = [bd.Method(ic) for ic in list(bd.methods) if
-                         ('IMPACT World+' in ic[0] and 'Footprint' not in ic[0] and
-                          self.version in ic[0] and "for ecoinvent" in ic[0] and
-                          ' (incl. CO2 uptake)' not in ic[0] and 'regionalized' not in ic[0])]
-                bi.package.BW2Package.export_objs(IW_ic, filename='impact_world_plus_' + self.version +
-                                                                  '_brightway' + self.bw_version +
-                                                                  '_expert_version_ei312',
-                                                  folder=path + '/bw' + self.bw_version.replace('.', '') + '/')
-                IW_ic = [bd.Method(ic) for ic in list(bd.methods) if
-                         ('IMPACT World+' in ic[0] and 'Footprint' in ic[0] and
-                          self.version in ic[0] and "for ecoinvent" in ic[0] and 'regionalized' not in ic[0])]
-                bi.package.BW2Package.export_objs(IW_ic, filename='impact_world_plus_' + self.version +
-                                                                  '_brightway' + self.bw_version +
-                                                                  '_footprint_version_ei312',
-                                                  folder=path + '/bw' + self.bw_version.replace('.', '') + '/')
+                    bi.package.BW2Package.export_objs(IW_ic, filename='impact_world_plus_' + self.version +
+                                                                    ' (incl. CO2 uptake)_brightway' + self.bw_version +
+                                                                    f'_expert_version_ei{ei_version.replace('.','')}',
+                                                    folder=path + '/bw' + self.bw_version.replace('.', '') + '/')
+                    IW_ic = [bd.Method(ic) for ic in list(bd.methods) if
+                            ('IMPACT World+' in ic[0] and 'Footprint' not in ic[0] and
+                            self.version in ic[0] and "for ecoinvent" in ic[0] and
+                            ' (incl. CO2 uptake)' not in ic[0] and 'regionalized' not in ic[0])]
+                    bi.package.BW2Package.export_objs(IW_ic, filename='impact_world_plus_' + self.version +
+                                                                    '_brightway' + self.bw_version +
+                                                                    f'_expert_version_ei{ei_version.replace('.','')}',
+                                                    folder=path + '/bw' + self.bw_version.replace('.', '') + '/')
+                    IW_ic = [bd.Method(ic) for ic in list(bd.methods) if
+                            ('IMPACT World+' in ic[0] and 'Footprint' in ic[0] and
+                            self.version in ic[0] and "for ecoinvent" in ic[0] and 'regionalized' not in ic[0])]
+                    bi.package.BW2Package.export_objs(IW_ic, filename='impact_world_plus_' + self.version +
+                                                                    '_brightway' + self.bw_version +
+                                                                    f'_footprint_version_ei{ei_version.replace('.','')}',
+                                                    folder=path + '/bw' + self.bw_version.replace('.', '') + '/')
+        if not bw_only:
+            # Dev version
+            self.master_db.to_excel(path + '/Dev/impact_world_plus_' + self.version + ' (incl. CO2 uptake)_dev.xlsx')
+            self.master_db_carbon_neutrality.to_excel(path + '/Dev/impact_world_plus_' + self.version + '_dev.xlsx')
 
-        # SimaPro version in csv format
-        with open(
-                path + '/SimaPro/impact_world_plus_' + self.version + ' (incl. CO2 uptake)_midpoint_version_simapro.csv',
-                'w', newline='', encoding='utf-8') as f:
-            writer = csv.writer(f, delimiter=";")
-            writer.writerows(
-                self.sp_data['metadata'] + [['', '', '', '', '', '']] + self.sp_data['midpoint_method_metadata'] +
-                self.sp_data['midpoint_values'] + [['', '', '', '', '', '']])
-            writer.writerows([['End', '', '', '', '', '']])
-        with open(
-                path + '/SimaPro/impact_world_plus_' + self.version + ' (incl. CO2 uptake)_expert_version_simapro.csv',
-                'w', newline='', encoding='utf-8') as f:
-            writer = csv.writer(f, delimiter=";")
-            writer.writerows(
-                self.sp_data['metadata'] + [['', '', '', '', '', '']] + self.sp_data['damage_method_metadata'] +
-                self.sp_data['damage_values'] + [['', '', '', '', '', '']])
-            writer.writerows(self.sp_data['weighting_info_damage'] + [['', '', '', '', '', '']])
-            writer.writerows([['End', '', '', '', '', '']])
-        with open(path + '/SimaPro/impact_world_plus_' + self.version + ' (incl. CO2 uptake)_simapro.csv', 'w',
-                  newline='', encoding='utf-8') as f:
-            writer = csv.writer(f, delimiter=";")
-            writer.writerows(
-                self.sp_data['metadata'] + [['', '', '', '', '', '']] + self.sp_data['combined_method_metadata'] +
-                self.sp_data['combined_values'] + [['', '', '', '', '', '']])
-            writer.writerows(self.sp_data['weighting_info_combined'] + [['', '', '', '', '', '']])
-            writer.writerows([['End', '', '', '', '', '']])
-        with open(path + '/SimaPro/impact_world_plus_' + self.version + '_footprint_version_simapro.csv', 'w',
-                  newline='', encoding='utf-8') as f:
-            writer = csv.writer(f, delimiter=";")
-            writer.writerows(
-                self.sp_data['metadata'] + [['', '', '', '', '', '']] + self.sp_data['simplified_method_metadata'] +
-                self.sp_data['simplified_values'] + [['', '', '', '', '', '']])
-            writer.writerows([['End', '', '', '', '', '']])
-        with open(path + '/SimaPro/impact_world_plus_' + self.version + '_midpoint_version_simapro.csv', 'w',
-                  newline='', encoding='utf-8') as f:
-            writer = csv.writer(f, delimiter=";")
-            writer.writerows(
-                self.sp_data['metadata'] + [['', '', '', '', '', '']] + self.sp_data[
-                    'midpoint_method_metadata_carboneutrality'] +
-                self.sp_data['midpoint_values_carboneutrality'] + [['', '', '', '', '', '']])
-            writer.writerows([['End', '', '', '', '', '']])
-        with open(path + '/SimaPro/impact_world_plus_' + self.version + '_expert_version_simapro.csv', 'w',
-                  newline='', encoding='utf-8') as f:
-            writer = csv.writer(f, delimiter=";")
-            writer.writerows(
-                self.sp_data['metadata'] + [['', '', '', '', '', '']] + self.sp_data[
-                    'damage_method_metadata_carboneutrality'] +
-                self.sp_data['damage_values_carboneutrality'] + [['', '', '', '', '', '']])
-            writer.writerows(self.sp_data['weighting_info_damage_carboneutrality'] + [['', '', '', '', '', '']])
-            writer.writerows([['End', '', '', '', '', '']])
-        with open(path + '/SimaPro/impact_world_plus_' + self.version + '_simapro.csv', 'w',
-                  newline='', encoding='utf-8') as f:
-            writer = csv.writer(f, delimiter=";")
-            writer.writerows(
-                self.sp_data['metadata'] + [['', '', '', '', '', '']] + self.sp_data[
-                    'combined_method_metadata_carboneutrality'] +
-                self.sp_data['combined_values_carboneutrality'] + [['', '', '', '', '', '']])
-            writer.writerows(self.sp_data['weighting_info_combined_carboneutrality'] + [['', '', '', '', '', '']])
-            writer.writerows([['End', '', '', '', '', '']])
+            # ecoinvent versions in Excel format
+            self.ei310_iw.to_excel(
+                path + '/ecoinvent/impact_world_plus_' + self.version + ' (incl. CO2 uptake)_expert_version_ecoinvent_v310.xlsx')
+            self.ei311_iw.to_excel(
+                path + '/ecoinvent/impact_world_plus_' + self.version + ' (incl. CO2 uptake)_expert_version_ecoinvent_v311.xlsx')
+            self.ei312_iw.to_excel(
+                path + '/ecoinvent/impact_world_plus_' + self.version + ' (incl. CO2 uptake)_expert_version_ecoinvent_v312.xlsx')
+            self.ei310_iw_carbon_neutrality.to_excel(
+                path + '/ecoinvent/impact_world_plus_' + self.version + '_expert_version_ecoinvent_v310.xlsx')
+            self.ei311_iw_carbon_neutrality.to_excel(
+                path + '/ecoinvent/impact_world_plus_' + self.version + '_expert_version_ecoinvent_v311.xlsx')
+            self.ei312_iw_carbon_neutrality.to_excel(
+                path + '/ecoinvent/impact_world_plus_' + self.version + '_expert_version_ecoinvent_v312.xlsx')
+
+            # ecoinvent version in DataFrame format
+            self.simplified_version_ei310.to_excel(
+                path + '/ecoinvent/impact_world_plus_' + self.version + '_footprint_version_ecoinvent_v310.xlsx')
+            self.simplified_version_ei311.to_excel(
+                path + '/ecoinvent/impact_world_plus_' + self.version + '_footprint_version_ecoinvent_v311.xlsx')
+            self.simplified_version_ei312.to_excel(
+                path + '/ecoinvent/impact_world_plus_' + self.version + '_footprint_version_ecoinvent_v312.xlsx')
+
+            # exiobase version in DataFrame format
+            self.exio_iw_38.to_excel(path + '/exiobase/impact_world_plus_' + self.version +
+                                    '_expert_version_exiobase_3.8.2_and_before.xlsx')
+            self.exio_iw_39.to_excel(path + '/exiobase/impact_world_plus_' + self.version +
+                                    '_expert_version_exiobase_3.9_and_after.xlsx')
+
+            # SimaPro version in csv format
+            with open(
+                    path + '/SimaPro/impact_world_plus_' + self.version + ' (incl. CO2 uptake)_midpoint_version_simapro.csv',
+                    'w', newline='', encoding='utf-8') as f:
+                writer = csv.writer(f, delimiter=";")
+                writer.writerows(
+                    self.sp_data['metadata'] + [['', '', '', '', '', '']] + self.sp_data['midpoint_method_metadata'] +
+                    self.sp_data['midpoint_values'] + [['', '', '', '', '', '']])
+                writer.writerows([['End', '', '', '', '', '']])
+            with open(
+                    path + '/SimaPro/impact_world_plus_' + self.version + ' (incl. CO2 uptake)_expert_version_simapro.csv',
+                    'w', newline='', encoding='utf-8') as f:
+                writer = csv.writer(f, delimiter=";")
+                writer.writerows(
+                    self.sp_data['metadata'] + [['', '', '', '', '', '']] + self.sp_data['damage_method_metadata'] +
+                    self.sp_data['damage_values'] + [['', '', '', '', '', '']])
+                writer.writerows(self.sp_data['weighting_info_damage'] + [['', '', '', '', '', '']])
+                writer.writerows([['End', '', '', '', '', '']])
+            with open(path + '/SimaPro/impact_world_plus_' + self.version + ' (incl. CO2 uptake)_simapro.csv', 'w',
+                    newline='', encoding='utf-8') as f:
+                writer = csv.writer(f, delimiter=";")
+                writer.writerows(
+                    self.sp_data['metadata'] + [['', '', '', '', '', '']] + self.sp_data['combined_method_metadata'] +
+                    self.sp_data['combined_values'] + [['', '', '', '', '', '']])
+                writer.writerows(self.sp_data['weighting_info_combined'] + [['', '', '', '', '', '']])
+                writer.writerows([['End', '', '', '', '', '']])
+            with open(path + '/SimaPro/impact_world_plus_' + self.version + '_footprint_version_simapro.csv', 'w',
+                    newline='', encoding='utf-8') as f:
+                writer = csv.writer(f, delimiter=";")
+                writer.writerows(
+                    self.sp_data['metadata'] + [['', '', '', '', '', '']] + self.sp_data['simplified_method_metadata'] +
+                    self.sp_data['simplified_values'] + [['', '', '', '', '', '']])
+                writer.writerows([['End', '', '', '', '', '']])
+            with open(path + '/SimaPro/impact_world_plus_' + self.version + '_midpoint_version_simapro.csv', 'w',
+                    newline='', encoding='utf-8') as f:
+                writer = csv.writer(f, delimiter=";")
+                writer.writerows(
+                    self.sp_data['metadata'] + [['', '', '', '', '', '']] + self.sp_data[
+                        'midpoint_method_metadata_carboneutrality'] +
+                    self.sp_data['midpoint_values_carboneutrality'] + [['', '', '', '', '', '']])
+                writer.writerows([['End', '', '', '', '', '']])
+            with open(path + '/SimaPro/impact_world_plus_' + self.version + '_expert_version_simapro.csv', 'w',
+                    newline='', encoding='utf-8') as f:
+                writer = csv.writer(f, delimiter=";")
+                writer.writerows(
+                    self.sp_data['metadata'] + [['', '', '', '', '', '']] + self.sp_data[
+                        'damage_method_metadata_carboneutrality'] +
+                    self.sp_data['damage_values_carboneutrality'] + [['', '', '', '', '', '']])
+                writer.writerows(self.sp_data['weighting_info_damage_carboneutrality'] + [['', '', '', '', '', '']])
+                writer.writerows([['End', '', '', '', '', '']])
+            with open(path + '/SimaPro/impact_world_plus_' + self.version + '_simapro.csv', 'w',
+                    newline='', encoding='utf-8') as f:
+                writer = csv.writer(f, delimiter=";")
+                writer.writerows(
+                    self.sp_data['metadata'] + [['', '', '', '', '', '']] + self.sp_data[
+                        'combined_method_metadata_carboneutrality'] +
+                    self.sp_data['combined_values_carboneutrality'] + [['', '', '', '', '', '']])
+                writer.writerows(self.sp_data['weighting_info_combined_carboneutrality'] + [['', '', '', '', '', '']])
+                writer.writerows([['End', '', '', '', '', '']])
 
     # ----------------------------------------- Secondary methods -----------------------------------------------------
 
