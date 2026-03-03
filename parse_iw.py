@@ -168,7 +168,6 @@ class Parse:
         self.iw_sp_carbon_neutrality = pd.DataFrame()
         self.simplified_version_sp = pd.DataFrame()
         self.simplified_version_olca = pd.DataFrame()
-        self.simplified_version_bw = pd.DataFrame()
         self.sp_data = {}
         self.olca_iw = pd.DataFrame()
         self.olca_iw_carbon_neutrality = pd.DataFrame()
@@ -1158,7 +1157,7 @@ class Parse:
         if not bw_only:
             self.logger.info("Creating all the files...")
         else :
-            self.logger.info("Creating brigthway files")
+            self.logger.info("Creating brightway files")
 
         path = pkg_resources.resource_filename(__name__, '/Databases/Impact_world_' + self.version)
 
@@ -1188,7 +1187,7 @@ class Parse:
                           ' (incl. CO2 uptake)' in ic[0] and 'regionalized' not in ic[0])]
                     bi.package.BW2Package.export_objs(IW_ic, filename='impact_world_plus_' + self.version +
                                                                     ' (incl. CO2 uptake)_brightway' + self.bw_version +
-                                                                    f'_expert_version_ei{ei_version.replace('.','')}',
+                                                                    f"_expert_version_ei{ei_version.replace('.','')}",
                                                     folder=path + '/bw' + self.bw_version.replace('.', '') + '/')
                     IW_ic = [bd.Method(ic) for ic in list(bd.methods) if
                             ('IMPACT World+' in ic[0] and 'Footprint' not in ic[0] and
@@ -1196,14 +1195,14 @@ class Parse:
                             ' (incl. CO2 uptake)' not in ic[0] and 'regionalized' not in ic[0])]
                     bi.package.BW2Package.export_objs(IW_ic, filename='impact_world_plus_' + self.version +
                                                                     '_brightway' + self.bw_version +
-                                                                    f'_expert_version_ei{ei_version.replace('.','')}',
+                                                                    f"_expert_version_ei{ei_version.replace('.','')}",
                                                     folder=path + '/bw' + self.bw_version.replace('.', '') + '/')
                     IW_ic = [bd.Method(ic) for ic in list(bd.methods) if
                             ('IMPACT World+' in ic[0] and 'Footprint' in ic[0] and
                             self.version in ic[0] and "for ecoinvent" in ic[0] and 'regionalized' not in ic[0])]
                     bi.package.BW2Package.export_objs(IW_ic, filename='impact_world_plus_' + self.version +
                                                                     '_brightway' + self.bw_version +
-                                                                    f'_footprint_version_ei{ei_version.replace('.','')}',
+                                                                    f"_footprint_version_ei{ei_version.replace('.','')}",
                                                     folder=path + '/bw' + self.bw_version.replace('.', '') + '/')
         if not bw_only:
             # Dev version
