@@ -4532,8 +4532,8 @@ class Parse:
             # for not_one_for_one it's harder, e.g., the "Zinc" substance from iw+ must be linked to multiple elementary flows in ecoinvent
             unique_not_one_for_one = set(not_one_for_one.loc[:, 'iw name'])
             for subst in tqdm(unique_not_one_for_one, leave=True):
-                ei_df = not_one_for_one.loc[not_one_for_one['iw name']==subst]
-                iw_df = ei_iw_db.loc[ei_iw_db['Elem flow name']==subst]
+                ei_df = not_one_for_one.loc[not_one_for_one['iw name'] == subst]
+                iw_df = ei_iw_db.loc[ei_iw_db['Elem flow name'] == subst]
                 new_df = pd.concat([iw_df] * len(ei_df))
                 new_df = new_df.reset_index().drop('index', axis=1)
                 for i, new_name in enumerate(ei_df.loc[:, 'ecoinvent name']):
@@ -5181,7 +5181,7 @@ class Parse:
                                                                    EXIO_IW_concordance.loc[flow, 'IW']].loc[:,
                               ['Impact category', 'CF unit', 'CF value', 'Compartment', 'Sub-compartment']]
                     # name of the comp in lower case to match exiobase easily
-                    CF_flow['Compartment'] = CF_flow['Compartment'].apply(lambda x:str(x).lower())
+                    CF_flow['Compartment'] = CF_flow['Compartment'].apply(lambda x: str(x).lower())
                     # only keeping right compartments, always selecting unspecified sub-compartment
                     if flow.split('- ')[-1] == 'soil':
                         # P - soil is not characterized in IW+
