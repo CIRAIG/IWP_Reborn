@@ -137,6 +137,9 @@ data is curated as 100km x 100km grid cells. This covers 26,648 species: birds (
 terrestrial reptiles (n = 4599), amphibians (n = 5998), marine mammals (n = 117), marine reptiles (n = 61), 
 marine fish (n = 1822), benthic marine invertebrates (n = 916), and corals and seagrasses (n = 798). The data originally
 comes from the International Union for Conservation of Nature (IUCN) and BirdLife International.
+Note that marine species living deeper than 200m were excluded from the data of Trisos. Literature 
+(https://doi.org/10.1016/j.cub.2017.04.060) seems to indicate that roughly 90% of marine species live above 200m depth.
+Our sample of marine species is thus representative.
 
 Since PAFs are defined as the exceedance of the niche temperature limit of each species over 5 consecutive years, we
 need climate models to determine what the temperature will be over the next years. To do so, we re-use the data from
@@ -203,7 +206,7 @@ effect of climate change on ecosystem quality overall has thus gone from 2.73e12
 Here we consider that any affected species will temporarily disappear. We thus have a 1:1 ratio conversion between PAF
 and PDF. While this might be surprising, the original authors Trisos et al. (2020) state having tested how would their
 own results be affected by taking a 20 consecutive years period (instead of 5) and noted that it did not significantly
-impact results.
+impact results. This indicates that once a species is affected (and thus disappears), they do not come back.
 
 ##### 3.2.2.2.4 The choice of the RCP
 The calculations for the ecosystem quality effect factor were performed for the three RCPs for which the climate models
@@ -219,20 +222,15 @@ increments of +0.1K and +1K, which yielded similar effect factors (difference of
 
 #### 3.2.2.2.6 Ocean/sea surface temperature proxy
 Ocean/sea temperature values from the climate models used are surface temperatures only. This correlates with the niche 
-temperatures of marine species, which are also provided as surface temperatures, even for species living deep in the 
+temperatures of marine species, which are also provided as surface temperatures, even for species living under the surface of the
 ocean. There is thus no issue of coherence here. However, the implicit assumption that is made by using the surface
 temperature is that we consider that an X degree temperature increase in the surface corresponds to an X degree 
-temperature increase everywhere in the ocean/sea. This is obviously wrong, since oceans/seas are not homogeneous in 
-their temperature distribution. Nevertheless, if this assumption becomes true in the course of our time period of study
-(until 500 years for climate change, long term indicators), then all it comes down to, is a potential overestimation of
-the short time impact and an underestimation of the long term impact, only for species living far from the surface.
-With a quick Google Gemini research, it estimated that a theoretical 1° increase in temperature at the surface of the 
-ocean would take on average (globally) less than 50 years to reach 250m depth. For 3000m depth, it would take around 300
-years. Of course, it depends on the geographical location and we only look at global values here. However, this would 
-mean that such temperature increase would eventually also be felt by species living in deep water, within the 500 years
-of our indicator. Moreover, another quick Gemini research seems to indicate that roughly 90% of marine species live
-above 250m depth, while 9% live between 250m and 3000m and 1% live below 3000m. Since most of our species live above the
-250m-depth, our proxy to use the surface temperature of the ocean is not drastically incorrect.
+temperature increase within the ocean/sea. This is obviously wrong, since oceans/seas are not homogeneous in 
+their temperature distribution. However, this assumption holds for depth above 200m, which corresponds to our covered 
+marine species. With a quick Google Gemini research, it estimated that a theoretical 1° increase in temperature at the surface of the 
+ocean would take on average (globally) less than 50 years to reach 200m depth. This would 
+mean that such temperature increase would eventually also be felt by species living in under the surface, within the 500 years
+of our indicator.
 
 ### 3.3 The case of biogenic carbon
 With the v2.1 update, users have the possibility to choose between two versions of IMPACT World+ corresponding to two 

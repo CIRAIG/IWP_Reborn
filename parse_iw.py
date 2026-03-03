@@ -211,7 +211,7 @@ class Parse:
         self.load_freshwater_eutrophication_cfs()
         self.logger.info("Loading land use characterization factors...")
         self.load_land_use_cfs()
-        self.logger.info("Loading resources services loss characterization factors...")
+        self.logger.info("Loading resources services loss/deficit characterization factors...")
         self.load_resources_services_loss_cfs()
         self.logger.info("Loading particulate matter characterization factors...")
         self.load_particulates_cfs()
@@ -444,16 +444,12 @@ class Parse:
                                     ['IMPACT World+ Midpoint ' + self.version + ' (incl. CO2 uptake)', '', '', '', '',
                                      ''],
                                     ['', '', '', '', '', ''], ['Version', '', '', '', '', ''],
-                                    ['2', '2', '', '', '', ''],
+                                    ['2', '2', '1', '', '', ''],
                                     ['', '', '', '', '', ''], ['Comment', '', '', '', '', ''],
                                     ['IMPACT World+ ' + self.version + chr(int("007F", 16)) +
                                      'New categories:' + chr(int("007F", 16)) +
-                                     '- Resources services loss' + chr(int("007F", 16)) +
-                                     '- Resources services loss (adaptation)' + chr(int("007F", 16)) +
-                                     chr(int("007F", 16)) +
-                                     'Deleted categories:' + chr(int("007F", 16)) +
-                                     '- Mineral resource use' + chr(int("007F", 16)) +
-                                     '- Fossil and nuclear energy use' + chr(int("007F", 16)) +
+                                     '- Resources services deficit (beta)' + chr(int("007F", 16)) +
+                                     '- Adaptation to resources services loss (beta)' + chr(int("007F", 16)) +
                                      chr(int("007F", 16)) +
                                      'Renamed categories' + chr(int("007F", 16)) +
                                      '- Physical effect on biota (formerly Plastic physical effect on biota)' + chr(
@@ -482,11 +478,11 @@ class Parse:
                                   ['Name', '', '', '', '', ''],
                                   ['IMPACT World+ Expert ' + self.version + ' (incl. CO2 uptake)', '', '', '', '', ''],
                                   ['', '', '', '', '', ''], ['Version', '', '', '', '', ''],
-                                  ['2', '2', '', '', '', ''],
+                                  ['2', '2', '1', '', '', ''],
                                   ['', '', '', '', '', ''], ['Comment', '', '', '', '', ''],
                                   ['IMPACT World+ ' + self.version + chr(int("007F", 16)) +
                                    'New categories:' + chr(int("007F", 16)) +
-                                   '- Climate change, ecosystem quality, marine ecosystems (abbreviated as Climate change, EQ, mar)' + chr(
+                                   '- Climate change, ecosystem quality, marine ecosystems (beta) (abbreviated as Climate change, EQ, mar (beta))' + chr(
                                       int("007F", 16)) +
                                    '- Climate change, ecosystem quality, terrestrial ecosystems (abbreviated as Climate change, EQ, terr)' + chr(
                                       int("007F", 16))
@@ -522,20 +518,16 @@ class Parse:
                                     ['Name', '', '', '', '', ''],
                                     ['IMPACT World+ ' + self.version + ' (incl. CO2 uptake)', '', '', '', '', ''],
                                     ['', '', '', '', '', ''], ['Version', '', '', '', '', ''],
-                                    ['2', '2', '', '', '', ''],
+                                    ['2', '2', '1', '', '', ''],
                                     ['', '', '', '', '', ''], ['Comment', '', '', '', '', ''],
                                     ['IMPACT World+ ' + self.version + chr(int("007F", 16)) +
                                      'New categories:' + chr(int("007F", 16)) +
-                                     '- Climate change, ecosystem quality, marine ecosystems (abbreviated as Climate change, EQ, mar)' + chr(
+                                     '- Climate change, ecosystem quality, marine ecosystems (beta) (abbreviated as Climate change, EQ, mar (beta))' + chr(
                                         int("007F", 16)) +
                                      '- Climate change, ecosystem quality, terrestrial ecosystems (abbreviated as Climate change, EQ, terr)' + chr(
                                         int("007F", 16)) +
-                                     '- Resources services loss' + chr(int("007F", 16)) +
-                                     '- Resources services loss (adaptation)' + chr(int("007F", 16)) +
-                                     chr(int("007F", 16)) +
-                                     'Deleted categories:' + chr(int("007F", 16)) +
-                                     '- Mineral resource use' + chr(int("007F", 16)) +
-                                     '- Fossil and nuclear energy use' + chr(int("007F", 16)) +
+                                     '- Resources services deficit (beta)' + chr(int("007F", 16)) +
+                                     '- Adaptation to resources services loss (beta)' + chr(int("007F", 16)) +
                                      chr(int("007F", 16)) +
                                      'Renamed categories' + chr(int("007F", 16)) +
                                      '- Physical effect on biota (formerly Plastic physical effect on biota)' + chr(
@@ -567,15 +559,11 @@ class Parse:
                                                     ['Name', '', '', '', '', ''],
                                                     ['IMPACT World+ Midpoint ' + self.version, '', '', '', '', ''],
                                                     ['', '', '', '', '', ''], ['Version', '', '', '', '', ''],
-                                                    ['2', '2', '', '', '', ''],
+                                                    ['2', '2', '1', '', '', ''],
                                                     ['IMPACT World+ ' + self.version + chr(int("007F", 16)) +
                                                      'New categories:' + chr(int("007F", 16)) +
-                                                     '- Resources services loss' + chr(int("007F", 16)) +
-                                                     '- Resources services loss (adaptation)' + chr(int("007F", 16)) +
-                                                     chr(int("007F", 16)) +
-                                                     'Deleted categories:' + chr(int("007F", 16)) +
-                                                    '- Mineral resource use' + chr(int("007F", 16)) +
-                                                    '- Fossil and nuclear energy use' + chr(int("007F", 16)) +
+                                                     '- Resources services deficit (beta)' + chr(int("007F", 16)) +
+                                                     '- Adaptation to resources services loss (beta)' + chr(int("007F", 16)) +
                                                      chr(int("007F", 16)) +
                                                     'Renamed categories' + chr(int("007F", 16)) +
                                                     '- Physical effect on biota (formerly Plastic physical effect on biota)' + chr(int("007F", 16)) +
@@ -605,11 +593,11 @@ class Parse:
                                                   ['Name', '', '', '', '', ''],
                                                   ['IMPACT World+ Expert ' + self.version, '', '', '', '', ''],
                                                   ['', '', '', '', '', ''], ['Version', '', '', '', '', ''],
-                                                  ['2', '2', '', '', '', ''],
+                                                  ['2', '2', '1', '', '', ''],
                                                   ['', '', '', '', '', ''], ['Comment', '', '', '', '', ''],
                                                   ['IMPACT World+ ' + self.version + chr(int("007F", 16)) +
                                                    'New categories:' + chr(int("007F", 16)) +
-                                                   '- Climate change, ecosystem quality, marine ecosystems (abbreviated as Climate change, EQ, mar)' + chr(
+                                                   '- Climate change, ecosystem quality, marine ecosystems (beta) (abbreviated as Climate change, EQ, mar (beta))' + chr(
                                                       int("007F", 16)) +
                                                    '- Climate change, ecosystem quality, terrestrial ecosystems (abbreviated as Climate change, EQ, terr)' + chr(
                                                       int("007F", 16))
@@ -647,18 +635,14 @@ class Parse:
                                                     ['Name', '', '', '', '', ''],
                                                     ['IMPACT World+ ' + self.version, '', '', '', '', ''],
                                                     ['', '', '', '', '', ''], ['Version', '', '', '', '', ''],
-                                                    ['2', '2', '', '', '', ''],
+                                                    ['2', '2', '1', '', '', ''],
                                                     ['', '', '', '', '', ''], ['Comment', '', '', '', '', ''],
                                                     ['IMPACT World+ ' + self.version + chr(int("007F", 16)) +
                                                      'New categories:' + chr(int("007F", 16)) +
-                                                     '- Climate change, ecosystem quality, marine ecosystems (abbreviated as Climate change, EQ, mar)' + chr(int("007F", 16)) +
+                                                     '- Climate change, ecosystem quality, marine ecosystems (beta) (abbreviated as Climate change, EQ, mar (beta))' + chr(int("007F", 16)) +
                                                      '- Climate change, ecosystem quality, terrestrial ecosystems (abbreviated as Climate change, EQ, terr)' + chr(int("007F", 16)) +
-                                                     '- Resources services loss' + chr(int("007F", 16)) +
-                                                     '- Resources services loss (adaptation)' + chr(int("007F", 16)) +
-                                                     chr(int("007F", 16)) +
-                                                     'Deleted categories:' + chr(int("007F", 16)) +
-                                                    '- Mineral resource use' + chr(int("007F", 16)) +
-                                                    '- Fossil and nuclear energy use' + chr(int("007F", 16)) +
+                                                     '- Resources services deficit (beta)' + chr(int("007F", 16)) +
+                                                     '- Adaptation to resources services loss (beta)' + chr(int("007F", 16)) +
                                                      chr(int("007F", 16)) +
                                                     'Renamed categories' + chr(int("007F", 16)) +
                                                     '- Physical effect on biota (formerly Plastic physical effect on biota)' + chr(int("007F", 16)) +
@@ -691,17 +675,9 @@ class Parse:
                                       ['Name', '', '', '', '', ''],
                                       ['IMPACT World+ Footprint ' + self.version, '', '', '', '', ''],
                                       ['', '', '', '', '', ''], ['Version', '', '', '', '', ''],
-                                      ['2', '2', '', '', '', ''],
+                                      ['2', '2', '1', '', '', ''],
                                       ['', '', '', '', '', ''], ['Comment', '', '', '', '', ''],
                                       ['IMPACT World+ Footprint ' + self.version + chr(int("007F", 16)) +
-                                       'New categories:' + chr(int("007F", 16)) +
-                                       '- Resources services loss' + chr(int("007F", 16)) +
-                                       '- Resources services loss (adaptation)' + chr(int("007F", 16)) +
-                                       chr(int("007F", 16)) +
-                                       'Deleted categories:' + chr(int("007F", 16)) +
-                                       '- Mineral resource use' + chr(int("007F", 16)) +
-                                       '- Fossil and nuclear energy use' + chr(int("007F", 16)) +
-                                       chr(int("007F", 16)) +
                                        'Updated categories:' + chr(int("007F", 16)) +
                                        '- Human health (residual)' + chr(int("007F", 16)) +
                                        '- Ecosystem quality (residual)' + chr(int("007F", 16)) +
@@ -1333,6 +1309,12 @@ class Parse:
         self.logger.info("Loading marine acidification characterization factors...")
         mar_acid = pd.read_sql(sql='SELECT * FROM [CF - not regionalized - MarineAcidification]', con=self.conn)
 
+        self.logger.info("Loading fossil resources characterization factors...")
+        fossils = pd.read_sql(sql='SELECT * FROM [CF - not regionalized - FossilResources]', con=self.conn)
+
+        self.logger.info("Loading mineral resources characterization factors...")
+        minerals = pd.read_sql(sql='SELECT * FROM [CF - not regionalized - MineralResources]', con=self.conn)
+
         elem_flow_list = pd.read_sql(sql='SELECT * FROM [SI - Mapping with elementary flows]', con=self.conn)
 
         self.logger.info("Loading toxicity characterization factors...")
@@ -1368,7 +1350,7 @@ class Parse:
         terr_ecotoxicity = terr_ecotoxicity.rename(
             columns={'Name IW+': 'Elem flow name', 'CAS-Usetox2_Mar_Terr': 'CAS number'})
 
-        self.master_db = pd.concat([ionizing, mar_acid, toxicity, fw_ecotoxicity, mar_ecotoxicity, terr_ecotoxicity])
+        self.master_db = pd.concat([ionizing, mar_acid, fossils, minerals, toxicity, fw_ecotoxicity, mar_ecotoxicity, terr_ecotoxicity])
 
         self.master_db = clean_up_dataframe(self.master_db)
 
@@ -1383,8 +1365,8 @@ class Parse:
             - Climate change, human health, long term
             - Climate change, ecosystem quality, terrestrial ecosystem, short term
             - Climate change, ecosystem quality, terrestrial ecosystem, long term
-            - Climate change, ecosystem quality, marine ecosystem, short term
-            - Climate change, ecosystem quality, marine ecosystem, long term
+            - Climate change, ecosystem quality, marine ecosystem, short term (beta)
+            - Climate change, ecosystem quality, marine ecosystem, long term (beta)
 
         :return: updated master_db
         """
@@ -1486,10 +1468,10 @@ class Parse:
         GWP_damage_EQ_terr_long.loc[:, 'MP or Damage'] = 'Damage'
         GWP_damage_EQ_terr_long.loc[:, 'Native geographical resolution scale'] = 'Global'
 
-        # Climate change, ecosystem quality, marine ecosystem, short term
+        # Climate change, ecosystem quality, marine ecosystem, short term (beta)
         GWP_damage_EQ_mar_short = (fate_factors.iloc[:, :101].sum(1) * EQ_mar_effect_factor).reset_index()
         GWP_damage_EQ_mar_short.columns = ['Elem flow name', 'CAS number', 'CF value']
-        GWP_damage_EQ_mar_short.loc[:, 'Impact category'] = 'Climate change, ecosystem quality, marine ecosystem, short term'
+        GWP_damage_EQ_mar_short.loc[:, 'Impact category'] = 'Climate change, ecosystem quality, marine ecosystem, short term (beta)'
         GWP_damage_EQ_mar_short.loc[:, 'CF unit'] = 'PDF.m2.yr'
         GWP_damage_EQ_mar_short.loc[:, 'Compartment'] = 'Air'
         GWP_damage_EQ_mar_short.loc[:, 'Sub-compartment'] = '(unspecified)'
@@ -1497,10 +1479,10 @@ class Parse:
         GWP_damage_EQ_mar_short.loc[:, 'MP or Damage'] = 'Damage'
         GWP_damage_EQ_mar_short.loc[:, 'Native geographical resolution scale'] = 'Global'
 
-        # Climate change, ecosystem quality, marine ecosystem, long term
+        # Climate change, ecosystem quality, marine ecosystem, long term (beta)
         GWP_damage_EQ_mar_long = (fate_factors.iloc[:, 101:].sum(1) * EQ_mar_effect_factor).reset_index()
         GWP_damage_EQ_mar_long.columns = ['Elem flow name', 'CAS number', 'CF value']
-        GWP_damage_EQ_mar_long.loc[:, 'Impact category'] = 'Climate change, ecosystem quality, marine ecosystem, long term'
+        GWP_damage_EQ_mar_long.loc[:, 'Impact category'] = 'Climate change, ecosystem quality, marine ecosystem, long term (beta)'
         GWP_damage_EQ_mar_long.loc[:, 'CF unit'] = 'PDF.m2.yr'
         GWP_damage_EQ_mar_long.loc[:, 'Compartment'] = 'Air'
         GWP_damage_EQ_mar_long.loc[:, 'Sub-compartment'] = '(unspecified)'
@@ -2017,15 +1999,15 @@ class Parse:
         Loading the CFs for the resources services loss adaptation impact category.
 
         Concerned impact categories:
-            - Resources services loss
-            - Resources services loss adaptation
+            - Resources services deficit (beta)
+            - Adaptation to resources services loss (beta)
 
         :return: updated master_db
         """
 
         # ----------------------------- RESEDA ----------------------------------------
 
-        data = pd.read_sql('SELECT * FROM [CF - not regionalized - ResourcesServicesLoss]', self.conn)
+        data = pd.read_sql('SELECT * FROM [CF - not regionalized - ResourcesServicesDeficit]', self.conn)
         data.columns = ['Elem flow name', 'CAS number', 'CF value', 'Status', 'Elem flow unit']
 
         # uncomment if you want to remove isotopes
@@ -2033,7 +2015,7 @@ class Parse:
         data = data.drop('Status', axis=1)
 
         # add metadata
-        data.loc[:, 'Impact category'] = 'Resources services loss'
+        data.loc[:, 'Impact category'] = 'Resources services deficit (beta)'
         data.loc[:, 'CF unit'] = 'kg deficit'
         data.loc[:, 'MP or Damage'] = 'Midpoint'
         data.loc[:, 'Native geographical resolution scale'] = 'Not regionalized'
@@ -2081,7 +2063,7 @@ class Parse:
         data = data.drop('Status', axis=1)
 
         # add metadata
-        data.loc[:, 'Impact category'] = 'Resources services loss (adaptation)'
+        data.loc[:, 'Impact category'] = 'Adaptation to resources services loss (beta)'
         data.loc[:, 'CF unit'] = 'MJ'
         data.loc[:, 'MP or Damage'] = 'Midpoint'
         data.loc[:, 'Native geographical resolution scale'] = 'Not regionalized'
@@ -4064,6 +4046,7 @@ class Parse:
                              'Water availability, freshwater ecosystem',
                              'Water availability, human health',
                              'Water scarcity']}
+
         # if an impact category already has specified groundwater flows, use that value instead of the unspecified subcomp value
         already_has_groundwater_values = set(
             water_comp[water_comp['Sub-compartment'] == 'groundwater']['Impact category'])
@@ -4137,8 +4120,11 @@ class Parse:
                                     'Native geographical resolution scale'], dropna=False).sum().reset_index()
                 # rename the subcomp
                 df.loc[:, 'Sub-compartment'] = subcomp
-                # reimplement the "long term" in the imapct category name
-                df.loc[:, 'Impact category'] = [i + ', long term' for i in df.loc[:, 'Impact category']]
+                # reimplement the "long term" in the impact category name
+                if cat == 'Climate change, ecosystem quality, marine ecosystem':#TODO remove whenever not beta anymore
+                    df.loc[:, 'Impact category'] = [i + ', long term (beta)' for i in df.loc[:, 'Impact category']]
+                else:
+                    df.loc[:, 'Impact category'] = [i + ', long term' for i in df.loc[:, 'Impact category']]
 
                 # concatenate new CFs to master_db
                 self.master_db = pd.concat([self.master_db, df])
@@ -4393,8 +4379,8 @@ class Parse:
             df.loc[df.loc[:, 'Impact category'] == 'Climate change, long term', 'CF value'] = 0
             df.loc[df.loc[:, 'Impact category'] == 'Climate change, ecosystem quality, terrestrial ecosystem, long term', 'CF value'] = -(
                 df.loc[df.loc[:, 'Impact category'] == 'Climate change, ecosystem quality, terrestrial ecosystem, short term', 'CF value']).iloc[0]
-            df.loc[df.loc[:,'Impact category'] == 'Climate change, ecosystem quality, marine ecosystem, long term', 'CF value'] = - (
-                df.loc[df.loc[:,'Impact category'] == 'Climate change, ecosystem quality, marine ecosystem, short term', 'CF value']).iloc[0]
+            df.loc[df.loc[:,'Impact category'] == 'Climate change, ecosystem quality, marine ecosystem, long term (beta)', 'CF value'] = - (
+                df.loc[df.loc[:,'Impact category'] == 'Climate change, ecosystem quality, marine ecosystem, short term (beta)', 'CF value']).iloc[0]
             df.loc[df.loc[:, 'Impact category'] == 'Climate change, human health, long term', 'CF value'] = -(
                 df.loc[df.loc[:, 'Impact category'] == 'Climate change, human health, short term', 'CF value']).iloc[0]
             if origin_flow in ['Carbon dioxide, fossil', 'Methane, fossil', 'Carbon monoxide, fossil']:
@@ -4517,7 +4503,7 @@ class Parse:
     def link_to_ecoinvent(self):
         """
         Function that links names of substance from IW+ to the names of ecoinvent.
-        :return: self.ei35_iw, self.ei36_iw, self.ei371_iw, self.ei38_iw
+        :return: e.g., self.ei310_iw, self.ei311_iw, etc.
         """
 
         latest_ei_version = '3.12'
@@ -4562,7 +4548,7 @@ class Parse:
             # CFs for resources "in ground" should only be for Fossil and nuclear energy use
             minerals = [i for i in ei_iw_db.index if (', in ground' in ei_iw_db.loc[i, 'Elem flow name'] and
                                                       ei_iw_db.loc[i, 'Impact category'] not in [
-                                                          'Fossil and nuclear energy use'] and
+                                                          'Fossil and nuclear energy use', 'Mineral resources use'] and
                                                       'Water' not in ei_iw_db.loc[i, 'Elem flow name'])]
             ei_iw_db.drop(minerals, axis=0, inplace=True)
             # ions are only available in Water compartments! So remove those ions in air that don't make any sense.
@@ -4622,6 +4608,25 @@ class Parse:
                           ei_iw_db.loc[i, 'Elem flow unit'] == 'm2.yr'], 'Elem flow unit'] = 'm2*year'
 
             # ---------- Odd cases ------------
+
+            # some weird subcomps for energy flows
+            energies = ['Energy, potential (in hydropower reservoir), converted',
+                        'Energy, solar, converted',
+                        'Energy, kinetic (in wind), converted',
+                        'Energy, gross calorific value, in biomass, primary forest',
+                        'Energy, gross calorific value, in biomass',
+                        'Energy, geothermal, converted']
+            subcomps_to_add = ['in air', 'in water', 'biotic']
+            # does not make sense but it does not matter because it's corrected by linking to ecoinvent afterwards
+            for energy in energies:
+                for subcomp in subcomps_to_add:
+                    add = pd.DataFrame(
+                        ['Fossil and nuclear energy use', 'MJ deprived', 'natural resource', subcomp, energy, None, 0.0,
+                         'MJ', 'Midpoint', 'Global'],
+                        ['Impact category', 'CF unit', 'Compartment', 'Sub-compartment', 'Elem flow name', 'CAS number',
+                         'CF value', 'Elem flow unit', 'MP or Damage', 'Native geographical resolution scale']).T
+                    ei_iw_db = pd.concat([ei_iw_db, add])
+                    ei_iw_db = clean_up_dataframe(ei_iw_db)
 
             # fix comp/subcomp of pesky biogenic carbon elementary flows
             ei_iw_db = ei_iw_db.drop(
@@ -4753,6 +4758,12 @@ class Parse:
             db.loc[db['Elem flow name'] == 'Water, agri', 'Elem flow name'] = 'Water/m3, agri'
             db.loc[db['Elem flow name'] == 'Water, non-agri', 'Elem flow name'] = 'Water/m3, non-agri'
 
+            # need an unspecified subcomp for mineral resource uses, for some databases in SP (e.g., Industry2.0)
+            df = db.loc[
+                [i for i in db.index if db.loc[i, 'Impact category'] == 'Mineral resources use']].copy()
+            df['Sub-compartment'] = '(unspecified)'
+            db = clean_up_dataframe(pd.concat([db, df]))
+
             # fix comp/subcomp of pesky biogenic carbon elementary flows
             db = db.drop(
                 db.loc[db.loc[:, 'Elem flow name'].isin(['Carbon dioxide, non-fossil, resource correction',
@@ -4772,6 +4783,42 @@ class Parse:
             db = db.drop(db.loc[db.loc[:, 'Elem flow name'] == 'Phosphorus-32'].index)
 
             # --------------------------- UNIT CONVERSIONS ----------------------------------
+
+            mj_flows = sp.loc[sp.loc[:, 'Name'].str.contains('MJ'), 'Name']
+            for flow in mj_flows:
+                db.loc[db.loc[:, 'Elem flow name'] == flow, 'CF value'] = float(
+                    flow.split(' MJ')[0].split(', ')[-1])
+
+            gj_flows = sp.loc[sp.loc[:, 'Name'].str.contains('GJ'), 'Name']
+            for flow in gj_flows:
+                if 'IN-GJ' not in flow:
+                    db.loc[[i for i in db.index if db.loc[i, 'Elem flow name'] == flow and
+                            db.loc[i, 'Impact category'] == 'Fossil and nuclear energy use'], 'CF value'] = float(
+                        flow.split(' GJ')[0].split(', ')[-1]) * 1000
+
+            # ensure units are coherent for energy flows
+            db.loc[db.loc[:, 'Elem flow name'].isin([i for i in mj_flows if 'per kg' in i]), 'Elem flow unit'] = 'kg'
+            db.loc[db.loc[:, 'Elem flow name'].isin([i for i in mj_flows if 'per m3' in i]), 'Elem flow unit'] = 'm3'
+
+            # some other flows from SP that require conversions because of units
+            new_flows = {
+                'Gas, natural/kg': 'Gas, natural/m3',
+                'Gas, mine, off-gas, process, coal mining/kg': 'Gas, mine, off-gas, process, coal mining/m3',
+                'Wood, unspecified, standing/kg': 'Wood, unspecified, standing/m3',
+                'Wood (16.9 MJ/kg)': 'Wood, unspecified, standing/m3'
+            }
+            for flow in new_flows:
+                if 'Gas' in flow:
+                    density = 0.8  # kg/m3 (https://www.engineeringtoolbox.com/gas-density-d_158.html)
+                elif 'Wood' in flow:
+                    density = 600  # kg/m3 (https://www.engineeringtoolbox.com/wood-density-d_40.html)
+
+                df = db[db['Elem flow name'] == new_flows[flow]].copy()
+                df.loc[:, 'Elem flow name'] = flow
+                df.loc[:, 'Elem flow unit'] = 'kg'
+                df.loc[:, 'CF value'] /= density
+                db = pd.concat([db, df])
+            db = clean_up_dataframe(db)
 
             # some water flows are in kilograms instead of cubic meters...
             problems = ['Water',
@@ -4819,10 +4866,10 @@ class Parse:
                    'Climate change, ecosystem quality, terrestrial ecosystem, long term', 'Impact category'] = \
                 'Climate change, EQ, terr, LT'
             db.loc[db.loc[:, 'Impact category'] ==
-                   'Climate change, ecosystem quality, marine ecosystem, short term', 'Impact category'] = \
+                   'Climate change, ecosystem quality, marine ecosystem, short term (beta)', 'Impact category'] = \
                 'Climate change, EQ, mar, ST'
             db.loc[db.loc[:, 'Impact category'] ==
-                   'Climate change, ecosystem quality, marine ecosystem, long term', 'Impact category'] = \
+                   'Climate change, ecosystem quality, marine ecosystem, long term (beta)', 'Impact category'] = \
                 'Climate change, EQ, mar, LT'
             # for consistency, also change the human health endpoint categories' names
             db.loc[db.loc[:, 'Impact category'] ==
@@ -4856,16 +4903,16 @@ class Parse:
                     db.loc[db.loc[:, 'Impact category'].str.contains(
                         'Climate change, ecosystem quality, terrestrial ecosystem, long term'), 'Impact category']]
                 db.loc[db.loc[:, 'Impact category'].str.contains(
-                    'Climate change, ecosystem quality, marine ecosystem, short term'), 'Impact category'] = [
-                    'Climate change, EQ, mar, ST' + i.split('Climate change, ecosystem quality, marine ecosystem, short term')[1] for i in
+                    'Climate change, ecosystem quality, marine ecosystem, short term (beta)'), 'Impact category'] = [
+                    'Climate change, EQ, mar, ST' + i.split('Climate change, ecosystem quality, marine ecosystem, short term (beta)')[1] for i in
                     db.loc[db.loc[:, 'Impact category'].str.contains(
-                        'Climate change, ecosystem quality, marine ecosystem, short term'), 'Impact category']]
+                        'Climate change, ecosystem quality, marine ecosystem, short term (beta)'), 'Impact category']]
 
                 db.loc[db.loc[:, 'Impact category'].str.contains(
-                    'Climate change, ecosystem quality, marine ecosystem, long term'), 'Impact category'] = [
-                    'Climate change, EQ, mar, LT' + i.split('Climate change, ecosystem quality, marine ecosystem, long term')[1] for i in
+                    'Climate change, ecosystem quality, marine ecosystem, long term (beta)'), 'Impact category'] = [
+                    'Climate change, EQ, mar, LT' + i.split('Climate change, ecosystem quality, marine ecosystem, long term (beta)')[1] for i in
                     db.loc[db.loc[:, 'Impact category'].str.contains(
-                        'Climate change, ecosystem quality, marine ecosystem, long term'), 'Impact category']]
+                        'Climate change, ecosystem quality, marine ecosystem, long term (beta)'), 'Impact category']]
 
                 db.loc[db.loc[:, 'Impact category'].str.contains(
                     'Climate change, human health, short term'), 'Impact category'] = [
@@ -4921,6 +4968,34 @@ class Parse:
             db.loc[db.loc[:, 'Elem flow unit'] == 'Bq', 'Elem flow unit'] = 'kBq'
             db.loc[db.loc[:, 'Elem flow unit'] == 'm2.yr', 'Elem flow unit'] = 'm2*a'
             db.loc[db.loc[:, 'Elem flow unit'] == 'kgy', 'Elem flow unit'] = 'kg*a'
+
+            mj_flows = olca.loc[olca.loc[:, 'Name'].str.contains('MJ'), 'Name']
+            for flow in mj_flows:
+                db.loc[db.loc[:, 'Elem flow name'] == flow, 'CF value'] = float(
+                    flow.split(' MJ')[0].split(', ')[-1])
+
+            gj_flows = olca.loc[olca.loc[:, 'Name'].str.contains('GJ'), 'Name']
+            for flow in gj_flows:
+                if 'IN-GJ' not in flow:
+                    db.loc[[i for i in db.index if db.loc[i, 'Elem flow name'] == flow and
+                            db.loc[i, 'Impact category'] == 'Fossil and nuclear energy use'], 'CF value'] = float(
+                        flow.split(' GJ')[0].split(', ')[-1]) * 1000
+
+            # some other flows from oLCA that require conversions because of units
+            new_flows = {
+                'Gas, natural/kg': 'Gas, natural/m3',
+                'Gas, mine, off-gas, process, coal mining/kg': 'Gas, mine, off-gas, process, coal mining/m3'
+            }
+            for flow in new_flows:
+                if 'Gas' in flow:
+                    density = 0.8  # kg/m3 (https://www.engineeringtoolbox.com/gas-density-d_158.html)
+
+                df = db[db['Elem flow name'] == new_flows[flow]].copy()
+                df.loc[:, 'Elem flow name'] = flow
+                df.loc[:, 'Elem flow unit'] = 'kg'
+                df.loc[:, 'CF value'] /= density
+                db = pd.concat([db, df])
+            db = clean_up_dataframe(db)
 
             # some water flows are in kilograms instead of cubic meters...
             problems = ['Water/kg',
@@ -5132,6 +5207,14 @@ class Parse:
 
             # EXIOBASE land occupation in km2 while IW in m2, so we convert
             C.loc[:, [i for i in C.columns if 'Land' in i[0]]] *= 1000000
+            # EXIOBASE energy flows in TJ while IW in MJ, so we convert
+            self.exio_iw.loc[:, 'Fossil and nuclear energy use'] = self.exio_iw.loc[:,
+                                                                   'Fossil and nuclear energy use'].values * 1000000
+            # EXIOBASE mineral flows in kt while IW in kg, so we convert
+            self.exio_iw.loc[:, 'Mineral resources use'] = self.exio_iw.loc[:, 'Mineral resources use'].values * 1000000
+
+            self.special_case_minerals_exiobase()
+
             # EXIOBASE water flows in Mm3 while IW in m3, so we convert
             C.loc[:, [i for i in C.columns if 'Water' in i[0]]] *= 1000000
             # more common to have impact categories as index
@@ -5140,13 +5223,219 @@ class Parse:
             C.index = [(i[0] + ' (' + i[1] + ')') for i in C.index]
             # HFC and PFC linked to "carbon dioxide" but should not impact marine acidification
             C.loc[['Marine acidification, long term (PDF.m2.yr)', 'Marine acidification, short term (PDF.m2.yr)',
-                   'Resources services loss (adaptation) (MJ)'],
+                   'Adaptation to resources services loss (beta) (MJ)'],
                   ['HFC - air', 'PFC - air']] = 0
 
             if exio_version == '3.8':
                 self.exio_iw_38 = C.copy()
             elif exio_version == '3.9':
                 self.exio_iw_39 = C.copy()
+
+    def special_case_minerals_exiobase(self):
+        """
+        Minerals in exiobase are accounted for as kilograms of ore, while IW+ operates with kilograms of metal. This
+        function is here to take extra information from exiobase, such as average ore content, to create corresponding
+        CFs for ores of exiobase.
+        :return:
+        """
+
+        # loading the file with metal content information (obtained from the EXIOBASE team)
+        metal_concentration_exiobase = pd.read_csv(pkg_resources.resource_filename(
+            __name__, 'Data/metadata/exiobase/All_factors_applied_to_Exiobase_metals_minerals.csv'), sep=';')
+
+        # extracting the average amount of metal per ore from this file
+        average_gold_per_ore = metal_concentration_exiobase.loc[
+            [i for i in metal_concentration_exiobase.index if
+             'Gold' in metal_concentration_exiobase.CommodityName[i] and
+             'Global average\r' in metal_concentration_exiobase.UsedComment[i]]].Concentration.mean()
+        average_lead_per_ore = metal_concentration_exiobase.loc[
+            [i for i in metal_concentration_exiobase.index if
+             'Lead' in metal_concentration_exiobase.CommodityName[i]]].Concentration.mean()
+        average_copper_per_ore = metal_concentration_exiobase.loc[
+            [i for i in metal_concentration_exiobase.index if
+             'opper' in metal_concentration_exiobase.CommodityName[i]]].Concentration.mean()
+        average_silver_per_ore = metal_concentration_exiobase.loc[
+            [i for i in metal_concentration_exiobase.index if
+             'Silver' in metal_concentration_exiobase.CommodityName[i] and
+             'Global average\r' in metal_concentration_exiobase.UsedComment[i]]].Concentration.mean()
+        average_iron_per_ore = metal_concentration_exiobase.loc[
+            [i for i in metal_concentration_exiobase.index if
+             'Iron' in metal_concentration_exiobase.CommodityName[i] and
+             'Global average\r' in metal_concentration_exiobase.UsedComment[i]]].Concentration.mean()
+        average_nickel_per_ore = metal_concentration_exiobase.loc[
+            [i for i in metal_concentration_exiobase.index if
+             'Nickel' in metal_concentration_exiobase.CommodityName[i] and
+             'Global average\r' in metal_concentration_exiobase.UsedComment[i]]].Concentration.mean()
+        average_zinc_per_ore = metal_concentration_exiobase.loc[
+            [i for i in metal_concentration_exiobase.index if
+             'Zinc' in metal_concentration_exiobase.CommodityName[i]]].Concentration.mean()
+        average_pgm_per_ore = metal_concentration_exiobase.loc[
+            [i for i in metal_concentration_exiobase.index if
+             'Platinum-group (PGM)' in metal_concentration_exiobase.CommodityName[i] and
+             'By-products of other ore' in metal_concentration_exiobase.UsedComment[i]]].UsedFactor.mean()
+
+        df = self.master_db_carbon_neutrality.copy()
+        df = df.set_index(['Elem flow name', 'Compartment', 'Sub-compartment'])
+
+        self.exio_iw.loc['Mineral resources use (kg deprived)', 'Domestic Extraction Used - Metal Ores - Gold ores'] = (
+                average_gold_per_ore * df.loc[('Gold', 'Raw', 'in ground'), 'CF value'].iloc[0] * 1000000)
+        self.exio_iw.loc[
+            'Mineral resources use (kg deprived)', 'Unused Domestic Extraction - Metal Ores - Gold ores'] = (
+                average_gold_per_ore * df.loc[('Gold', 'Raw', 'in ground'), 'CF value'].iloc[0] * 1000000)
+        self.exio_iw.loc['Mineral resources use (kg deprived)', 'Domestic Extraction Used - Metal Ores - Lead ores'] = (
+                average_lead_per_ore * df.loc[('Lead', 'Raw', 'in ground'), 'CF value'].iloc[0] * 1000000)
+        self.exio_iw.loc[
+            'Mineral resources use (kg deprived)', 'Unused Domestic Extraction - Metal Ores - Lead ores'] = (
+                average_lead_per_ore * df.loc[('Lead', 'Raw', 'in ground'), 'CF value'].iloc[0] * 1000000)
+        self.exio_iw.loc[
+            'Mineral resources use (kg deprived)', 'Domestic Extraction Used - Metal Ores - Copper ores'] = (
+                average_copper_per_ore * df.loc[('Copper', 'Raw', 'in ground'), 'CF value'].iloc[0] * 1000000)
+        self.exio_iw.loc[
+            'Mineral resources use (kg deprived)', 'Unused Domestic Extraction - Metal Ores - Copper ores'] = (
+                average_copper_per_ore * df.loc[('Copper', 'Raw', 'in ground'), 'CF value'].iloc[0] * 1000000)
+        self.exio_iw.loc[
+            'Mineral resources use (kg deprived)', 'Domestic Extraction Used - Metal Ores - Silver ores'] = (
+                average_silver_per_ore * df.loc[('Silver', 'Raw', 'in ground'), 'CF value'].iloc[0] * 1000000)
+        self.exio_iw.loc[
+            'Mineral resources use (kg deprived)', 'Unused Domestic Extraction - Metal Ores - Silver ores'] = (
+                average_silver_per_ore * df.loc[('Silver', 'Raw', 'in ground'), 'CF value'].iloc[0] * 1000000)
+        self.exio_iw.loc['Mineral resources use (kg deprived)', 'Domestic Extraction Used - Metal Ores - Iron ores'] = (
+                average_iron_per_ore * df.loc[('Iron', 'Raw', 'in ground'), 'CF value'].iloc[0] * 1000000)
+        self.exio_iw.loc[
+            'Mineral resources use (kg deprived)', 'Unused Domestic Extraction - Metal Ores - Iron ores'] = (
+                average_iron_per_ore * df.loc[('Iron', 'Raw', 'in ground'), 'CF value'].iloc[0] * 1000000)
+        self.exio_iw.loc[
+            'Mineral resources use (kg deprived)', 'Domestic Extraction Used - Metal Ores - Nickel ores'] = (
+                average_nickel_per_ore * df.loc[('Nickel', 'Raw', 'in ground'), 'CF value'].iloc[0] * 1000000)
+        self.exio_iw.loc[
+            'Mineral resources use (kg deprived)', 'Unused Domestic Extraction - Metal Ores - Nickel ores'] = (
+                average_nickel_per_ore * df.loc[('Nickel', 'Raw', 'in ground'), 'CF value'].iloc[0] * 1000000)
+        self.exio_iw.loc['Mineral resources use (kg deprived)', 'Domestic Extraction Used - Metal Ores - Zinc ores'] = (
+                average_zinc_per_ore * df.loc[('Zinc', 'Raw', 'in ground'), 'CF value'].iloc[0] * 1000000)
+        self.exio_iw.loc[
+            'Mineral resources use (kg deprived)', 'Unused Domestic Extraction - Metal Ores - Zinc ores'] = (
+                average_zinc_per_ore * df.loc[('Zinc', 'Raw', 'in ground'), 'CF value'].iloc[0] * 1000000)
+        self.exio_iw.loc['Mineral resources use (kg deprived)', 'Domestic Extraction Used - Metal Ores - PGM ores'] = (
+                average_pgm_per_ore * df.loc[('Platinum', 'Raw', 'in ground'), 'CF value'].iloc[0] * 1000000)
+        self.exio_iw.loc[
+            'Mineral resources use (kg deprived)', 'Unused Domestic Extraction - Metal Ores - PGM ores'] = (
+                average_pgm_per_ore * df.loc[('Platinum', 'Raw', 'in ground'), 'CF value'].iloc[0] * 1000000)
+
+        # loading the file describing which metals EXIOBASE includes in their other non-ferrous metals flow
+        other_categories_composition = pd.read_excel(pkg_resources.resource_filename(
+            __name__, 'Data/mappings/exiobase/Mineral_extension_exio_detailed_2016.xlsx'))
+
+        # identify non ferrous metals among the list of mineral resources
+        other_non_ferrous_metals_index = [i for i in other_categories_composition.index if
+                                          'Other non-ferrous metal ores' in
+                                          other_categories_composition.PhysicalTypeName[i]]
+        # delete duplicated other non ferrous metals identified
+        other_non_ferrous_metals = other_categories_composition.loc[other_non_ferrous_metals_index].groupby(
+            other_categories_composition.CommodityName).head(1)
+        # make a dataframe of it
+        other_non_ferrous_metals = pd.DataFrame(0, other_non_ferrous_metals.CommodityName,
+                                                ['Metal content', 'Ore abundance'])
+
+        # iterate through the non-ferrous metals
+        for metal in other_non_ferrous_metals.index:
+            # if we can find a global average value pick it
+            try:
+                average_metal_content = metal_concentration_exiobase.loc[
+                    [i for i in metal_concentration_exiobase.index if
+                     metal in metal_concentration_exiobase.CommodityName[i] and
+                     'Global average' in metal_concentration_exiobase.UsedComment[i]]].Concentration.mean()
+            except TypeError:
+                pass
+            # if we didn't have a match
+            if np.isnan(average_metal_content):
+                # try with By-product of other ores
+                try:
+                    average_metal_content = metal_concentration_exiobase.loc[
+                        [i for i in metal_concentration_exiobase.index if
+                         metal in metal_concentration_exiobase.CommodityName[i] and
+                         'By-product of other ores' in metal_concentration_exiobase.UsedComment[i]]].UsedFactor.mean()
+                except TypeError:
+                    pass
+            # if for whatever reason we have a completely ridiculous concentration drop it
+            if average_metal_content > 0.5:
+                average_metal_content = None
+            other_non_ferrous_metals.loc[metal, 'Metal content'] = average_metal_content
+
+        # use 0.001 as default value
+        other_non_ferrous_metals = other_non_ferrous_metals.fillna(0.001)
+
+        abundance = pd.read_excel(pkg_resources.resource_filename(
+            __name__, 'Data/metadata/exiobase/USGS_extraction_volumes.xlsx'), 'metals')
+        abundance.set_index('Unnamed: 0', inplace=True)
+        abundance /= abundance.sum()
+        assert (other_non_ferrous_metals.index == abundance.index).all()
+        other_non_ferrous_metals.loc[:, 'Ore abundance'] = abundance.values
+
+        other_metal_concordance = pd.read_excel(pkg_resources.resource_filename(
+            __name__, 'Data/mappings/exiobase/other_metals_matching.xlsx')).drop('comments', axis=1)
+        other_metal_concordance.set_index('Unnamed: 0', inplace=True)
+        other_metal_concordance.dropna(inplace=True)
+
+        for flow in other_metal_concordance.index:
+            CF_flow = self.master_db_carbon_neutrality.loc[self.master_db_carbon_neutrality['Elem flow name'] ==
+                                                           other_metal_concordance.loc[flow].iloc[0]].loc[:,
+                      ['Impact category', 'CF unit', 'CF value', 'Compartment', 'Sub-compartment']]
+            CFs = pd.pivot(CF_flow, values='CF value', index=['Compartment', 'Sub-compartment'],
+                           columns=['Impact category', 'CF unit']).loc[('Raw', 'in ground')].fillna(0)
+            other_non_ferrous_metals.loc[flow, 'CF'] = CFs.loc['Mineral resources use'].iloc[0]
+
+        CF = (other_non_ferrous_metals.loc[:, 'Metal content'] * other_non_ferrous_metals.loc[:,
+                                                                 'Ore abundance'] * other_non_ferrous_metals.loc[:,
+                                                                                    'CF']).sum()
+
+        self.exio_iw.loc['Mineral resources use (kg deprived)',
+                         'Domestic Extraction Used - Metal Ores - Other non-ferrous metal ores'] = CF * 1000000
+        self.exio_iw.loc['Mineral resources use (kg deprived)',
+                         'Unused Domestic Extraction - Metal Ores - Other non-ferrous metal ores'] = CF * 1000000
+
+        # first we identify which mineral are part of "other minerals"
+        other_minerals = other_categories_composition.loc[
+            [i for i in other_categories_composition.index if
+             'Other minerals' in other_categories_composition.PhysicalTypeName[i]]].groupby(
+            other_categories_composition.CommodityName).head(1).drop(
+            ['PhysicalTypeName', 'ProductTypeCode', 'CountryCode', 'ISOAlpha2', 'AccountingYear'], axis=1)
+        other_minerals.index = other_minerals.CommodityName
+
+        other_minerals.loc['Sillica sand (quartzsand)', 'CF'] = \
+            df.loc[('Sand, quartz', 'Raw', 'in ground'), 'CF value'].iloc[0]
+        other_minerals.loc['Feldspar', 'CF'] = df.loc[('Feldspar', 'Raw', 'in ground'), 'CF value'].iloc[0]
+        other_minerals.loc['Graphite, natural', 'CF'] = \
+            df.loc[('Metamorphous rock, graphite containing', 'Raw', 'in ground'), 'CF value'].iloc[0]
+        other_minerals.loc['Magnesite', 'CF'] = df.loc[('Magnesite', 'Raw', 'in ground'), 'CF value'].iloc[0]
+        other_minerals.loc['Talc (steatite, soapstone, pyrophyllite)', 'CF'] = \
+            df.loc[('Talc', 'Raw', 'in ground'), 'CF value'].iloc[0]
+        other_minerals.loc['Diatomite', 'CF'] = df.loc[('Diatomite', 'Raw', 'in ground'), 'CF value'].iloc[0]
+        other_minerals.loc['Vermiculite', 'CF'] = df.loc[('Vermiculite', 'Raw', 'in ground'), 'CF value'].iloc[0]
+        other_minerals.loc['Perlite', 'CF'] = df.loc[('Perlite', 'Raw', 'in ground'), 'CF value'].iloc[0]
+        # arithmetic average because it does not matter (both are at 0)
+        other_minerals.loc['Igneous rock (basalt, basaltic lava, diabase, granite, porphyry, etc.)',
+                           'CF'] = (df.loc[('Basalt', 'Raw', 'in ground'), 'CF value'].iloc[0] +
+                                    df.loc[('Granite', 'Raw', 'in ground'), 'CF value'].iloc[0]) / 2
+        other_minerals.loc['Peat for agricultural use', 'CF'] = df.loc[('Peat', 'Raw', 'in ground'), 'CF value'].iloc[0]
+        other_minerals.loc['Strontium minerals', 'CF'] = df.loc[('Strontium', 'Raw', 'in ground'), 'CF value'].iloc[0]
+        other_minerals.loc['Abrasives, natural (puzzolan, pumice, volcanic cinder etc.)', 'CF'] = \
+            df.loc[('Pumice', 'Raw', 'in ground'), 'CF value'].iloc[0]
+        other_minerals.loc['Calcite', 'CF'] = df.loc[('Calcite', 'Raw', 'in ground'), 'CF value'].iloc[0]
+
+        abundance_minerals = pd.read_excel(pkg_resources.resource_filename(
+            __name__, 'Data/metadata/exiobase/USGS_extraction_volumes.xlsx'), 'minerals')
+
+        # Include those in the dataframe containing all intel on other minerals
+        other_minerals = pd.concat([other_minerals, abundance_minerals.set_index('CommodityName')], axis=1)
+        # weighted average
+        other_minerals.loc[:, 'Mineral extracted (kg)'] /= other_minerals.loc[:, 'Mineral extracted (kg)'].sum()
+        # the CF for the aggregated mineral flow is thus:
+        new_CF = (other_minerals.loc[:, 'CF'] * other_minerals.loc[:, 'Mineral extracted (kg)']).sum()
+
+        self.exio_iw.loc['Mineral resources use (kg deprived)',
+                         'Domestic Extraction Used - Non-Metallic Minerals - Other minerals'] = new_CF * 1000000
+        self.exio_iw.loc['Mineral resources use (kg deprived)',
+                         'Unused Domestic Extraction - Non-Metallic Minerals - Other minerals'] = new_CF * 1000000
 
     def get_simplified_versions(self):
 
@@ -5608,8 +5897,7 @@ def produce_simplified_version(complete_dataframe):
     Method producing the simplified version of IW+ in which there are only 5 indicators:
     - Climate change, short term (=GWP100)
     - Water scarcity
-    - Resources services loss
-    - Resources services loss (adaptation)
+    - Fossil resources
     - Remaining Human health damage
     - Remaining Ecosystem quality damage
     The damage impacts of climate change and water use on the Human health and Ecosystem quality area of protections
@@ -5625,13 +5913,14 @@ def produce_simplified_version(complete_dataframe):
     midpoint_drop = ['Climate change, long term', 'Freshwater acidification', 'Freshwater ecotoxicity',
                      'Freshwater eutrophication', 'Human toxicity cancer', 'Human toxicity non-cancer',
                      'Ionizing radiations', 'Land occupation, biodiversity', 'Land transformation, biodiversity',
-                     'Marine eutrophication', 'Ozone layer depletion', 'Particulate matter formation',
-                     'Photochemical ozone formation', 'Physical effects on biota', 'Terrestrial acidification']
+                     'Marine eutrophication', 'Mineral resources use', 'Ozone layer depletion', 'Particulate matter formation',
+                     'Photochemical ozone formation', 'Physical effects on biota', 'Terrestrial acidification',
+                     'Resources services deficit (beta)', 'Adaptation to resources services loss (beta)']
     # endpoint categories excluded from simplified version
     endpoint_drop = ['Climate change, ecosystem quality, terrestrial ecosystem, long term',
                      'Climate change, ecosystem quality, terrestrial ecosystem, short term',
-                     'Climate change, ecosystem quality, marine ecosystem, long term',
-                     'Climate change, ecosystem quality, marine ecosystem, short term',
+                     'Climate change, ecosystem quality, marine ecosystem, long term (beta)',
+                     'Climate change, ecosystem quality, marine ecosystem, short term (beta)',
                      'Climate change, human health, long term', 'Climate change, human health, short term',
                      'Water availability, freshwater ecosystem', 'Water availability, human health',
                      'Water availability, terrestrial ecosystem', 'Marine ecotoxicity, long term',
@@ -5712,9 +6001,7 @@ def produce_simplified_version(complete_dataframe):
     simplified_version.loc[[i for i in simplified_version.index if simplified_version.loc[i, 'Impact category'] ==
                             'Water scarcity'], 'Impact category'] = 'Water footprint - Scarcity'
     simplified_version.loc[[i for i in simplified_version.index if simplified_version.loc[i, 'Impact category'] ==
-                            'Resources services loss'], 'Impact category'] = 'Resources services loss'
-    simplified_version.loc[[i for i in simplified_version.index if simplified_version.loc[i, 'Impact category'] ==
-                            'Resources services loss adaptation'], 'Impact category'] = 'Resources services loss adaptation'
+                            'Fossil and nuclear energy use'], 'Impact category'] = 'Energetic resource depletion'
 
     return simplified_version
 
