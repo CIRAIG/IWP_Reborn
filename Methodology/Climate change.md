@@ -119,7 +119,7 @@ a total of 3.69e7 DALY/(K.yr). The weight of each risk and the exact total value
 The effect factor for Ecosystem quality is based on Potentially Affected Fraction of species (PAF). A species is 
 considered affected whenever their niche habitat temperature is exceeded for 5 consecutive years. This definition is
 based on the article of Trisos et al. 2020 (https://doi.org/10.1038/s41586-020-2189-9) which is also used by 
-Iordan-Vasquez et al. 2023 (https://doi.org/10.1016/j.resconrec.2023.107159). The latter is the basis of the equivalent
+Iordan et al. 2023 (https://doi.org/10.1016/j.resconrec.2023.107159). The latter is the basis of the equivalent
 climate change ecosystem quality indicator in the GLAM methodology.
 
 ##### 3.2.2.2.1 Data sources
@@ -128,22 +128,22 @@ entire geographic range of a species, between 1850 and 2005" (Trisos et al. 2020
 temperatures (at grid level across the globe) and derived a maximum out of these 155 values. Crossing these local
 temperatures with the locations where each species resides, the niche temperature of each species was defined. Same 
 species living in different places thus share the same niche temperature. 
-Trisos 2020 provides these temperatures for 30,652 species across 9 taxa. 4 taxa living on land: amphibians, birds, 
+Trisos (2020) provides these temperatures for 30,652 species across 9 taxa. 4 taxa living on land: amphibians, birds, 
 mammals, reptiles and 5 taxa living in the ocean: benthic marine invertebrates, corals & seagrasses, marine fishes, 
 marine mammals and marine reptiles.
 
-The distribution of species (where each species resides) is taken from the data of Iordan-Vasquez et al. (2023). The
+The distribution of species (where each species resides) is taken from the data of Iordan et al. (2023). The
 data is curated as 100km x 100km grid cells. This covers 26,648 species: birds (n = 7177), terrestrial mammals (n = 5160), 
 terrestrial reptiles (n = 4599), amphibians (n = 5998), marine mammals (n = 117), marine reptiles (n = 61), 
 marine fish (n = 1822), benthic marine invertebrates (n = 916), and corals and seagrasses (n = 798). The data originally
 comes from the International Union for Conservation of Nature (IUCN) and BirdLife International.
 Note that marine species living deeper than 200m were excluded from the data of Trisos. Literature 
 (https://doi.org/10.1016/j.cub.2017.04.060) seems to indicate that roughly 90% of marine species live above 200m depth.
-Our sample of marine species is thus representative.
+Our sample of marine species should thus be representative.
 
 Since PAFs are defined as the exceedance of the niche temperature limit of each species over 5 consecutive years, we
 need climate models to determine what the temperature will be over the next years. To do so, we re-use the data from
-Iordan-Vasquez et al. (2023). They averaged 5 climate models (CESM1(CAM5), HadGEM2-ES, IPSL-CM5A-MR, MIROC5, MPI-ESM-MR)
+Iordan et al. (2023). They averaged 5 climate models (CESM1(CAM5), HadGEM2-ES, IPSL-CM5A-MR, MIROC5, MPI-ESM-MR)
 to obtain temperatures from 2010 to 2100, at a 1.875° resolution, for three climate scenarios RCP2.6, 4.5 and 8.5. This
 provides temperatures for air and ocean surface. The latter is used as a proxy for the total ocean temperature.
 
@@ -152,55 +152,43 @@ The maps to do so come from using MODIS MCD12Q1 land water mask through the Goog
 
 ##### 3.2.2.2.2 Methodology for calculating effect factors
 To determine the effect factors, we first calculate the PAF for each grid cell, that is, the number of affected species
-per grid cell, over the total number of species in that grid cell. In each grid cell, we thus compared the maximum estimated
-temperature over the time period 2010-2100. This maximum often occurs at the 2100 year, but not always. This maximum of 
-temperature is then compared to the niche temperatures of all species in the grid cell, and species for which this 
-temperature is exceeded are considered affected. 
-Note that since the temperature estimates at provided by increment of 
+per grid cell, over the total number of species in that grid cell. We do so for each 5 year increment between 2010 and 2100,
+which are the years for which we have temperature estimates. In each grid cell, we thus compared the estimated temperature
+in that cell at that time period,  this value is then compared to the niche temperatures of all species in the grid cell,
+and species for which this temperature is exceeded are considered affected. 
+Note that the temperature estimates are provided by increment of 
 average of 5 years (e.g., the average temperature from 2050 and 2055), which means that as soon as the estimated temperature
 exceeds the niche temperature, it directly corresponds to our definition of affected species (i.e., temperature exceeded 
 for 5 consecutive years).
 Also note that for terrestrial species, the air temperature estimates are used while the estimated surface ocean temperatures
 are used for marine species.
 
-Once we have our PAFs per grid cell, we multiply them by their corresponding surface area (either land or water) in
+Once we have our PAFs per grid cell per time period, we multiply them by their corresponding surface area (either land or water) in
 each grid cell.
 
-We finally divide these PAF.m2 by the temperature increase in the corresponding cell, that is, the difference between the
-maximum estimated temperature over the period 2010-2100 and the temperature at 2010 (the reference year). This provides
-PAF.m2/K effect factors.
+We multiply these PAF.m2 by the time period, which is 5 years (temperature estimates from Iordan were provided every 5 years).
+This gives us PAF.m2.yr.
 
-At this point, we have what we call average effect factors, for each of the three RCP for which temperature
-estimates are provided (RCP2.6, 4.5 and 8.5). In IMPACT World+, characterization factors are typically marginal 
-characterization factors. So, we need a few more steps to get there.
+Then, we calculate the overall global air/sea temperature increases according to the climate models, taking into account
+the surface of each grid cell to properly weight. We multiply these increases by our time step again (5 years) which gives
+us K.yr.
 
-Marginal effect factors are typically defined to represent the effect of a marginal increase of a pollutant in
-the system. For this indicator, the marginal increase of pollutant would be an increase in emissions of GHGs, which can
-be translated as an increase of temperature in our system. Therefore, to derive marginal effect factors, we
-use the previously obtained average effect factors as a reference state, and proceed to add marginal increments
-of temperature to the system to see what is the effect that will result from these increments.
-
-Concretely, we follow the same methodology, except we compare the niche temperature to the estimated air/surface
-ocean temperature from the climate models + an increment of temperature increase (say +0.01K). This increment must be
-distributed across the different grid cells across the global, because simply adding the increment equally in each grid
-cell does not account for the fact that some areas in the world are heating up faster than others. So we determine the
-temperature increase between 2100 and 2010 in each grid cell. This provides us a distribution, reflecting some areas
-heat up faster than others. This distribution is then applied to the temperature increment to distribute it in a logical
-manner across the globe.
-Similarly to the average effect factor, we then obtain PAFs, that we convert to PAF.m2 and PAF.m2/K. Finally,
-we calculate the difference between the effect factor obtained through this increment and its reference state (the 
-average effect factor). The obtained value is then divided by the temperature increment, which yields the final effect factor.
+We finally divide the sum of the PAF.m2.yr with the global air/sea temperature increase (in K.yr), resulting in PAF.m2/K,
+our effect factors.
 
 Since we both cover terrestrial and marine species, we decided to split the climate change, ecosystem quality damage
 indicator into two indicators:
 - climate change, ecosystem quality, terrestrial ecosystem
-- climate change, ecosystem quality, marine ecosystem
+- climate change, ecosystem quality, marine ecosystem (beta)
+We currently apply a "beta" tag to the marine ecosystem indicator as the latter is responsible for a considerable increase
+of the climate change, ecosystem quality values, and that the presented methodology in this document has not yet been
+peer-reviewed.
 
-In the end, the respective effect factors are 4.35e12 PDF.m2/K for terrestrial species and 31.3e12 PDF.m2/K for marine
+In the end, the respective effect factors are 2.53e12 PDF.m2/K for terrestrial species and 17.70e12 PDF.m2/K for marine
 species. Marine species are thus dramatically more affected than terrestrial species by climate change, which is an 
 observation that can be found in other scientific articles (https://doi.org/10.1038/s41586-019-1132-4). For reference, 
 the previous effect factors in IW+ v2.1 was 2.73e12 PDF.m2/K. This factor only represented terrestrial species. The 
-effect of climate change on ecosystem quality overall has thus gone from 2.73e12 to 35.65e12, that is a 13-fold increase!
+effect of climate change on ecosystem quality overall has thus gone from 2.73e12 to 20.23e12, that is a 7-fold increase!
 
 ##### 3.2.2.2.3 PAF to PDF
 Here we consider that any affected species will temporarily disappear. We thus have a 1:1 ratio conversion between PAF
@@ -210,17 +198,12 @@ impact results. This indicates that once a species is affected (and thus disappe
 
 ##### 3.2.2.2.4 The choice of the RCP
 The calculations for the ecosystem quality effect factor were performed for the three RCPs for which the climate models
-were derived by Iordan-Vasquez et al. (2023). In fine, we chose the RCP4.5 to determine the effect factors. The RCP2.6
+were derived by Iordan et al. (2023). At the end, we chose the RCP4.5 to determine the effect factors. The RCP2.6
 corresponds to a very optimistic vision of the world, while the RCP8.5 could be considered a pessimistic vision. Note
 that the arithmetic average of these three RCPs yielded temperatures estimates extremely close to the RCP4.5 estimates.
-Also note that the effect factors obtained from the RCP4.5 are higher than the ones obtained from the RCP8.5. Choosing
-the RCP4.5 thus corresponds to a conservative approach, where we take the worst case.
+Also note that the effect factors obtained from the RCP4.5 are higher than the ones obtained from the RCP8.5.
 
-##### 3.2.2.2.5 The choice of the temperature increment
-We selected the +0.01K temperature increment for the calculation of our marginal effect factor. We tested temperature
-increments of +0.1K and +1K, which yielded similar effect factors (difference of less than 25%).
-
-#### 3.2.2.2.6 Ocean/sea surface temperature proxy
+#### 3.2.2.2.5 Ocean/sea surface temperature proxy
 Ocean/sea temperature values from the climate models used are surface temperatures only. This correlates with the niche 
 temperatures of marine species, which are also provided as surface temperatures, even for species living under the surface of the
 ocean. There is thus no issue of coherence here. However, the implicit assumption that is made by using the surface
@@ -230,7 +213,7 @@ their temperature distribution. However, this assumption holds for depth above 2
 marine species. With a quick Google Gemini research, it estimated that a theoretical 1° increase in temperature at the surface of the 
 ocean would take on average (globally) less than 50 years to reach 200m depth. This would 
 mean that such temperature increase would eventually also be felt by species living in under the surface, within the 500 years
-of our indicator.
+of our indicator long term indicators.
 
 ### 3.3 The case of biogenic carbon
 With the v2.1 update, users have the possibility to choose between two versions of IMPACT World+ corresponding to two 

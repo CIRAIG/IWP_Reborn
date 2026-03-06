@@ -1,11 +1,11 @@
 ## Resources services loss indicators
 
 Concerned impact categories:
-- Resources services loss (midpoint)
-- Resources services loss (adaptation) (midpoint)
+- Adaptation to resources services loss (midpoint)
+- Resources services deficit (midpoint)
 
 ### 1. Midpoint indicator(s)
-The Resources services loss and Resources services loss (adaptation) indicators are sourced from Chapter 6 (starting page 138) of Greffe (2025) 
+The Adaptation to resources services loss and Resources services deficit indicators are sourced from Chapter 6 (starting page 138) of Greffe (2025) 
 (https://archipel.uqam.ca/18963/1/D4886.pdf).
 The peer-review version of this article is accepted for publication in _The International Journal of Life Cycle 
 Assessment_ and will be published soon.
@@ -13,26 +13,26 @@ Assessment_ and will be published soon.
 Resource dissipation results in a potential reduction of resource service flow (arrow 1 and 2 on figure 1). 
 Since dissipative flows are flows ending in an inaccessible stock to future users, their potential to provide services 
 to humans is lost. This latter (negative $\Delta RS$) is identified as a midpoint indicator.
-Two distinct and mutually exclusive impact pathways describe the consequences of  a reduction of service flow (arrow 3 
+Two distinct and mutually exclusive impact pathways describe the consequences of a reduction of service flow (arrow 3 
 and 4 on figure 1).
 
 <figure>
   <img src="images/Impact_pathways.png">
   <figcaption>Figure 1. Impact pathways from resource dissipation to damage on ecosystem services through adaptation and 
 respectively non adaptation pathways. The first one addressed by the additional energy cost potential required for 
-adaptation (Resources services Loss (adaptation), with blue arrows) and the second one by the resource services deficit 
-assessment due to impossible adaptation (Resources Services Loss, with green arrows).</figcaption>
+adaptation (Adaptation to resources services loss, with blue arrows) and the second one by the resource services deficit 
+assessment due to impossible adaptation (Resources services deficit, with green arrows).</figcaption>
 </figure>
 
 For the adaptation pathway (arrow 3 on fig. 1), we develop a characterization method at the midpoint level,
-named Resources Loss Services (adaptation) that quantifies an additional energy consumption related to
+named Adaptation to resources services loss that quantifies an additional energy consumption related to
 a dissipative flow at a given moment in time. This indicator can be seen as a measure of the additional
 effort required by the society to adapt and keep accessing to resource services. It is quantified by assessing
 the additional cumulative energy over time, needed for primary extraction of any combination of resources
 needed to compensate the dissipative flow of one specific resource dissipated at a specific point in time. It
 is expressed in MJ per kg of dissipative flow.
 For the non adaptation pathway (arrow 4 on fig. 1), we develop a second characterization method at
-the midpoint level, called Resource Services Loss, which quantifies the potential
+the midpoint level, called Resource services deficit, which quantifies the potential
 cumulative deficit of a given resource (e.g., copper), integrated over time, caused by its dissipation at a
 specific point in time.
 
