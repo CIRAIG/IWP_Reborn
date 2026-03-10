@@ -5251,6 +5251,8 @@ class Parse:
             C.loc[:, [i for i in C.columns if 'Land' in i[0]]] *= 1000000
             # EXIOBASE energy flows in TJ while IW in MJ, so we convert
             C.loc[:, 'Fossil and nuclear energy use'] = C.loc[:, 'Fossil and nuclear energy use'].values * 1000000
+            if exio_version == '3.9':
+                C.loc[:, 'Domestic Extraction Used - Fossil Fuels - Natural gas'] /= 0.7 #0.7=density of natural gas
             # EXIOBASE mineral flows in kt while IW in kg, so we convert
             C.loc[:, 'Mineral resources use'] = C.loc[:, 'Mineral resources use'].values * 1000000
 
