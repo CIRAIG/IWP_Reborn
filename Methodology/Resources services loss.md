@@ -5,8 +5,7 @@ Concerned impact categories:
 - Resources services deficit (midpoint)
 
 ### 1. Midpoint indicator(s)
-The Adaptation to resources services loss and Resources services deficit indicators are sourced from Chapter 6 (starting page 138) of Greffe (2025) 
-(https://archipel.uqam.ca/18963/1/D4886.pdf).
+The Adaptation to resources services loss and Resources services deficit indicators are sourced from Greffe (2026) [https://doi.org/10.1007/s11367-026-02593-5].
 The peer-review version of this article is accepted for publication in _The International Journal of Life Cycle 
 Assessment_ and will be published soon.
 
