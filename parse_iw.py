@@ -4754,6 +4754,14 @@ class Parse:
             # concat originals + all mapped copies
             db = pd.concat([db, matched], ignore_index=True)
 
+            # special case for substances with switched names in SP, e.g., Crotonaldehyde and Crotonaldehyde (trans)
+            list1 = set(db.loc[:, 'Elem flow name'])
+            list2 = set(matched.loc[:, 'Elem flow name'])
+            potential_issues = set([i for i in list1 if i in list2])
+            issues = [j for j in potential_issues if set(db.loc[db.loc[:, 'Elem flow name'] == j, 'CAS number']) != set(
+                matched.loc[matched.loc[:, 'Elem flow name'] == j, 'CAS number'])]
+            db = db.loc[~db.loc[:, 'Elem flow name'].isin(issues)]
+
             # remove duplicates names from IW+ (we just added everything together, i.e., SP names AND IW names)
             db = db.loc[~((db.loc[:, "Elem flow name"].isin(differences.loc[:, 'Name IW+'])) & ~(
                 db.loc[:, "Elem flow name"].isin(double_iw_flow)))]
