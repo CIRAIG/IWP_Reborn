@@ -245,6 +245,9 @@ class Parse:
         self.logger.info("Create non-regionalized version for ecoinvent...")
         self.separate_regio_cfs()
 
+        self.logger.info("Adding unique UUID to IWP flows in master_db...")
+        self.add_uuid_elem_flows()
+
         self.logger.info("Linking to ecoinvent elementary flows...")
         self.link_to_ecoinvent()
 
@@ -297,7 +300,7 @@ class Parse:
         self.export_to_bw()
         self.produce_files(bw_only=True)
 
-    def export_to_bw(self):
+    def export_to_bw(self,all_iwp_flows:bool=False):
         """
         This method creates a brightway2 or brightway2.5 method with the IW+ characterization 
         factors.
@@ -316,7 +319,10 @@ class Parse:
             else:
                 biosphere_db_name = [i for i in bd.databases if 'biosphere' in i][0]
             bio = bd.Database(biosphere_db_name)
-            ei_version = project.split('ecoinvent')[1]
+            #ei_version = project.split('ecoinvent')[1]
+            for db in bd.databases:
+                if "ecoinvent-" in db:
+                    self.ei_version = db.split('ecoinvent')[1]
 
             bw_flows_with_codes = (
                 pd.DataFrame(
@@ -328,16 +334,20 @@ class Parse:
                     columns=['Elem flow name', 'Compartment', 'Sub-compartment', 'code'])
             )
 
-            if '3.10' in project:
+            if '3.10' in self.ei_version:
                 ei_in_bw_normal = self.ei310_iw.merge(bw_flows_with_codes)
                 ei_in_bw_carbon_neutrality = self.ei310_iw_carbon_neutrality.merge(bw_flows_with_codes)
                 ei_in_bw_simple = self.simplified_version_ei310.merge(bw_flows_with_codes)
-            elif '3.11' in project:
+            elif '3.11' in self.ei_version:
                 ei_in_bw_normal = self.ei311_iw.merge(bw_flows_with_codes)
                 ei_in_bw_carbon_neutrality = self.ei311_iw_carbon_neutrality.merge(bw_flows_with_codes)
                 ei_in_bw_simple = self.simplified_version_ei311.merge(bw_flows_with_codes)
-            elif '3.12' in project:
+            elif '3.12' in self.ei_version:
                 ei_in_bw_normal = self.ei312_iw.merge(bw_flows_with_codes)
+                iwp_substances_in_ei = self.elem_flow_list.merge(ei_in_bw_normal,left_on = ["Name IW+"],
+                                                                 right_on=['Elem flow name'],
+                                                                 how="left",indicator=True)
+                self.iwp_substances_not_in_ei = iwp_substances_in_ei[iwp_substances_in_ei["_merge"]=="left_only"].drop(columns=["_merge"])
                 ei_in_bw_carbon_neutrality = self.ei312_iw_carbon_neutrality.merge(bw_flows_with_codes)
                 ei_in_bw_simple = self.simplified_version_ei312.merge(bw_flows_with_codes)
             for ei_in_bw_format in ['normal', 'carbon neutrality']:
@@ -375,32 +385,64 @@ class Parse:
                 ei_in_bw.set_index(['Impact category', 'CF unit'], inplace=True)
                 impact_categories = ei_in_bw.index.drop_duplicates()
 
+            if all_iwp_flows:
+                self.logger.info("Creating biosphere3_plus database...")
+                categories_dict = {}
+                biosphere_plus_dict = {}
+                self.biosphere_plus_name = "biosphere3_plus"
+                self.df_biosphere_plus = self.master_db[self.master_db.loc[:, "Elem flow name"].isin(self.iwp_substances_not_in_ei.loc[:, "Name IW+"])].drop_duplicates(subset=["Elem flow name", "Compartment", "Sub-compartment"])
+                for i in self.df_biosphere_plus.index:
+                    biosphere_plus_dict[(self.biosphere_plus_name,self.df_biosphere_plus.loc[i,"code"])] = {
+                        "name": self.df_biosphere_plus.loc[i,"Elem flow name"],
+                        "unit": self.units[self.df_biosphere_plus.loc[i,"Elem flow unit"]],
+                        "type": "biosphere",
+                        "categories":(self.comps_ei[self.df_biosphere_plus.loc[i,"Compartment"]], self.subcomps_ei[self.df_biosphere_plus.loc[i,"Sub-compartment"]]),
+                        "code": self.df_biosphere_plus.loc[i,"code"]}
+
+                if self.biosphere_plus_name in bd.databases:
+                    del bd.databases[self.biosphere_plus_name]
+
+                bd.Database(self.biosphere_plus_name).write(biosphere_plus_dict)
+
+                bio_plus = bd.Database(self.biosphere_plus_name)
+                self.bio_plus_flows_with_codes = (
+                    pd.DataFrame(
+                        [(i.as_dict()['name'], i.as_dict()['categories'][0], i.as_dict()['categories'][1],
+                          i.as_dict()['code'])
+                         if len(i.as_dict()['categories']) == 2
+                         else (i.as_dict()['name'], i.as_dict()['categories'][0], 'unspecified',
+                               i.as_dict()['code'])
+                         for i in bio_plus],
+                        columns=['Elem flow name', 'Compartment', 'Sub-compartment', 'code'])
+                )
+
                 # -------------- For complete version of IW+ ----------------
                 for ic in impact_categories:
                     if ei_in_bw.loc[[ic], 'MP or Damage'].iloc[0] == 'Midpoint':
                         mid_end = 'Midpoint'
                         if ei_in_bw_format == 'normal':
                             name = ('IMPACT World+ ' + mid_end + ' ' + self.version + ' for ecoinvent v' +
-                                    ei_version + ' (incl. CO2 uptake)', 'Midpoint', ic[0])
+                                    self.ei_version + ' (incl. CO2 uptake)', 'Midpoint', ic[0])
                         elif ei_in_bw_format == 'carbon neutrality':
                             name = ('IMPACT World+ ' + mid_end + ' ' + self.version + ' for ecoinvent v' +
-                                    ei_version, 'Midpoint', ic[0])
+                                    self.ei_version, 'Midpoint', ic[0])
                     else:
                         mid_end = 'Damage'
                         if ic[1] == 'DALY':
                             if ei_in_bw_format == 'normal':
                                 name = ('IMPACT World+ ' + mid_end + ' ' + self.version + ' for ecoinvent v' +
-                                        ei_version + ' (incl. CO2 uptake)', 'Human health', ic[0])
+                                        self.ei_version + ' (incl. CO2 uptake)', 'Human health', ic[0])
                             elif ei_in_bw_format == 'carbon neutrality':
                                 name = ('IMPACT World+ ' + mid_end + ' ' + self.version + ' for ecoinvent v' +
-                                        ei_version, 'Human health', ic[0])
+                                        self.ei_version, 'Human health', ic[0])
                         else:
                             if ei_in_bw_format == 'normal':
                                 name = ('IMPACT World+ ' + mid_end + ' ' + self.version + ' for ecoinvent v' +
-                                        ei_version + ' (incl. CO2 uptake)', 'Ecosystem quality', ic[0])
+                                        self.ei_version + ' (incl. CO2 uptake)', 'Ecosystem quality', ic[0])
                             elif ei_in_bw_format == 'carbon neutrality':
                                 name = ('IMPACT World+ ' + mid_end + ' ' + self.version + ' for ecoinvent v' +
-                                        ei_version, 'Ecosystem quality', ic[0])
+                                        self.ei_version, 'Ecosystem quality', ic[0])
+
 
                     # initialize the "Method" method
                     new_method = bd.Method(name)
@@ -415,6 +457,15 @@ class Parse:
                     data = []
                     for stressor in df.index:
                         data.append(((biosphere_db_name, stressor), df.loc[stressor, 'CF value']))
+
+                    if all_iwp_flows:
+                        self.logger.info("Adding biosphere3_plus IW+ CFs...")
+                        self.df_plus = self.master_db[(self.master_db.loc[:,"Impact category"]==ic[0])&(self.master_db.loc[:,"CF unit"]==ic[1])&(self.master_db.loc[:,"Elem flow name"].isin(list(self.bio_plus_flows_with_codes.loc[:,"Elem flow name"])))].loc[:, ['code', 'CF value']].copy()
+                        self.df_plus.set_index('code', inplace=True)
+                        for stressor in self.df_plus.index:
+                            data.append(((self.biosphere_plus_name, stressor), self.df_plus.loc[stressor, 'CF value']))
+
+                    self.logger.info("Writing method"+str(name)+" in bw...")
                     new_method.write(data)
 
             # -------------- For simplified version of IW+ ----------------
@@ -424,7 +475,7 @@ class Parse:
 
             for ic in impact_categories_simple:
 
-                name = ('IMPACT World+ Footprint ' + self.version + ' for ecoinvent v' + ei_version, ic[0])
+                name = ('IMPACT World+ Footprint ' + self.version + ' for ecoinvent v' + self.ei_version, ic[0])
 
                 # initialize the "Method" method
                 new_method = bd.Method(name)
@@ -1165,8 +1216,9 @@ class Parse:
         # brightway2 versions in bw2package format
         for project in self.bw2_projects:
             bd.projects.set_current(project)
+
             for ei_version in ['3.10', '3.11', '3.12']:
-                if ei_version in project:
+                if ei_version in self.ei_version:
                     IW_ic = [bd.Method(ic) for ic in list(bd.methods) if
                          ('IMPACT World+' in ic[0] and 'Footprint' not in ic[0] and
                           self.version in ic[0] and "for ecoinvent" in ic[0] and
@@ -1324,18 +1376,18 @@ class Parse:
         self.logger.info("Loading mineral resources characterization factors...")
         minerals = pd.read_sql(sql='SELECT * FROM [CF - not regionalized - MineralResources]', con=self.conn)
 
-        elem_flow_list = pd.read_sql(sql='SELECT * FROM [SI - Mapping with elementary flows]', con=self.conn)
+        self.elem_flow_list = pd.read_sql(sql='SELECT * FROM [SI - Mapping with elementary flows]', con=self.conn)
 
         self.logger.info("Loading toxicity characterization factors...")
         toxicity = pd.read_sql(sql='SELECT * FROM [CF - not regionalized - HumanTox]', con=self.conn)
-        toxicity = toxicity.merge(elem_flow_list.loc[:, ['Name IW+', 'CAS-Usetox2_FW']], left_on=['CAS number'],
+        toxicity = toxicity.merge(self.elem_flow_list.loc[:, ['Name IW+', 'CAS-Usetox2_FW']], left_on=['CAS number'],
                                   right_on=['CAS-Usetox2_FW'], how='left').drop_duplicates()
         toxicity = toxicity.drop(['Elem flow name', 'CAS number'], axis=1)
         toxicity = toxicity.rename(columns={'Name IW+': 'Elem flow name', 'CAS-Usetox2_FW': 'CAS number'})
 
         self.logger.info("Loading freshwater ecotoxicity characterization factors...")
         fw_ecotoxicity = pd.read_sql(sql='SELECT * FROM [CF - not regionalized - FreshwaterEcotox]', con=self.conn)
-        fw_ecotoxicity = fw_ecotoxicity.merge(elem_flow_list.loc[:, ['Name IW+', 'CAS-Usetox2_FW']],
+        fw_ecotoxicity = fw_ecotoxicity.merge(self.elem_flow_list.loc[:, ['Name IW+', 'CAS-Usetox2_FW']],
                                               left_on=['CAS number'],
                                               right_on=['CAS-Usetox2_FW'], how='left').drop_duplicates()
         fw_ecotoxicity = fw_ecotoxicity.drop(['Elem flow name', 'CAS number'], axis=1)
@@ -1343,7 +1395,7 @@ class Parse:
 
         self.logger.info("Loading marine ecotoxicity characterization factors...")
         mar_ecotoxicity = pd.read_sql('SELECT * FROM [CF - not regionalized - MarineEcotox]', self.conn)
-        mar_ecotoxicity = mar_ecotoxicity.merge(elem_flow_list.loc[:, ['Name IW+', 'CAS-Usetox2_Mar_Terr']],
+        mar_ecotoxicity = mar_ecotoxicity.merge(self.elem_flow_list.loc[:, ['Name IW+', 'CAS-Usetox2_Mar_Terr']],
                                                 left_on=['CAS number'],
                                                 right_on=['CAS-Usetox2_Mar_Terr'], how='left').drop_duplicates()
         mar_ecotoxicity = mar_ecotoxicity.drop(['Elem flow name', 'CAS number'], axis=1)
@@ -1352,7 +1404,7 @@ class Parse:
 
         self.logger.info("Loading terrestrial ecotoxicity characterization factors...")
         terr_ecotoxicity = pd.read_sql('SELECT * FROM [CF - not regionalized - TerrestrialEcotox]', self.conn)
-        terr_ecotoxicity = terr_ecotoxicity.merge(elem_flow_list.loc[:, ['Name IW+', 'CAS-Usetox2_Mar_Terr']],
+        terr_ecotoxicity = terr_ecotoxicity.merge(self.elem_flow_list.loc[:, ['Name IW+', 'CAS-Usetox2_Mar_Terr']],
                                                   left_on=['CAS number'],
                                                   right_on=['CAS-Usetox2_Mar_Terr'], how='left').drop_duplicates()
         terr_ecotoxicity = terr_ecotoxicity.drop(['Elem flow name', 'CAS number'], axis=1)
@@ -2031,31 +2083,50 @@ class Parse:
         data.loc[:, 'Native geographical resolution scale'] = 'Not regionalized'
 
         # the CFs must be created for all compartments and sub-compartments possible
-        data.loc[:, 'Compartment'] = 'Air'
-        data.loc[:, 'Sub-compartment'] = '(unspecified)'
-        water_comp_data = data.copy()
-        water_comp_data.loc[:, 'Compartment'] = 'Water'
-        soil_comp_data = data.copy()
-        soil_comp_data.loc[:, 'Compartment'] = 'Soil'
+        mask = ~data["Elem flow name"].str.contains("in technosphere", na=False)
+        mask_tec = ~mask  # simpler
 
-        data = pd.concat([data, water_comp_data, soil_comp_data]).reset_index().drop('index', axis=1)
+        # Only fill missing values
+        data.loc[mask, "Compartment"] = "Air"
+        data.loc[mask, "Sub-compartment"] = "(unspecified)"
+
+        data.loc[mask_tec, "Compartment"] = "Technosphere"
+        data.loc[mask_tec, "Sub-compartment"] = "(unspecified)"
+
+        # Now build derived datasets
+        base = data.loc[mask].copy()
+
+        water_comp_data = base.copy()
+        water_comp_data["Compartment"] = "Water"
+
+        soil_comp_data = base.copy()
+        soil_comp_data["Compartment"] = "Soil"
+
+        technosphere_comp_data = data.loc[mask_tec].copy()
+
+        data = pd.concat([data, water_comp_data, soil_comp_data,technosphere_comp_data]).reset_index().drop('index', axis=1)
 
         subcomps_air = ['high. pop.', 'indoor', 'low. pop.', 'low. pop., long-term', 'stratosphere + troposphere']
         subcomps_water = ['lake', 'river', 'ocean', 'groundwater', 'groundwater, long-term']
         subcomps_soil = ['agricultural', 'forestry', 'industrial']
+        subcomps_technosphere = ["tailings","landfill","in product"]
 
         for subcomp in subcomps_air:
-            df = data[data.Compartment == 'Air'].copy()
+            df = data[(data["Compartment"] == "Air") &(~data["Elem flow name"].str.contains("in technosphere", na=False))].copy()
             df.loc[:, 'Sub-compartment'] = subcomp
-            data = pd.concat([data, df])
+            data = pd.concat([data, df], ignore_index=True)
         for subcomp in subcomps_water:
-            df = data[data.Compartment == 'Water'].copy()
+            df = data[(data["Compartment"] == "Water") &(~data["Elem flow name"].str.contains("in technosphere", na=False))].copy()
             df.loc[:, 'Sub-compartment'] = subcomp
-            data = pd.concat([data, df])
+            data = pd.concat([data, df], ignore_index=True)
         for subcomp in subcomps_soil:
-            df = data[data.Compartment == 'Soil'].copy()
+            df = data[(data["Compartment"] == "Soil") &(~data["Elem flow name"].str.contains("in technosphere", na=False))].copy()
             df.loc[:, 'Sub-compartment'] = subcomp
-            data = pd.concat([data, df])
+            data = pd.concat([data, df], ignore_index=True)
+        for subcomp in subcomps_technosphere:
+            df = data[(data["Compartment"] == "Technosphere") &(data["Elem flow name"].str.contains("in technosphere", na=False))].copy()
+            df.loc[:, 'Sub-compartment'] = subcomp
+            data = pd.concat([data, df], ignore_index=True)
 
         data = data.reset_index().drop('index', axis=1)
 
@@ -2079,31 +2150,50 @@ class Parse:
         data.loc[:, 'Native geographical resolution scale'] = 'Not regionalized'
 
         # the CFs must be created for all compartments and sub-compartments possible
-        data.loc[:, 'Compartment'] = 'Air'
-        data.loc[:, 'Sub-compartment'] = '(unspecified)'
-        water_comp_data = data.copy()
-        water_comp_data.loc[:, 'Compartment'] = 'Water'
-        soil_comp_data = data.copy()
-        soil_comp_data.loc[:, 'Compartment'] = 'Soil'
+        mask = ~data["Elem flow name"].str.contains("in technosphere", na=False)
+        mask_tec = ~mask  # simpler
 
-        data = pd.concat([data, water_comp_data, soil_comp_data]).reset_index().drop('index', axis=1)
+        # Only fill missing values
+        data.loc[mask, "Compartment"] = "Air"
+        data.loc[mask, "Sub-compartment"] = "(unspecified)"
+
+        data.loc[mask_tec, "Compartment"] = "Technosphere"
+        data.loc[mask_tec, "Sub-compartment"] = "(unspecified)"
+
+        # Now build derived datasets
+        base = data.loc[mask].copy()
+
+        water_comp_data = base.copy()
+        water_comp_data["Compartment"] = "Water"
+
+        soil_comp_data = base.copy()
+        soil_comp_data["Compartment"] = "Soil"
+
+        technosphere_comp_data = data.loc[mask_tec].copy()
+
+        data = pd.concat([data, water_comp_data, soil_comp_data,technosphere_comp_data]).reset_index().drop('index', axis=1)
 
         subcomps_air = ['high. pop.', 'indoor', 'low. pop.', 'low. pop., long-term', 'stratosphere + troposphere']
         subcomps_water = ['lake', 'river', 'ocean', 'groundwater', 'groundwater, long-term']
         subcomps_soil = ['agricultural', 'forestry', 'industrial']
+        subcomps_technosphere = ["tailings", "landfill", "in product"]
 
         for subcomp in subcomps_air:
-            df = data[data.Compartment == 'Air'].copy()
+            df = data[(data["Compartment"] == "Air") &(~data["Elem flow name"].str.contains("in technosphere", na=False))].copy()
             df.loc[:, 'Sub-compartment'] = subcomp
-            data = pd.concat([data, df])
+            data = pd.concat([data, df], ignore_index=True)
         for subcomp in subcomps_water:
-            df = data[data.Compartment == 'Water'].copy()
+            df = data[(data["Compartment"] == "Water") &(~data["Elem flow name"].str.contains("in technosphere", na=False))].copy()
             df.loc[:, 'Sub-compartment'] = subcomp
-            data = pd.concat([data, df])
+            data = pd.concat([data, df], ignore_index=True)
         for subcomp in subcomps_soil:
-            df = data[data.Compartment == 'Soil'].copy()
+            df = data[(data["Compartment"] == "Soil") &(~data["Elem flow name"].str.contains("in technosphere", na=False))].copy()
             df.loc[:, 'Sub-compartment'] = subcomp
-            data = pd.concat([data, df])
+            data = pd.concat([data, df], ignore_index=True)
+        for subcomp in subcomps_technosphere:
+            df = data[(data["Compartment"] == "Technosphere") &(data["Elem flow name"].str.contains("in technosphere", na=False))].copy()
+            df.loc[:, 'Sub-compartment'] = subcomp
+            data = pd.concat([data, df], ignore_index=True)
 
         data = data.reset_index().drop('index', axis=1)
 
@@ -4193,6 +4283,24 @@ class Parse:
         self.master_db = pd.concat([self.master_db, df])
         self.master_db = clean_up_dataframe(self.master_db)
 
+    def add_uuid_elem_flows(self):
+        cols = ["Compartment", "Sub-compartment", "Elem flow name"]
+        unique_tuples = list(
+            self.master_db[cols]
+            .drop_duplicates()
+            .itertuples(index=False, name=None)
+        )
+        tuple_to_uuid = {
+            t: uuid.uuid4().hex
+            for t in unique_tuples
+        }
+        self.master_db["code"] = (
+            self.master_db[cols]
+            .apply(tuple, axis=1)
+            .map(tuple_to_uuid)
+        )
+
+
     def create_not_regio_flows(self):
         """
         Method creates not regionalized flows (e.g., "Ammonia") from global values (e.g., "Ammonia, GLO"). Those flows
@@ -4576,13 +4684,16 @@ class Parse:
 
             with open(pkg_resources.resource_filename(
                     __name__, "Data/mappings/ei" + latest_ei_version.replace('.', '') + "/comps.json"), "r") as f:
-                comps = json.load(f)
+                self.comps_ei = json.load(f)
             with open(pkg_resources.resource_filename(
                     __name__, "Data/mappings/ei" + latest_ei_version.replace('.', '') + "/subcomps.json"), "r") as f:
-                subcomps = json.load(f)
+                self.subcomps_ei = json.load(f)
+            with open(pkg_resources.resource_filename(
+                    __name__, "Data/mappings/ei" + latest_ei_version.replace('.', '') + "/units.json"), "r") as f:
+                self.units = json.load(f)
 
-            ei_iw_db.Compartment = [comps[i] for i in ei_iw_db.Compartment]
-            ei_iw_db.loc[:, 'Sub-compartment'] = [subcomps[i] if i in subcomps else None for i in
+            ei_iw_db.Compartment = [self.comps_ei[i] for i in ei_iw_db.Compartment]
+            ei_iw_db.loc[:, 'Sub-compartment'] = [self.subcomps_ei[i] if i in self.subcomps_ei else None for i in
                                                   ei_iw_db.loc[:, 'Sub-compartment']]
 
             # special cases: forestry subcomp = unspecified subcomp
