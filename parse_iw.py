@@ -245,25 +245,25 @@ class Parse:
         self.logger.info("Create non-regionalized version for ecoinvent...")
         self.separate_regio_cfs()
 
-        self.logger.info("Linking to ecoinvent elementary flows...")
-        self.link_to_ecoinvent()
-
-        if not bw_only:
-            self.logger.info("Linking to SimaPro elementary flows...")
-            self.link_to_sp()
-
-            self.logger.info("Linking to openLCA elementary flows...")
-            self.link_to_olca()
-
-        # leave exiobase with brightway only option for hybrid version
-        self.logger.info("Linking to exiobase environmental extensions...")
-        self.link_to_exiobase()
-
-        self.logger.info("Prepare the footprint version...")
-        self.get_simplified_versions(bw_only=bw_only)
-
-        if not bw_only:
-            self.get_total_hh_and_eq_for_olca()
+        # self.logger.info("Linking to ecoinvent elementary flows...")
+        # self.link_to_ecoinvent()
+        #
+        # if not bw_only:
+        #     self.logger.info("Linking to SimaPro elementary flows...")
+        #     self.link_to_sp()
+        #
+        #     self.logger.info("Linking to openLCA elementary flows...")
+        #     self.link_to_olca()
+        #
+        # # leave exiobase with brightway only option for hybrid version
+        # self.logger.info("Linking to exiobase environmental extensions...")
+        # self.link_to_exiobase()
+        #
+        # self.logger.info("Prepare the footprint version...")
+        # self.get_simplified_versions(bw_only=bw_only)
+        #
+        # if not bw_only:
+        #     self.get_total_hh_and_eq_for_olca()
 
     def generate_bw_files(self)->None:
         """
@@ -5975,15 +5975,25 @@ def produce_simplified_version(complete_dataframe):
                                                            'Elem flow name', 'Elem flow unit', 'MP or Damage'])
     # isolate and group HH CFs
     hh_simplified = simplified_version.loc['DALY'].copy()
-    hh_simplified = hh_simplified.drop(['Impact category', 'CAS number',
-                                        'Native geographical resolution scale'], axis=1).groupby(
-        hh_simplified.index).sum()
+    if 'ID' in hh_simplified.columns:
+        hh_simplified = hh_simplified.drop(['Impact category', 'CAS number',
+                                            'Native geographical resolution scale'], axis=1).groupby(
+            hh_simplified.index).agg({'CF value': 'sum', 'Name': 'first', 'Subcompartment': 'first', 'ID': 'first'})
+    else:
+        hh_simplified = hh_simplified.drop(['Impact category', 'CAS number',
+                                            'Native geographical resolution scale'], axis=1).groupby(
+            hh_simplified.index).sum()
     hh_simplified.index = pd.MultiIndex.from_tuples(hh_simplified.index)
     # isolate and group EQ CFs
     eq_simplified = simplified_version.loc['PDF.m2.yr'].copy()
-    eq_simplified = eq_simplified.drop(['Impact category', 'CAS number',
-                                        'Native geographical resolution scale'], axis=1).groupby(
-        eq_simplified.index).sum()
+    if 'ID' in eq_simplified.columns:
+        eq_simplified = eq_simplified.drop(['Impact category', 'CAS number',
+                                            'Native geographical resolution scale'], axis=1).groupby(
+            eq_simplified.index).agg({'CF value': 'sum', 'Name': 'first', 'Subcompartment': 'first', 'ID': 'first'})
+    else:
+        eq_simplified = eq_simplified.drop(['Impact category', 'CAS number',
+                                            'Native geographical resolution scale'], axis=1).groupby(
+            eq_simplified.index).sum()
     eq_simplified.index = pd.MultiIndex.from_tuples(eq_simplified.index)
     # delete HH and EQ CFs from original df
     simplified_version.drop(['DALY', 'PDF.m2.yr'], inplace=True)
