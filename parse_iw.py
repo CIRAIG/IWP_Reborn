@@ -245,25 +245,25 @@ class Parse:
         self.logger.info("Create non-regionalized version for ecoinvent...")
         self.separate_regio_cfs()
 
-        # self.logger.info("Linking to ecoinvent elementary flows...")
-        # self.link_to_ecoinvent()
-        #
-        # if not bw_only:
-        #     self.logger.info("Linking to SimaPro elementary flows...")
-        #     self.link_to_sp()
-        #
-        #     self.logger.info("Linking to openLCA elementary flows...")
-        #     self.link_to_olca()
-        #
-        # # leave exiobase with brightway only option for hybrid version
-        # self.logger.info("Linking to exiobase environmental extensions...")
-        # self.link_to_exiobase()
-        #
-        # self.logger.info("Prepare the footprint version...")
-        # self.get_simplified_versions(bw_only=bw_only)
-        #
-        # if not bw_only:
-        #     self.get_total_hh_and_eq_for_olca()
+        self.logger.info("Linking to ecoinvent elementary flows...")
+        self.link_to_ecoinvent()
+
+        if not bw_only:
+            self.logger.info("Linking to SimaPro elementary flows...")
+            self.link_to_sp()
+
+            self.logger.info("Linking to openLCA elementary flows...")
+            self.link_to_olca()
+
+        # leave exiobase with brightway only option for hybrid version
+        self.logger.info("Linking to exiobase environmental extensions...")
+        self.link_to_exiobase()
+
+        self.logger.info("Prepare the footprint version...")
+        self.get_simplified_versions(bw_only=bw_only)
+
+        if not bw_only:
+            self.get_total_hh_and_eq_for_olca()
 
     def generate_bw_files(self)->None:
         """
