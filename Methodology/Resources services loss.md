@@ -74,7 +74,7 @@ where $e$ is an element embedded in substance $s$, such as copper, silver, or fo
 
 $$\theta_{e,s} = \frac{\alpha_{e,s} \cdot M_e}{\sum_{f \in E} \alpha_{f,s} \cdot M_f}$$
 
-where $E$ is the ensemble of all elements in substance $s$. The molar mass $M$ of each element is obtained with the *molmass* Python package.
+where  $\alpha_{e,s}$ is the number of mole of each element $e$ in substance $s$ and $E$ is the ensemble of all elements in substance $s$. The molar mass $M$ of each element is obtained with the *molmass* Python package.
 
 Dissipative flows of radionuclides  
 
