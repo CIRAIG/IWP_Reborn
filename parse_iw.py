@@ -2506,19 +2506,37 @@ class Parse:
                         so2.loc[flow, 'CF value'] = (so2.loc[flow, 'CF value'] /
                                                      data.loc[data.Continent == conc[region], 'iF unspecified'].iloc[
                                                          0] * secondary_pm_if.loc['SO2', 'unspecified'])
-            elif region in data.Country_code:
-                if so2.loc[flow, 'Sub-compartment'] == 'high. pop.':
-                    so2.loc[flow, 'CF value'] = (
-                            so2.loc[flow, 'CF value'] / data.loc[data.Country_code == region, 'iF urban'].iloc[0] *
-                            secondary_pm_if.loc['SO2', 'urban'])
-                elif so2.loc[flow, 'Sub-compartment'] == 'low. pop.':
-                    so2.loc[flow, 'CF value'] = (
-                            so2.loc[flow, 'CF value'] / data.loc[data.Country_code == region, 'iF rural'].iloc[0] *
-                            secondary_pm_if.loc['SO2', 'rural'])
-                elif so2.loc[flow, 'Sub-compartment'] == '(unspecified)':
-                    so2.loc[flow, 'CF value'] = (so2.loc[flow, 'CF value'] /
-                                                 data.loc[data.Country_code == region, 'iF unspecified'].iloc[0] *
-                                                 secondary_pm_if.loc['SO2', 'unspecified'])
+                elif conc[region] in list(data.loc[:, 'Country-Region']):
+                    if so2.loc[flow, 'Sub-compartment'] == 'high. pop.':
+                        so2.loc[flow, 'CF value'] = (so2.loc[flow, 'CF value'] /
+                                                     data.loc[
+                                                         data.loc[:, 'Country-Region'] == conc[region], 'iF urban'].iloc[
+                                                         0] *
+                                                     secondary_pm_if.loc['SO2', 'urban'])
+                    elif so2.loc[flow, 'Sub-compartment'] == 'low. pop.':
+                        so2.loc[flow, 'CF value'] = (so2.loc[flow, 'CF value'] /
+                                                     data.loc[
+                                                         data.loc[:, 'Country-Region'] == conc[region], 'iF rural'].iloc[
+                                                         0] *
+                                                     secondary_pm_if.loc['SO2', 'rural'])
+                    elif so2.loc[flow, 'Sub-compartment'] == '(unspecified)':
+                        so2.loc[flow, 'CF value'] = (so2.loc[flow, 'CF value'] /
+                                                     data.loc[data.loc[:, 'Country-Region'] == conc[
+                                                         region], 'iF unspecified'].iloc[
+                                                         0] * secondary_pm_if.loc['SO2', 'unspecified'])
+                else:
+                    if so2.loc[flow, 'Sub-compartment'] == 'high. pop.':
+                        so2.loc[flow, 'CF value'] = (
+                                so2.loc[flow, 'CF value'] / data.loc[data.Continent == 'Global', 'iF urban'].iloc[0] *
+                                secondary_pm_if.loc['SO2', 'urban'])
+                    elif so2.loc[flow, 'Sub-compartment'] == 'low. pop.':
+                        so2.loc[flow, 'CF value'] = (
+                                so2.loc[flow, 'CF value'] / data.loc[data.Continent == 'Global', 'iF rural'].iloc[0] *
+                                secondary_pm_if.loc['SO2', 'rural'])
+                    elif so2.loc[flow, 'Sub-compartment'] == '(unspecified)':
+                        so2.loc[flow, 'CF value'] = (
+                                so2.loc[flow, 'CF value'] / data.loc[data.Continent == 'Global', 'iF unspecified'].iloc[
+                            0] * secondary_pm_if.loc['SO2', 'unspecified'])
             else:
                 # for RoW and GLO
                 if so2.loc[flow, 'Sub-compartment'] == 'high. pop.':
@@ -2568,19 +2586,42 @@ class Parse:
                         nh3.loc[flow, 'CF value'] = (nh3.loc[flow, 'CF value'] /
                                                      data.loc[data.Continent == conc[region], 'iF unspecified'].iloc[
                                                          0] * secondary_pm_if.loc['NH3', 'unspecified'])
-            elif region in data.Country_code:
-                if nh3.loc[flow, 'Sub-compartment'] == 'high. pop.':
-                    nh3.loc[flow, 'CF value'] = (nh3.loc[flow, 'CF value'] /
-                                                 data.loc[data.Country_code == region, 'iF urban'].iloc[0] *
-                                                 secondary_pm_if.loc['NH3', 'urban'])
-                elif nh3.loc[flow, 'Sub-compartment'] == 'low. pop.':
-                    nh3.loc[flow, 'CF value'] = (nh3.loc[flow, 'CF value'] /
-                                                 data.loc[data.Country_code == region, 'iF rural'].iloc[0] *
-                                                 secondary_pm_if.loc['NH3', 'rural'])
-                elif nh3.loc[flow, 'Sub-compartment'] == '(unspecified)':
-                    nh3.loc[flow, 'CF value'] = (nh3.loc[flow, 'CF value'] /
-                                                 data.loc[data.Country_code == region, 'iF unspecified'].iloc[
-                                                     0] * secondary_pm_if.loc['NH3', 'unspecified'])
+                elif conc[region] in list(data.loc[:, 'Country-Region']):
+                    if nh3.loc[flow, 'Sub-compartment'] == 'high. pop.':
+                        nh3.loc[flow, 'CF value'] = (nh3.loc[flow, 'CF value'] /
+                                                     data.loc[
+                                                         data.loc[:, 'Country-Region'] == conc[
+                                                             region], 'iF urban'].iloc[
+                                                         0] *
+                                                     secondary_pm_if.loc['NH3', 'urban'])
+                    elif nh3.loc[flow, 'Sub-compartment'] == 'low. pop.':
+                        nh3.loc[flow, 'CF value'] = (nh3.loc[flow, 'CF value'] /
+                                                     data.loc[
+                                                         data.loc[:, 'Country-Region'] == conc[
+                                                             region], 'iF rural'].iloc[
+                                                         0] *
+                                                     secondary_pm_if.loc['NH3', 'rural'])
+                    elif nh3.loc[flow, 'Sub-compartment'] == '(unspecified)':
+                        nh3.loc[flow, 'CF value'] = (nh3.loc[flow, 'CF value'] /
+                                                     data.loc[data.loc[:, 'Country-Region'] == conc[
+                                                         region], 'iF unspecified'].iloc[
+                                                         0] * secondary_pm_if.loc['NH3', 'unspecified'])
+                else:
+                    if nh3.loc[flow, 'Sub-compartment'] == 'high. pop.':
+                        nh3.loc[flow, 'CF value'] = (
+                                nh3.loc[flow, 'CF value'] /
+                                data.loc[data.Continent == 'Global', 'iF urban'].iloc[0] *
+                                secondary_pm_if.loc['NH3', 'urban'])
+                    elif nh3.loc[flow, 'Sub-compartment'] == 'low. pop.':
+                        nh3.loc[flow, 'CF value'] = (
+                                nh3.loc[flow, 'CF value'] /
+                                data.loc[data.Continent == 'Global', 'iF rural'].iloc[0] *
+                                secondary_pm_if.loc['NH3', 'rural'])
+                    elif nh3.loc[flow, 'Sub-compartment'] == '(unspecified)':
+                        nh3.loc[flow, 'CF value'] = (
+                                nh3.loc[flow, 'CF value'] /
+                                data.loc[data.Continent == 'Global', 'iF unspecified'].iloc[
+                                    0] * secondary_pm_if.loc['NH3', 'unspecified'])
             else:
                 # for RoW and GLO
                 if nh3.loc[flow, 'Sub-compartment'] == 'high. pop.':
@@ -2630,19 +2671,42 @@ class Parse:
                         nox.loc[flow, 'CF value'] = (nox.loc[flow, 'CF value'] /
                                                      data.loc[data.Continent == conc[region], 'iF unspecified'].iloc[
                                                          0] * secondary_pm_if.loc['NOx', 'unspecified'])
-            elif region in data.Country_code:
-                if nox.loc[flow, 'Sub-compartment'] == 'high. pop.':
-                    nox.loc[flow, 'CF value'] = (
-                            nox.loc[flow, 'CF value'] / data.loc[data.Country_code == region, 'iF urban'].iloc[0] *
-                            secondary_pm_if.loc['NOx', 'urban'])
-                elif nox.loc[flow, 'Sub-compartment'] == 'low. pop.':
-                    nox.loc[flow, 'CF value'] = (
-                            nox.loc[flow, 'CF value'] / data.loc[data.Country_code == region, 'iF rural'].iloc[0] *
-                            secondary_pm_if.loc['NOx', 'rural'])
-                elif nox.loc[flow, 'Sub-compartment'] == '(unspecified)':
-                    nox.loc[flow, 'CF value'] = (nox.loc[flow, 'CF value'] /
-                                                 data.loc[data.Country_code == region, 'iF unspecified'].iloc[0] *
-                                                 secondary_pm_if.loc['NOx', 'unspecified'])
+                elif conc[region] in list(data.loc[:, 'Country-Region']):
+                    if nox.loc[flow, 'Sub-compartment'] == 'high. pop.':
+                        nox.loc[flow, 'CF value'] = (nox.loc[flow, 'CF value'] /
+                                                     data.loc[
+                                                         data.loc[:, 'Country-Region'] == conc[
+                                                             region], 'iF urban'].iloc[
+                                                         0] *
+                                                     secondary_pm_if.loc['NOx', 'urban'])
+                    elif nox.loc[flow, 'Sub-compartment'] == 'low. pop.':
+                        nox.loc[flow, 'CF value'] = (nox.loc[flow, 'CF value'] /
+                                                     data.loc[
+                                                         data.loc[:, 'Country-Region'] == conc[
+                                                             region], 'iF rural'].iloc[
+                                                         0] *
+                                                     secondary_pm_if.loc['NOx', 'rural'])
+                    elif nox.loc[flow, 'Sub-compartment'] == '(unspecified)':
+                        nox.loc[flow, 'CF value'] = (nox.loc[flow, 'CF value'] /
+                                                     data.loc[data.loc[:, 'Country-Region'] == conc[
+                                                         region], 'iF unspecified'].iloc[
+                                                         0] * secondary_pm_if.loc['NOx', 'unspecified'])
+                else:
+                    if nox.loc[flow, 'Sub-compartment'] == 'high. pop.':
+                        nox.loc[flow, 'CF value'] = (
+                                nox.loc[flow, 'CF value'] /
+                                data.loc[data.Continent == 'Global', 'iF urban'].iloc[0] *
+                                secondary_pm_if.loc['NOx', 'urban'])
+                    elif nox.loc[flow, 'Sub-compartment'] == 'low. pop.':
+                        nox.loc[flow, 'CF value'] = (
+                                nox.loc[flow, 'CF value'] /
+                                data.loc[data.Continent == 'Global', 'iF rural'].iloc[0] *
+                                secondary_pm_if.loc['NOx', 'rural'])
+                    elif nox.loc[flow, 'Sub-compartment'] == '(unspecified)':
+                        nox.loc[flow, 'CF value'] = (
+                                nox.loc[flow, 'CF value'] /
+                                data.loc[data.Continent == 'Global', 'iF unspecified'].iloc[
+                                    0] * secondary_pm_if.loc['NOx', 'unspecified'])
             else:
                 # for RoW and GLO
                 if nox.loc[flow, 'Sub-compartment'] == 'high. pop.':
